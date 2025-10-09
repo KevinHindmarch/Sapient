@@ -262,3 +262,66 @@ class PortfolioOptimizer:
         except Exception as e:
             st.error(f"Efficient frontier calculation error: {str(e)}")
             return []
+    
+    def backtest_portfolio(self, price_data, weights, initial_investment=10000):
+        """
+        Backtest portfolio performance with given weights
+        
+        Args:
+            price_data (pd.DataFrame): Historical price data
+            weights (dict): Portfolio weights
+            initial_investment (float): Initial investment amount
+            
+        Returns:
+            dict: Backtesting results
+        """
+        try:
+            # Calculate daily returns
+            returns = price_data.pct_change().dropna()
+            
+            # Align weights with columns
+            weight_array = np.array([weights.get(col, 0) for col in returns.columns])
+            
+            # Calculate portfolio daily returns
+            portfolio_returns = returns.dot(weight_array)
+            
+            # Calculate cumulative returns
+            cumulative_returns = (1 + portfolio_returns).cumprod()
+            portfolio_value = initial_investment * cumulative_returns
+            
+            # Calculate metrics
+            total_return = (portfolio_value.iloc[-1] / initial_investment - 1) * 100
+            annual_return = portfolio_returns.mean() * 252 * 100
+            annual_volatility = portfolio_returns.std() * np.sqrt(252) * 100
+            sharpe = (portfolio_returns.mean() * 252 - self.risk_free_rate) / (portfolio_returns.std() * np.sqrt(252))
+            
+            # Calculate drawdowns
+            running_max = portfolio_value.expanding().max()
+            drawdowns = (portfolio_value - running_max) / running_max * 100
+            max_drawdown = drawdowns.min()
+            
+            # Calculate win rate
+            win_rate = (portfolio_returns > 0).sum() / len(portfolio_returns) * 100
+            
+            # Best and worst days
+            best_day = portfolio_returns.max() * 100
+            worst_day = portfolio_returns.min() * 100
+            
+            return {
+                'portfolio_value': portfolio_value,
+                'cumulative_returns': cumulative_returns,
+                'total_return': total_return,
+                'annual_return': annual_return,
+                'annual_volatility': annual_volatility,
+                'sharpe_ratio': sharpe,
+                'max_drawdown': max_drawdown,
+                'win_rate': win_rate,
+                'best_day': best_day,
+                'worst_day': worst_day,
+                'drawdowns': drawdowns,
+                'daily_returns': portfolio_returns
+            }
+            
+        except Exception as e:
+            st.error(f"Backtesting error: {str(e)}")
+            return None

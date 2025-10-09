@@ -201,9 +201,9 @@ def main():
 
     # Display results
     if st.session_state.portfolio_optimized and st.session_state.optimization_results:
-        display_optimization_results(st.session_state.optimization_results, investment_amount)
+        display_optimization_results(st.session_state.optimization_results, investment_amount, optimizer)
 
-def display_optimization_results(results, investment_amount):
+def display_optimization_results(results, investment_amount, optimizer):
     st.header("📊 Optimized Portfolio Results")
     
     # Display risk tolerance badge
@@ -350,7 +350,124 @@ def display_optimization_results(results, investment_amount):
             
             st.plotly_chart(fig_corr, use_container_width=True)
     
+    # Backtesting section
+    st.divider()
+    st.subheader("📈 Historical Performance Backtest")
+    
+    # Run backtest
+    backtest_results = optimizer.backtest_portfolio(
+        results['historical_data'],
+        results['weights'],
+        investment_amount
+    )
+    
+    if backtest_results:
+        # Backtest metrics
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric(
+                "Total Return",
+                f"{backtest_results['total_return']:.2f}%",
+                delta=f"{backtest_results['total_return']:.2f}%" if backtest_results['total_return'] > 0 else None
+            )
+        
+        with col2:
+            st.metric(
+                "Win Rate",
+                f"{backtest_results['win_rate']:.1f}%"
+            )
+        
+        with col3:
+            st.metric(
+                "Best Day",
+                f"+{backtest_results['best_day']:.2f}%"
+            )
+        
+        with col4:
+            st.metric(
+                "Worst Day",
+                f"{backtest_results['worst_day']:.2f}%"
+            )
+        
+        # Portfolio value over time chart
+        fig_backtest = go.Figure()
+        
+        fig_backtest.add_trace(go.Scatter(
+            x=backtest_results['portfolio_value'].index,
+            y=backtest_results['portfolio_value'],
+            mode='lines',
+            name='Portfolio Value',
+            line=dict(color='#1f77b4', width=2),
+            fill='tonexty',
+            fillcolor='rgba(31, 119, 180, 0.1)'
+        ))
+        
+        # Add initial investment line
+        fig_backtest.add_hline(
+            y=investment_amount,
+            line_dash="dash",
+            line_color="gray",
+            annotation_text=f"Initial Investment: {format_currency(investment_amount)}"
+        )
+        
+        fig_backtest.update_layout(
+            title="Portfolio Value Over Time",
+            xaxis_title="Date",
+            yaxis_title="Portfolio Value (AUD)",
+            hovermode='x unified',
+            showlegend=True
+        )
+        
+        st.plotly_chart(fig_backtest, use_container_width=True)
+        
+        # Drawdown chart
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            fig_drawdown = go.Figure()
+            
+            fig_drawdown.add_trace(go.Scatter(
+                x=backtest_results['drawdowns'].index,
+                y=backtest_results['drawdowns'],
+                mode='lines',
+                name='Drawdown',
+                line=dict(color='#d62728', width=2),
+                fill='tozeroy',
+                fillcolor='rgba(214, 39, 40, 0.1)'
+            ))
+            
+            fig_drawdown.update_layout(
+                title="Portfolio Drawdown",
+                xaxis_title="Date",
+                yaxis_title="Drawdown (%)",
+                hovermode='x unified'
+            )
+            
+            st.plotly_chart(fig_drawdown, use_container_width=True)
+        
+        with col2:
+            # Distribution of daily returns
+            fig_dist = go.Figure()
+            
+            fig_dist.add_trace(go.Histogram(
+                x=backtest_results['daily_returns'] * 100,
+                nbinsx=50,
+                name='Daily Returns',
+                marker_color='#2ca02c'
+            ))
+            
+            fig_dist.update_layout(
+                title="Distribution of Daily Returns",
+                xaxis_title="Daily Return (%)",
+                yaxis_title="Frequency",
+                showlegend=False
+            )
+            
+            st.plotly_chart(fig_dist, use_container_width=True)
+    
     # Risk metrics
+    st.divider()
     st.subheader("Risk Analysis")
     
     col1, col2, col3 = st.columns(3)
