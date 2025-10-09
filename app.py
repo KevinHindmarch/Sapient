@@ -297,11 +297,12 @@ def display_optimization_results(results, investment_amount):
             
             fig_corr = px.imshow(
                 corr_matrix,
-                text_auto='.2f',
+                text_auto=True,
                 aspect="auto",
                 color_continuous_scale="RdBu_r",
                 title="Stock Correlations"
             )
+            fig_corr.update_traces(texttemplate='%{z:.2f}')
             fig_corr.update_layout(
                 coloraxis_showscale=False
             )

@@ -33,7 +33,7 @@ class StockDataManager:
             # Fetch data
             data = yf.download(symbols, period=period, auto_adjust=True, progress=False)
             
-            if data.empty:
+            if data is None or data.empty:
                 st.error("No data retrieved for the selected stocks")
                 return None
             
@@ -44,8 +44,11 @@ class StockDataManager:
                 else:
                     return None
             else:
-                # Multi-stock case - extract Close prices
-                if 'Close' in data.columns:
+                # Multi-stock case - extract Close prices from MultiIndex columns
+                # yfinance returns MultiIndex columns for multiple stocks
+                if hasattr(data.columns, 'get_level_values') and 'Close' in data.columns.get_level_values(0):
+                    data = data['Close']
+                elif 'Close' in data.columns:
                     data = data['Close']
                 else:
                     return None

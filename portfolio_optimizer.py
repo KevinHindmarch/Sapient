@@ -136,10 +136,13 @@ class PortfolioOptimizer:
             # Fetch ASX 200 data as market proxy
             asx200 = yf.download("^AXJO", period="2y", auto_adjust=True, progress=False)
             
-            if asx200.empty:
+            if asx200 is None or asx200.empty:
                 return 1.0  # Default beta
             
-            market_returns = asx200['Close'].pct_change().dropna()
+            if isinstance(asx200, pd.DataFrame) and 'Close' in asx200.columns:
+                market_returns = asx200['Close'].pct_change().dropna()
+            else:
+                return 1.0
             
             # Align dates
             aligned_data = pd.concat([portfolio_returns, market_returns], axis=1, join='inner')
@@ -149,9 +152,15 @@ class PortfolioOptimizer:
             if len(aligned_data) < 30:  # Need sufficient data
                 return 1.0
             
-            # Calculate beta
-            covariance = aligned_data['portfolio'].cov(aligned_data['market'])
-            market_variance = aligned_data['market'].var()
+            # Calculate beta - ensure we have Series objects
+            portfolio_col = aligned_data['portfolio']
+            market_col = aligned_data['market']
+            
+            if isinstance(portfolio_col, pd.Series) and isinstance(market_col, pd.Series):
+                covariance = portfolio_col.cov(market_col)
+                market_variance = market_col.var()
+            else:
+                return 1.0
             
             if market_variance == 0:
                 return 1.0
