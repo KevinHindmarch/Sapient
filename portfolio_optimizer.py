@@ -11,7 +11,7 @@ class PortfolioOptimizer:
     def __init__(self):
         self.risk_free_rate = 0.035  # Australian risk-free rate approximation
     
-    def optimize_portfolio(self, price_data, investment_amount, risk_tolerance='moderate'):
+    def optimize_portfolio(self, price_data, investment_amount, risk_tolerance='moderate', dividend_yields=None):
         """
         Optimize portfolio to maximize Sharpe ratio with risk tolerance constraints
         
@@ -19,6 +19,7 @@ class PortfolioOptimizer:
             price_data (pd.DataFrame): Historical price data
             investment_amount (float): Total investment amount
             risk_tolerance (str): 'conservative', 'moderate', or 'aggressive'
+            dividend_yields (dict): Optional dictionary of dividend yields per stock
             
         Returns:
             dict: Optimization results
@@ -52,6 +53,13 @@ class PortfolioOptimizer:
             
             # Calculate mean returns and covariance matrix
             mean_returns = returns.mean() * 252  # Annualized
+            
+            # Add dividend yields to expected returns if provided
+            if dividend_yields:
+                for col in returns.columns:
+                    if col in dividend_yields:
+                        mean_returns[col] += dividend_yields[col]
+            
             cov_matrix = returns.cov() * 252     # Annualized
             
             num_assets = len(returns.columns)
@@ -117,6 +125,13 @@ class PortfolioOptimizer:
             total_weight = sum(weights_dict.values())
             weights_dict = {k: v/total_weight for k, v in weights_dict.items()}
             
+            # Calculate portfolio dividend yield if provided
+            portfolio_dividend_yield = 0
+            if dividend_yields:
+                for stock, weight in weights_dict.items():
+                    if stock in dividend_yields:
+                        portfolio_dividend_yield += weight * dividend_yields[stock]
+            
             results = {
                 'weights': weights_dict,
                 'expected_return': portfolio_return,
@@ -128,7 +143,9 @@ class PortfolioOptimizer:
                 'historical_data': price_data,
                 'optimization_success': result.success,
                 'risk_tolerance': risk_tolerance,
-                'max_single_weight': params['max_weight']
+                'max_single_weight': params['max_weight'],
+                'dividend_yields': dividend_yields,
+                'portfolio_dividend_yield': portfolio_dividend_yield
             }
             
             return results

@@ -152,3 +152,38 @@ class StockDataManager:
             
         except:
             return 0.03  # Default fallback
+    
+    @st.cache_data(ttl=86400)
+    def get_dividend_yields(_self, stock_symbols):
+        """
+        Get dividend yields for given stock symbols
+        
+        Args:
+            stock_symbols (list): List of stock symbols
+            
+        Returns:
+            dict: Dictionary mapping symbols to dividend yields
+        """
+        dividend_yields = {}
+        
+        for symbol in stock_symbols:
+            try:
+                if not symbol.endswith('.AX'):
+                    symbol += '.AX'
+                    
+                ticker = yf.Ticker(symbol)
+                info = ticker.info
+                
+                # Get dividend yield (already as percentage in yfinance)
+                div_yield = info.get('dividendYield', 0)
+                
+                # Convert to decimal if it's a percentage
+                if div_yield and div_yield > 1:
+                    div_yield = div_yield / 100
+                
+                dividend_yields[symbol] = div_yield if div_yield else 0
+                
+            except Exception as e:
+                dividend_yields[symbol] = 0
+        
+        return dividend_yields

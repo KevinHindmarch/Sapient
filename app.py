@@ -180,11 +180,17 @@ def main():
                 )
                 
                 if stock_data is not None and not stock_data.empty:
+                    # Fetch dividend yields
+                    dividend_yields = stock_manager.get_dividend_yields(
+                        st.session_state.selected_stocks
+                    )
+                    
                     # Perform optimization
                     results = optimizer.optimize_portfolio(
                         stock_data,
                         investment_amount,
-                        risk_tolerance
+                        risk_tolerance,
+                        dividend_yields
                     )
                     
                     if results:
@@ -215,7 +221,7 @@ def display_optimization_results(results, investment_amount, optimizer):
     st.markdown(f"### {risk_badges.get(results.get('risk_tolerance', 'moderate'), 'Portfolio Strategy')}")
     
     # Key metrics
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
     
     with col1:
         st.metric(
@@ -238,6 +244,12 @@ def display_optimization_results(results, investment_amount, optimizer):
         )
     
     with col4:
+        st.metric(
+            "Portfolio Dividend Yield",
+            f"{results.get('portfolio_dividend_yield', 0):.2%}"
+        )
+    
+    with col5:
         st.metric(
             "Total Investment",
             format_currency(investment_amount)
@@ -275,8 +287,10 @@ def display_optimization_results(results, investment_amount, optimizer):
     with col2:
         st.subheader("Allocation Details")
         
-        # Calculate approximate shares first
+        # Calculate approximate shares and get dividend yields
         shares_list = []
+        div_yields_list = []
+        
         for stock in results['weights'].keys():
             try:
                 ticker = yf.Ticker(stock)
@@ -285,11 +299,18 @@ def display_optimization_results(results, investment_amount, optimizer):
                 shares_list.append(shares)
             except:
                 shares_list.append("N/A")
+            
+            # Get dividend yield from results
+            if results.get('dividend_yields') and stock in results['dividend_yields']:
+                div_yields_list.append(f"{results['dividend_yields'][stock]:.2%}")
+            else:
+                div_yields_list.append("N/A")
         
         # Allocation table
         allocation_df = pd.DataFrame({
             'Stock': list(results['weights'].keys()),
             'Weight (%)': [f"{w * 100:.1f}%" for w in results['weights'].values()],
+            'Div. Yield': div_yields_list,
             'Investment Amount': [format_currency(w * investment_amount) for w in results['weights'].values()],
             'Shares (approx.)': shares_list
         })
