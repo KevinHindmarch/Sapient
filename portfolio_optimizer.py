@@ -11,18 +11,39 @@ class PortfolioOptimizer:
     def __init__(self):
         self.risk_free_rate = 0.035  # Australian risk-free rate approximation
     
-    def optimize_portfolio(self, price_data, investment_amount):
+    def optimize_portfolio(self, price_data, investment_amount, risk_tolerance='moderate'):
         """
-        Optimize portfolio to maximize Sharpe ratio
+        Optimize portfolio to maximize Sharpe ratio with risk tolerance constraints
         
         Args:
             price_data (pd.DataFrame): Historical price data
             investment_amount (float): Total investment amount
+            risk_tolerance (str): 'conservative', 'moderate', or 'aggressive'
             
         Returns:
             dict: Optimization results
         """
         try:
+            # Risk tolerance parameters
+            risk_params = {
+                'conservative': {
+                    'max_weight': 0.25,  # No stock more than 25%
+                    'min_stocks': 4,     # Diversify across at least 4 stocks
+                    'volatility_penalty': 1.5  # Penalize high volatility
+                },
+                'moderate': {
+                    'max_weight': 0.40,  # No stock more than 40%
+                    'min_stocks': 3,     # At least 3 stocks
+                    'volatility_penalty': 1.0  # Standard optimization
+                },
+                'aggressive': {
+                    'max_weight': 0.60,  # Allow concentration up to 60%
+                    'min_stocks': 2,     # Minimum 2 stocks
+                    'volatility_penalty': 0.8  # Accept higher volatility
+                }
+            }
+            
+            params = risk_params.get(risk_tolerance, risk_params['moderate'])
             # Calculate returns
             returns = price_data.pct_change().dropna()
             
@@ -35,7 +56,12 @@ class PortfolioOptimizer:
             
             num_assets = len(returns.columns)
             
-            # Objective function: minimize negative Sharpe ratio
+            # Validate minimum stocks requirement
+            if num_assets < params['min_stocks']:
+                st.error(f"Risk tolerance '{risk_tolerance}' requires at least {params['min_stocks']} stocks, but only {num_assets} provided.")
+                return None
+            
+            # Objective function: minimize negative Sharpe ratio with volatility penalty
             def objective(weights):
                 portfolio_return = np.sum(mean_returns * weights)
                 portfolio_volatility = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
@@ -43,12 +69,14 @@ class PortfolioOptimizer:
                 if portfolio_volatility == 0:
                     return -np.inf
                 
-                sharpe_ratio = (portfolio_return - self.risk_free_rate) / portfolio_volatility
+                # Apply volatility penalty based on risk tolerance
+                adjusted_volatility = portfolio_volatility * params['volatility_penalty']
+                sharpe_ratio = (portfolio_return - self.risk_free_rate) / adjusted_volatility
                 return -sharpe_ratio  # Minimize negative Sharpe ratio
             
             # Constraints and bounds
             constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})  # Weights sum to 1
-            bounds = tuple((0, 1) for _ in range(num_assets))  # Long-only portfolio
+            bounds = tuple((0, params['max_weight']) for _ in range(num_assets))  # Long-only with max weight constraint
             
             # Initial guess (equal weights)
             initial_guess = np.array([1/num_assets] * num_assets)
@@ -98,7 +126,9 @@ class PortfolioOptimizer:
                 'max_drawdown': max_drawdown,
                 'beta': beta,
                 'historical_data': price_data,
-                'optimization_success': result.success
+                'optimization_success': result.success,
+                'risk_tolerance': risk_tolerance,
+                'max_single_weight': params['max_weight']
             }
             
             return results

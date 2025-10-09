@@ -128,15 +128,46 @@ def main():
         )
         period = period_options[selected_period]
         
+        # Risk tolerance setting
+        st.subheader("Risk Tolerance")
+        risk_tolerance_options = {
+            "Conservative": "conservative",
+            "Moderate": "moderate",
+            "Aggressive": "aggressive"
+        }
+        selected_risk = st.selectbox(
+            "Select your risk profile:",
+            options=list(risk_tolerance_options.keys()),
+            index=1,
+            help="Conservative: Lower risk, more diversification. Moderate: Balanced approach. Aggressive: Higher potential returns, concentrated positions."
+        )
+        risk_tolerance = risk_tolerance_options[selected_risk]
+        
+        # Display risk tolerance info
+        risk_info = {
+            "conservative": "🛡️ Max 25% per stock, requires 4+ stocks",
+            "moderate": "⚖️ Max 40% per stock, requires 3+ stocks",
+            "aggressive": "🚀 Max 60% per stock, allows concentration"
+        }
+        st.info(risk_info[risk_tolerance])
+        
+        # Determine minimum stocks required based on risk tolerance
+        min_stocks_required = {
+            'conservative': 4,
+            'moderate': 3,
+            'aggressive': 2
+        }
+        min_required = min_stocks_required.get(risk_tolerance, 2)
+        
         # Optimize button
         optimize_button = st.button(
             "🚀 Optimize Portfolio",
             type="primary",
-            disabled=len(st.session_state.selected_stocks) < 2
+            disabled=len(st.session_state.selected_stocks) < min_required
         )
         
-        if len(st.session_state.selected_stocks) < 2:
-            st.warning("Please select at least 2 stocks to optimize")
+        if len(st.session_state.selected_stocks) < min_required:
+            st.warning(f"Please select at least {min_required} stocks for {selected_risk} risk profile")
 
     # Main content area
     if optimize_button and len(st.session_state.selected_stocks) >= 2:
@@ -152,7 +183,8 @@ def main():
                     # Perform optimization
                     results = optimizer.optimize_portfolio(
                         stock_data,
-                        investment_amount
+                        investment_amount,
+                        risk_tolerance
                     )
                     
                     if results:
@@ -173,6 +205,14 @@ def main():
 
 def display_optimization_results(results, investment_amount):
     st.header("📊 Optimized Portfolio Results")
+    
+    # Display risk tolerance badge
+    risk_badges = {
+        'conservative': '🛡️ Conservative Strategy',
+        'moderate': '⚖️ Moderate Strategy',
+        'aggressive': '🚀 Aggressive Strategy'
+    }
+    st.markdown(f"### {risk_badges.get(results.get('risk_tolerance', 'moderate'), 'Portfolio Strategy')}")
     
     # Key metrics
     col1, col2, col3, col4 = st.columns(4)
@@ -235,23 +275,24 @@ def display_optimization_results(results, investment_amount):
     with col2:
         st.subheader("Allocation Details")
         
-        # Allocation table
-        allocation_df = pd.DataFrame({
-            'Stock': list(results['weights'].keys()),
-            'Weight (%)': [f"{w * 100:.1f}%" for w in results['weights'].values()],
-            'Investment Amount': [format_currency(w * investment_amount) for w in results['weights'].values()],
-            'Shares (approx.)': []
-        })
-        
-        # Calculate approximate shares
+        # Calculate approximate shares first
+        shares_list = []
         for stock in results['weights'].keys():
             try:
                 ticker = yf.Ticker(stock)
                 current_price = ticker.history(period="1d")['Close'].iloc[-1]
                 shares = int((results['weights'][stock] * investment_amount) / current_price)
-                allocation_df.loc[allocation_df['Stock'] == stock, 'Shares (approx.)'] = shares
+                shares_list.append(shares)
             except:
-                allocation_df.loc[allocation_df['Stock'] == stock, 'Shares (approx.)'] = "N/A"
+                shares_list.append("N/A")
+        
+        # Allocation table
+        allocation_df = pd.DataFrame({
+            'Stock': list(results['weights'].keys()),
+            'Weight (%)': [f"{w * 100:.1f}%" for w in results['weights'].values()],
+            'Investment Amount': [format_currency(w * investment_amount) for w in results['weights'].values()],
+            'Shares (approx.)': shares_list
+        })
         
         st.dataframe(allocation_df, hide_index=True, use_container_width=True)
     
