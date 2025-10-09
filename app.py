@@ -168,6 +168,10 @@ def main():
         
         if len(st.session_state.selected_stocks) < min_required:
             st.warning(f"Please select at least {min_required} stocks for {selected_risk} risk profile")
+        
+        # Strategy comparison option
+        st.divider()
+        compare_strategies = st.checkbox("📊 Compare All Risk Strategies", value=False)
 
     # Main content area
     if optimize_button and len(st.session_state.selected_stocks) >= 2:
@@ -185,20 +189,45 @@ def main():
                         st.session_state.selected_stocks
                     )
                     
-                    # Perform optimization
-                    results = optimizer.optimize_portfolio(
-                        stock_data,
-                        investment_amount,
-                        risk_tolerance,
-                        dividend_yields
-                    )
-                    
-                    if results:
-                        st.session_state.optimization_results = results
-                        st.session_state.portfolio_optimized = True
-                        st.success("Portfolio optimization completed!")
+                    if compare_strategies:
+                        # Optimize for all three risk strategies
+                        strategies_results = {}
+                        for strategy in ['conservative', 'moderate', 'aggressive']:
+                            # Check if we have enough stocks for this strategy
+                            min_stocks_req = {'conservative': 4, 'moderate': 3, 'aggressive': 2}
+                            if len(st.session_state.selected_stocks) >= min_stocks_req[strategy]:
+                                result = optimizer.optimize_portfolio(
+                                    stock_data,
+                                    investment_amount,
+                                    strategy,
+                                    dividend_yields
+                                )
+                                if result:
+                                    strategies_results[strategy] = result
+                        
+                        if strategies_results:
+                            st.session_state.optimization_results = strategies_results
+                            st.session_state.portfolio_optimized = True
+                            st.session_state.compare_mode = True
+                            st.success(f"Compared {len(strategies_results)} portfolio strategies!")
+                        else:
+                            st.error("Strategy comparison failed. Please try with different stocks.")
                     else:
-                        st.error("Portfolio optimization failed. Please try with different stocks or time period.")
+                        # Single strategy optimization
+                        results = optimizer.optimize_portfolio(
+                            stock_data,
+                            investment_amount,
+                            risk_tolerance,
+                            dividend_yields
+                        )
+                        
+                        if results:
+                            st.session_state.optimization_results = results
+                            st.session_state.portfolio_optimized = True
+                            st.session_state.compare_mode = False
+                            st.success("Portfolio optimization completed!")
+                        else:
+                            st.error("Portfolio optimization failed. Please try with different stocks or time period.")
                 else:
                     st.error("Failed to fetch stock data. Please check your stock selections.")
                     
@@ -207,7 +236,107 @@ def main():
 
     # Display results
     if st.session_state.portfolio_optimized and st.session_state.optimization_results:
-        display_optimization_results(st.session_state.optimization_results, investment_amount, optimizer)
+        if st.session_state.get('compare_mode', False):
+            display_strategy_comparison(st.session_state.optimization_results, investment_amount)
+        else:
+            display_optimization_results(st.session_state.optimization_results, investment_amount, optimizer)
+
+def display_strategy_comparison(strategies_results, investment_amount):
+    """Display side-by-side comparison of different risk strategies"""
+    st.header("📊 Strategy Comparison")
+    
+    # Create comparison table
+    comparison_data = []
+    
+    for strategy_name, results in strategies_results.items():
+        comparison_data.append({
+            'Strategy': strategy_name.capitalize(),
+            'Expected Return': f"{results['expected_return']:.2%}",
+            'Volatility': f"{results['volatility']:.2%}",
+            'Sharpe Ratio': f"{results['sharpe_ratio']:.3f}",
+            'Dividend Yield': f"{results.get('portfolio_dividend_yield', 0):.2%}",
+            'Max Drawdown': f"{results.get('max_drawdown', 0):.2%}",
+            'Max Single Weight': f"{results.get('max_single_weight', 0):.1%}"
+        })
+    
+    comparison_df = pd.DataFrame(comparison_data)
+    st.dataframe(comparison_df, hide_index=True, use_container_width=True)
+    
+    # Visual comparison charts
+    st.subheader("Risk-Return Profile")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        # Risk-Return scatter plot
+        fig_scatter = go.Figure()
+        
+        for strategy_name, results in strategies_results.items():
+            fig_scatter.add_trace(go.Scatter(
+                x=[results['volatility'] * 100],
+                y=[results['expected_return'] * 100],
+                mode='markers+text',
+                name=strategy_name.capitalize(),
+                text=[strategy_name.capitalize()],
+                textposition='top center',
+                marker=dict(size=15)
+            ))
+        
+        fig_scatter.update_layout(
+            title="Risk-Return Trade-off",
+            xaxis_title="Volatility (%)",
+            yaxis_title="Expected Return (%)",
+            showlegend=True,
+            hovermode='closest'
+        )
+        
+        st.plotly_chart(fig_scatter, use_container_width=True)
+    
+    with col2:
+        # Sharpe ratio comparison
+        sharpe_data = {
+            'Strategy': [s.capitalize() for s in strategies_results.keys()],
+            'Sharpe Ratio': [r['sharpe_ratio'] for r in strategies_results.values()]
+        }
+        
+        fig_sharpe = px.bar(
+            sharpe_data,
+            x='Strategy',
+            y='Sharpe Ratio',
+            title="Sharpe Ratio Comparison",
+            color='Strategy'
+        )
+        
+        st.plotly_chart(fig_sharpe, use_container_width=True)
+    
+    # Allocation comparison
+    st.subheader("Portfolio Allocation Comparison")
+    
+    cols = st.columns(len(strategies_results))
+    
+    for idx, (strategy_name, results) in enumerate(strategies_results.items()):
+        with cols[idx]:
+            st.markdown(f"**{strategy_name.capitalize()}**")
+            
+            weights_df = pd.DataFrame({
+                'Stock': list(results['weights'].keys()),
+                'Weight': [w * 100 for w in results['weights'].values()]
+            })
+            
+            fig_pie = px.pie(
+                weights_df,
+                values='Weight',
+                names='Stock',
+                title=f"{strategy_name.capitalize()} Allocation"
+            )
+            fig_pie.update_traces(textposition='inside', textinfo='percent')
+            st.plotly_chart(fig_pie, use_container_width=True)
+            
+            # Top holdings
+            st.markdown("**Top Holdings:**")
+            top_holdings = sorted(results['weights'].items(), key=lambda x: x[1], reverse=True)[:3]
+            for stock, weight in top_holdings:
+                st.write(f"• {stock}: {weight:.1%}")
 
 def display_optimization_results(results, investment_amount, optimizer):
     st.header("📊 Optimized Portfolio Results")
