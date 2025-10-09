@@ -6,6 +6,13 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime, timedelta
 import yfinance as yf
+from reportlab.lib.pagesizes import letter, A4
+from reportlab.lib import colors
+from reportlab.lib.units import inch
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_CENTER, TA_LEFT
+import io
 
 from stock_data import StockDataManager
 from portfolio_optimizer import PortfolioOptimizer
@@ -739,7 +746,7 @@ def display_optimization_results(results, investment_amount, optimizer):
     st.divider()
     st.subheader("Export Results")
     
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     
     with col1:
         if st.button("📄 Generate Report"):
@@ -770,6 +777,143 @@ def display_optimization_results(results, investment_amount, optimizer):
             file_name=f"portfolio_allocation_{datetime.now().strftime('%Y%m%d')}.csv",
             mime="text/csv"
         )
+    
+    with col3:
+        # Generate PDF report
+        pdf_buffer = generate_pdf_report(results, investment_amount)
+        st.download_button(
+            label="📄 Download PDF Report",
+            data=pdf_buffer,
+            file_name=f"portfolio_report_{datetime.now().strftime('%Y%m%d')}.pdf",
+            mime="application/pdf"
+        )
+
+def generate_pdf_report(results, investment_amount):
+    """Generate a PDF report of the portfolio optimization results"""
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter)
+    elements = []
+    styles = getSampleStyleSheet()
+    
+    # Title
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=24,
+        textColor=colors.HexColor('#1f77b4'),
+        spaceAfter=30,
+        alignment=TA_CENTER
+    )
+    
+    elements.append(Paragraph("Australian Stock Portfolio Report", title_style))
+    elements.append(Spacer(1, 12))
+    
+    # Report date and risk strategy
+    date_str = datetime.now().strftime("%B %d, %Y")
+    risk_strategy = results.get('risk_tolerance', 'moderate').capitalize()
+    elements.append(Paragraph(f"<b>Report Date:</b> {date_str}", styles['Normal']))
+    elements.append(Paragraph(f"<b>Risk Strategy:</b> {risk_strategy}", styles['Normal']))
+    elements.append(Spacer(1, 20))
+    
+    # Portfolio Summary
+    elements.append(Paragraph("Portfolio Summary", styles['Heading2']))
+    elements.append(Spacer(1, 12))
+    
+    summary_data = [
+        ['Metric', 'Value'],
+        ['Total Investment', format_currency(investment_amount)],
+        ['Expected Annual Return', f"{results['expected_return']:.2%}"],
+        ['Annual Volatility', f"{results['volatility']:.2%}"],
+        ['Sharpe Ratio', f"{results['sharpe_ratio']:.3f}"],
+        ['Portfolio Dividend Yield', f"{results.get('portfolio_dividend_yield', 0):.2%}"],
+        ['Maximum Drawdown', f"{results.get('max_drawdown', 0):.2%}"],
+        ['Beta (vs ASX 200)', f"{results.get('beta', 0):.2f}"]
+    ]
+    
+    summary_table = Table(summary_data, colWidths=[3*inch, 2*inch])
+    summary_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 12),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black)
+    ]))
+    
+    elements.append(summary_table)
+    elements.append(Spacer(1, 30))
+    
+    # Portfolio Allocation
+    elements.append(Paragraph("Portfolio Allocation", styles['Heading2']))
+    elements.append(Spacer(1, 12))
+    
+    allocation_data = [['Stock', 'Weight (%)', 'Investment Amount', 'Dividend Yield']]
+    
+    for stock, weight in sorted(results['weights'].items(), key=lambda x: x[1], reverse=True):
+        div_yield = "N/A"
+        if results.get('dividend_yields') and stock in results['dividend_yields']:
+            div_yield = f"{results['dividend_yields'][stock]:.2%}"
+        
+        allocation_data.append([
+            stock,
+            f"{weight * 100:.1f}%",
+            format_currency(weight * investment_amount),
+            div_yield
+        ])
+    
+    allocation_table = Table(allocation_data, colWidths=[1.5*inch, 1.5*inch, 2*inch, 1.5*inch])
+    allocation_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 11),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.lightblue),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.lightblue, colors.white])
+    ]))
+    
+    elements.append(allocation_table)
+    elements.append(Spacer(1, 30))
+    
+    # Risk Analysis
+    elements.append(Paragraph("Risk Metrics", styles['Heading2']))
+    elements.append(Spacer(1, 12))
+    
+    risk_text = f"""
+    <b>Value at Risk (95%):</b> {results.get('var_95', 0):.2%}<br/>
+    <b>Maximum Drawdown:</b> {results.get('max_drawdown', 0):.2%}<br/>
+    <b>Beta (vs ASX 200):</b> {results.get('beta', 0):.2f}<br/>
+    <b>Maximum Single Stock Weight:</b> {results.get('max_single_weight', 0):.1%}
+    """
+    
+    elements.append(Paragraph(risk_text, styles['Normal']))
+    elements.append(Spacer(1, 30))
+    
+    # Disclaimer
+    disclaimer_style = ParagraphStyle(
+        'Disclaimer',
+        parent=styles['Normal'],
+        fontSize=8,
+        textColor=colors.grey
+    )
+    
+    disclaimer_text = """
+    <b>Disclaimer:</b> This report is for informational purposes only and does not constitute financial advice. 
+    Past performance is not indicative of future results. Please consult with a qualified financial advisor before 
+    making investment decisions. The portfolio optimization is based on historical data and mathematical models, 
+    which may not accurately predict future market conditions.
+    """
+    
+    elements.append(Paragraph(disclaimer_text, disclaimer_style))
+    
+    # Build PDF
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer.getvalue()
 
 if __name__ == "__main__":
     main()
