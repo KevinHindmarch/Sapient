@@ -502,7 +502,112 @@ def display_optimization_results(results, investment_amount, optimizer):
     with col3:
         st.metric("Beta (vs ASX 200)", f"{results.get('beta', 0):.2f}")
     
+    # Rebalancing recommendations
+    st.divider()
+    st.subheader("📊 Portfolio Rebalancing")
+    
+    st.markdown("Enter your current holdings to get rebalancing recommendations:")
+    
+    # Create input fields for current holdings
+    current_holdings = {}
+    has_current_holdings = False
+    
+    cols = st.columns(3)
+    for idx, stock in enumerate(results['weights'].keys()):
+        with cols[idx % 3]:
+            current_shares = st.number_input(
+                f"{stock} (current shares)",
+                min_value=0,
+                value=0,
+                step=1,
+                key=f"current_{stock}"
+            )
+            if current_shares > 0:
+                has_current_holdings = True
+                current_holdings[stock] = current_shares
+    
+    if has_current_holdings:
+        # Fetch current prices for ALL stocks in optimal portfolio (not just held ones)
+        current_prices = {}
+        for stock in results['weights'].keys():
+            try:
+                ticker = yf.Ticker(stock)
+                price = ticker.history(period="1d")['Close'].iloc[-1]
+                current_prices[stock] = price
+            except:
+                st.error(f"Could not fetch current price for {stock}")
+                continue
+        
+        # Calculate current portfolio value
+        current_portfolio_value = 0
+        for stock, shares in current_holdings.items():
+            if stock in current_prices:
+                current_portfolio_value += shares * current_prices[stock]
+        
+        if current_portfolio_value > 0:
+            # Calculate current weights
+            current_weights = {}
+            for stock, shares in current_holdings.items():
+                if stock in current_prices:
+                    current_weights[stock] = (shares * current_prices[stock]) / current_portfolio_value
+            
+            # Add missing stocks with 0 weight
+            for stock in results['weights'].keys():
+                if stock not in current_weights:
+                    current_weights[stock] = 0
+                    current_holdings[stock] = 0
+            
+            st.info(f"Current Portfolio Value: {format_currency(current_portfolio_value)}")
+            
+            # Calculate rebalancing trades
+            st.subheader("Recommended Trades")
+            
+            trades = []
+            total_buy_value = 0
+            total_sell_value = 0
+            
+            for stock in results['weights'].keys():
+                optimal_value = results['weights'][stock] * current_portfolio_value
+                current_value = current_weights.get(stock, 0) * current_portfolio_value
+                diff_value = optimal_value - current_value
+                
+                if stock in current_prices:
+                    diff_shares = diff_value / current_prices[stock]
+                    
+                    if abs(diff_shares) >= 1:  # Only show if difference is at least 1 share
+                        action = "BUY" if diff_shares > 0 else "SELL"
+                        abs_diff_value = abs(diff_value)
+                        
+                        # Add to totals
+                        if action == "BUY":
+                            total_buy_value += abs_diff_value
+                        else:
+                            total_sell_value += abs_diff_value
+                        
+                        trades.append({
+                            'Stock': stock,
+                            'Action': action,
+                            'Shares': abs(int(diff_shares)),
+                            'Current Weight': f"{current_weights.get(stock, 0):.1%}",
+                            'Target Weight': f"{results['weights'][stock]:.1%}",
+                            'Value': format_currency(abs_diff_value)
+                        })
+            
+            if trades:
+                trades_df = pd.DataFrame(trades)
+                st.dataframe(trades_df, hide_index=True, use_container_width=True)
+                
+                # Summary with correctly calculated totals
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Total to Buy", format_currency(total_buy_value))
+                with col2:
+                    st.metric("Total to Sell", format_currency(total_sell_value))
+            else:
+                st.success("✅ Your portfolio is already well-balanced!")
+    
     # Export functionality
+    st.divider()
     st.subheader("Export Results")
     
     col1, col2 = st.columns(2)
