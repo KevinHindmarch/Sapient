@@ -2,9 +2,9 @@
 
 ## Overview
 
-The Australian Stock Portfolio Optimizer is a Streamlit-based web application that helps users optimize their ASX (Australian Securities Exchange) portfolio using Modern Portfolio Theory. The application fetches real-time stock data from Yahoo Finance, calculates optimal portfolio allocations based on Sharpe ratio maximization, and provides interactive visualizations of portfolio performance and risk metrics.
+The Australian Stock Portfolio Optimizer is a comprehensive Streamlit-based web application that helps users optimize their ASX (Australian Securities Exchange) portfolio using Modern Portfolio Theory. The application fetches real-time stock data from Yahoo Finance, calculates optimal portfolio allocations based on Sharpe ratio maximization, and provides interactive visualizations of portfolio performance and risk metrics.
 
-The system allows users to select ASX stocks, specify investment amounts, choose risk tolerance levels, and receive optimized portfolio recommendations with detailed analytics including expected returns, volatility, and individual stock allocations.
+The system allows users to select ASX stocks, specify investment amounts, choose risk tolerance levels, and receive optimized portfolio recommendations with detailed analytics including expected returns, volatility, individual stock allocations, dividend yields, backtesting results, rebalancing recommendations, multi-strategy comparisons, and comprehensive PDF reports.
 
 ## User Preferences
 
@@ -73,7 +73,8 @@ Preferred communication style: Simple, everyday language.
 **Session State Variables**:
 - selected_stocks: List of user-selected stock symbols
 - portfolio_optimized: Boolean flag indicating optimization status
-- optimization_results: Dictionary containing optimization output
+- optimization_results: Dictionary containing optimization output (single strategy) or nested dictionaries (multi-strategy comparison)
+- compare_mode: Boolean flag for multi-strategy comparison mode
 
 ## External Dependencies
 
@@ -106,6 +107,12 @@ Preferred communication style: Simple, everyday language.
   - Caching mechanisms
   - Session state management
 
+**Report Generation**:
+- reportlab: PDF generation library for creating professional portfolio reports
+  - SimpleDocTemplate for document structure
+  - Table and TableStyle for formatted data tables
+  - Paragraph and custom styles for text formatting
+
 **Date/Time Operations**:
 - datetime: Time series operations and date calculations
 - timedelta: Date range calculations for historical data
@@ -114,3 +121,63 @@ Preferred communication style: Simple, everyday language.
 - **Streamlit Cache**: TTL-based caching (3600 seconds) for stock data
 - **Purpose**: Minimize redundant API calls, improve application performance
 - **Trade-off**: Balance between data freshness and API rate limits
+
+## Key Features (Updated December 2024)
+
+### 1. Risk Tolerance Settings
+- **Conservative Strategy**: Maximum 25% per stock, minimum 4 stocks, higher volatility penalty
+- **Moderate Strategy**: Maximum 40% per stock, minimum 3 stocks, standard optimization
+- **Aggressive Strategy**: Maximum 60% per stock, minimum 2 stocks, lower volatility penalty
+- Automated minimum stock enforcement with user-friendly validation messages
+
+### 2. Portfolio Backtesting
+- Historical performance simulation using actual stock data
+- Metrics calculated: Total return, annualized return, win rate, best/worst days
+- Maximum drawdown analysis for risk assessment
+- Interactive performance visualization over selected time period
+
+### 3. Dividend Yield Integration
+- Fetches trailing dividend yield for each stock from Yahoo Finance
+- Calculates weighted portfolio dividend yield based on allocations
+- Displays individual stock yields in allocation table
+- Considers dividend income in total return expectations
+
+### 4. Portfolio Rebalancing Recommendations
+- Compares current holdings with optimized allocation
+- Generates specific buy/sell trade recommendations
+- Calculates exact investment amounts for each trade
+- Displays total buy and sell values for portfolio rebalancing
+
+### 5. Multi-Strategy Comparison
+- Side-by-side comparison of all applicable risk strategies
+- Comparison metrics table showing return, volatility, Sharpe ratio for each strategy
+- Risk-return scatter plot visualizing strategy trade-offs
+- Sharpe ratio bar chart for performance comparison
+- Individual allocation pie charts for each strategy with top holdings
+
+### 6. Export Capabilities
+- **JSON Report**: Interactive summary of portfolio metrics and allocations
+- **CSV Export**: Downloadable spreadsheet with stock weights and investment amounts
+- **PDF Report**: Comprehensive professional report including:
+  - Portfolio summary with all key metrics
+  - Detailed allocation table with dividend yields
+  - Risk analysis section
+  - Professional formatting with tables and styling
+  - Legal disclaimer for compliance
+
+## Recent Changes (December 2024)
+
+**December 9, 2024**:
+- Added multi-strategy comparison feature for analyzing different risk profiles simultaneously
+- Implemented comprehensive PDF export with reportlab for professional portfolio reports
+- Enhanced export section with three export formats: JSON, CSV, and PDF
+
+**December 8, 2024**:
+- Integrated dividend yield data into optimization and display
+- Added portfolio rebalancing recommendations with trade calculations
+- Implemented backtesting feature with historical performance metrics
+
+**December 7, 2024**:
+- Implemented risk tolerance settings with three distinct strategies
+- Added automated validation for minimum stock requirements per strategy
+- Enhanced portfolio optimizer with strategy-specific constraints
