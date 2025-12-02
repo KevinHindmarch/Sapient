@@ -165,9 +165,25 @@ Preferred communication style: Simple, everyday language.
   - Professional formatting with tables and styling
   - Legal disclaimer for compliance
 
+### 7. Auto Portfolio Builder (NEW)
+- **Automatic stock selection** from curated universe of 41 top ASX stocks
+- **Sector diversification** across 10 market sectors (Financials, Materials, Healthcare, etc.)
+- **Simple interface**: Just enter investment amount and portfolio size
+- **Optimization algorithm**: Tests 50+ stock combinations to find highest Sharpe ratio
+- **Portfolio sizes**: Small (5-8 stocks), Medium (8-12 stocks), Large (12-20 stocks)
+- **Full results display**: Metrics, allocation charts, sector breakdown, and export options
+
+## Application Structure
+
+### Tab-Based Interface
+1. **Manual Portfolio Builder**: Original functionality for selecting specific ASX stocks
+2. **Auto Portfolio Builder**: Automatic portfolio generation for maximum Sharpe ratio
+
 ## Recent Changes (December 2024)
 
 **December 9, 2024**:
+- Added Auto Portfolio Builder tab for automatic Sharpe-optimized portfolio generation
+- Implemented curated stock universe with 41 ASX blue-chips across 10 sectors
 - Added multi-strategy comparison feature for analyzing different risk profiles simultaneously
 - Implemented comprehensive PDF export with reportlab for professional portfolio reports
 - Enhanced export section with three export formats: JSON, CSV, and PDF
