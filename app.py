@@ -38,6 +38,17 @@ def main():
     st.title("🇦🇺 Australian Stock Portfolio Optimizer")
     st.markdown("Optimize your ASX portfolio using Sharpe ratio maximization")
     
+    # Create tabs for different modes
+    tab1, tab2 = st.tabs(["🎯 Manual Portfolio Builder", "🤖 Auto Portfolio Builder"])
+    
+    with tab1:
+        manual_portfolio_builder()
+    
+    with tab2:
+        auto_portfolio_builder()
+
+def manual_portfolio_builder():
+    """Original manual stock selection and optimization"""
     # Initialize managers
     stock_manager = StockDataManager()
     optimizer = PortfolioOptimizer()
@@ -914,6 +925,359 @@ def generate_pdf_report(results, investment_amount):
     doc.build(elements)
     buffer.seek(0)
     return buffer.getvalue()
+
+def get_top_asx_stocks():
+    """Return curated list of top ASX blue-chip stocks across sectors"""
+    return {
+        'Financials': ['CBA.AX', 'NAB.AX', 'WBC.AX', 'ANZ.AX', 'MQG.AX'],
+        'Materials': ['BHP.AX', 'RIO.AX', 'FMG.AX', 'MIN.AX', 'S32.AX'],
+        'Healthcare': ['CSL.AX', 'COH.AX', 'RMD.AX', 'SHL.AX', 'PME.AX'],
+        'Consumer': ['WES.AX', 'WOW.AX', 'COL.AX', 'JBH.AX', 'ALL.AX'],
+        'Industrials': ['TCL.AX', 'BXB.AX', 'QAN.AX', 'AZJ.AX', 'QBE.AX'],
+        'Technology': ['XRO.AX', 'WTC.AX', 'CPU.AX', 'REA.AX', 'CAR.AX'],
+        'Energy': ['WDS.AX', 'STO.AX', 'ORG.AX', 'WHC.AX'],
+        'REITs': ['GMG.AX', 'SGP.AX', 'GPT.AX', 'MGR.AX', 'SCG.AX'],
+        'Utilities': ['APA.AX', 'AGL.AX', 'ENV.AX'],
+        'Telecommunications': ['TLS.AX', 'TPG.AX']
+    }
+
+def auto_portfolio_builder():
+    """Automatic portfolio generation with Sharpe ratio optimization"""
+    st.header("🤖 Automatic Portfolio Builder")
+    st.markdown("""
+    Simply enter your investment amount and let our algorithm build the optimal 
+    Sharpe ratio-adjusted portfolio from top ASX stocks across all sectors.
+    """)
+    
+    # Initialize session state for auto portfolio
+    if 'auto_portfolio_results' not in st.session_state:
+        st.session_state.auto_portfolio_results = None
+    if 'auto_portfolio_generated' not in st.session_state:
+        st.session_state.auto_portfolio_generated = False
+    
+    # Initialize managers
+    stock_manager = StockDataManager()
+    optimizer = PortfolioOptimizer()
+    
+    # Simple input interface
+    col1, col2, col3 = st.columns([2, 2, 1])
+    
+    with col1:
+        auto_investment = st.number_input(
+            "💰 Investment Amount (AUD)",
+            min_value=1000.0,
+            max_value=10000000.0,
+            value=50000.0,
+            step=5000.0,
+            format="%.2f",
+            key="auto_investment"
+        )
+    
+    with col2:
+        portfolio_size = st.selectbox(
+            "📊 Portfolio Size",
+            options=["Small (5-8 stocks)", "Medium (8-12 stocks)", "Large (12-20 stocks)"],
+            index=1,
+            key="auto_portfolio_size"
+        )
+    
+    with col3:
+        auto_period = st.selectbox(
+            "📅 Analysis Period",
+            options=["1y", "2y", "3y"],
+            index=1,
+            key="auto_period"
+        )
+    
+    # Portfolio size mapping
+    size_map = {
+        "Small (5-8 stocks)": (5, 8),
+        "Medium (8-12 stocks)": (8, 12),
+        "Large (12-20 stocks)": (12, 20)
+    }
+    min_stocks, max_stocks = size_map[portfolio_size]
+    
+    # Display available stock universe
+    with st.expander("📋 View Stock Universe (Top ASX Stocks)"):
+        stock_universe = get_top_asx_stocks()
+        for sector, stocks in stock_universe.items():
+            st.markdown(f"**{sector}:** {', '.join([s.replace('.AX', '') for s in stocks])}")
+    
+    # Generate portfolio button
+    if st.button("🚀 Generate Optimal Portfolio", type="primary", use_container_width=True, key="auto_generate"):
+        with st.spinner("Analyzing market data and optimizing portfolio..."):
+            try:
+                # Get all stocks from universe
+                stock_universe = get_top_asx_stocks()
+                all_stocks = []
+                for stocks in stock_universe.values():
+                    all_stocks.extend(stocks)
+                
+                # Fetch data for all stocks - handle individual failures
+                st.info(f"Fetching data for {len(all_stocks)} stocks...")
+                
+                # Fetch stocks individually to handle failures gracefully
+                valid_stock_data = {}
+                failed_stocks = []
+                
+                for stock in all_stocks:
+                    try:
+                        ticker = yf.Ticker(stock)
+                        hist = ticker.history(period=auto_period)
+                        if hist is not None and not hist.empty and len(hist) > 50:
+                            valid_stock_data[stock] = hist['Close']
+                    except Exception:
+                        failed_stocks.append(stock)
+                
+                if valid_stock_data:
+                    stock_data = pd.DataFrame(valid_stock_data)
+                    
+                    # Remove stocks with insufficient data
+                    valid_stocks = stock_data.dropna(axis=1, thresh=int(len(stock_data) * 0.8)).columns.tolist()
+                    stock_data = stock_data[valid_stocks]
+                    
+                    if failed_stocks:
+                        st.warning(f"Skipped {len(failed_stocks)} stocks with insufficient data")
+                    
+                    if len(valid_stocks) < min_stocks:
+                        st.error(f"Only {len(valid_stocks)} stocks have sufficient data. Need at least {min_stocks}.")
+                    else:
+                        st.info(f"Found {len(valid_stocks)} stocks with valid data. Optimizing...")
+                        
+                        # Fetch dividend yields
+                        dividend_yields = {}
+                        for stock in valid_stocks:
+                            try:
+                                ticker = yf.Ticker(stock)
+                                info = ticker.info
+                                div_yield = info.get('dividendYield', 0) or info.get('trailingAnnualDividendYield', 0)
+                                dividend_yields[stock] = div_yield if div_yield else 0
+                            except:
+                                dividend_yields[stock] = 0
+                        
+                        # Run optimization to find best portfolio
+                        best_result = None
+                        best_sharpe = -999
+                        
+                        # Try multiple random stock combinations to find optimal
+                        progress_bar = st.progress(0)
+                        status_text = st.empty()
+                        
+                        n_iterations = 50
+                        for i in range(n_iterations):
+                            progress_bar.progress((i + 1) / n_iterations)
+                            status_text.text(f"Testing combination {i + 1}/{n_iterations}...")
+                            
+                            # Select random subset of stocks
+                            n_stocks = np.random.randint(min_stocks, min(max_stocks + 1, len(valid_stocks) + 1))
+                            selected = np.random.choice(valid_stocks, size=n_stocks, replace=False).tolist()
+                            
+                            # Optimize this subset
+                            subset_data = stock_data[selected]
+                            subset_yields = {s: dividend_yields.get(s, 0) for s in selected}
+                            
+                            result = optimizer.optimize_portfolio(
+                                subset_data,
+                                auto_investment,
+                                'moderate',
+                                subset_yields
+                            )
+                            
+                            if result and result['sharpe_ratio'] > best_sharpe:
+                                best_sharpe = result['sharpe_ratio']
+                                best_result = result
+                                best_result['selected_stocks'] = selected
+                        
+                        progress_bar.empty()
+                        status_text.empty()
+                        
+                        if best_result:
+                            st.session_state.auto_portfolio_results = best_result
+                            st.session_state.auto_portfolio_generated = True
+                            st.success(f"✅ Optimal portfolio generated with Sharpe ratio: {best_sharpe:.3f}")
+                            st.rerun()
+                        else:
+                            st.error("Failed to generate optimal portfolio. Please try again.")
+                else:
+                    st.error("Failed to fetch stock data. Please try again later.")
+                    
+            except Exception as e:
+                st.error(f"An error occurred: {str(e)}")
+    
+    # Display results
+    if st.session_state.auto_portfolio_generated and st.session_state.auto_portfolio_results:
+        display_auto_portfolio_results(st.session_state.auto_portfolio_results, st.session_state.get('auto_investment', 50000))
+
+def display_auto_portfolio_results(results, investment_amount):
+    """Display auto-generated portfolio results"""
+    st.divider()
+    st.header("📊 Your Optimal Portfolio")
+    
+    # Key metrics
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric(
+            "Expected Annual Return",
+            f"{results['expected_return']:.2%}",
+            delta=f"{(results['expected_return'] - 0.035):.2%} vs risk-free"
+        )
+    
+    with col2:
+        st.metric(
+            "Annual Volatility",
+            f"{results['volatility']:.2%}"
+        )
+    
+    with col3:
+        st.metric(
+            "Sharpe Ratio",
+            f"{results['sharpe_ratio']:.3f}",
+            delta="Optimal" if results['sharpe_ratio'] > 1 else None
+        )
+    
+    with col4:
+        st.metric(
+            "Portfolio Dividend Yield",
+            f"{results.get('portfolio_dividend_yield', 0):.2%}"
+        )
+    
+    # Allocation visualization
+    st.subheader("Portfolio Allocation")
+    
+    col1, col2 = st.columns([1, 1])
+    
+    with col1:
+        # Pie chart
+        weights_df = pd.DataFrame({
+            'Stock': list(results['weights'].keys()),
+            'Weight': [w * 100 for w in results['weights'].values()],
+            'Investment': [w * investment_amount for w in results['weights'].values()]
+        })
+        
+        fig_pie = px.pie(
+            weights_df,
+            values='Weight',
+            names='Stock',
+            title="Allocation by Weight"
+        )
+        fig_pie.update_traces(textposition='inside', textinfo='percent+label')
+        st.plotly_chart(fig_pie, use_container_width=True)
+    
+    with col2:
+        # Bar chart for investment amounts
+        fig_bar = px.bar(
+            weights_df.sort_values('Investment', ascending=True),
+            x='Investment',
+            y='Stock',
+            orientation='h',
+            title="Investment Amount per Stock",
+            labels={'Investment': 'Amount (AUD)', 'Stock': ''}
+        )
+        fig_bar.update_traces(text=[format_currency(x) for x in weights_df.sort_values('Investment', ascending=True)['Investment']], textposition='outside')
+        st.plotly_chart(fig_bar, use_container_width=True)
+    
+    # Detailed allocation table
+    st.subheader("Detailed Allocation")
+    
+    allocation_data = []
+    for stock, weight in sorted(results['weights'].items(), key=lambda x: x[1], reverse=True):
+        div_yield = "N/A"
+        if results.get('dividend_yields') and stock in results['dividend_yields']:
+            div_yield = f"{results['dividend_yields'][stock]:.2%}"
+        
+        allocation_data.append({
+            'Stock': stock,
+            'Weight': f"{weight:.1%}",
+            'Investment': format_currency(weight * investment_amount),
+            'Dividend Yield': div_yield
+        })
+    
+    allocation_df = pd.DataFrame(allocation_data)
+    st.dataframe(allocation_df, hide_index=True, use_container_width=True)
+    
+    # Sector breakdown
+    st.subheader("Sector Diversification")
+    
+    stock_universe = get_top_asx_stocks()
+    sector_map = {}
+    for sector, stocks in stock_universe.items():
+        for stock in stocks:
+            sector_map[stock] = sector
+    
+    sector_weights = {}
+    for stock, weight in results['weights'].items():
+        sector = sector_map.get(stock, 'Other')
+        sector_weights[sector] = sector_weights.get(sector, 0) + weight
+    
+    sector_df = pd.DataFrame({
+        'Sector': list(sector_weights.keys()),
+        'Weight': [w * 100 for w in sector_weights.values()]
+    }).sort_values('Weight', ascending=False)
+    
+    fig_sector = px.bar(
+        sector_df,
+        x='Sector',
+        y='Weight',
+        title="Sector Allocation",
+        labels={'Weight': 'Weight (%)', 'Sector': ''}
+    )
+    st.plotly_chart(fig_sector, use_container_width=True)
+    
+    # Risk metrics
+    st.subheader("Risk Analysis")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("Max Drawdown", f"{results.get('max_drawdown', 0):.2%}")
+    
+    with col2:
+        st.metric("Value at Risk (95%)", f"{results.get('var_95', 0):.2%}")
+    
+    with col3:
+        st.metric("Beta vs ASX 200", f"{results.get('beta', 0):.2f}")
+    
+    with col4:
+        st.metric("Max Single Weight", f"{results.get('max_single_weight', 0):.1%}")
+    
+    # Export options
+    st.divider()
+    st.subheader("Export Your Portfolio")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        # CSV download
+        csv_data = pd.DataFrame({
+            'Stock': list(results['weights'].keys()),
+            'Weight': list(results['weights'].values()),
+            'Investment_Amount': [w * investment_amount for w in results['weights'].values()]
+        })
+        
+        csv_string = csv_data.to_csv(index=False)
+        st.download_button(
+            label="📊 Download CSV",
+            data=csv_string,
+            file_name=f"auto_portfolio_{datetime.now().strftime('%Y%m%d')}.csv",
+            mime="text/csv"
+        )
+    
+    with col2:
+        # PDF download
+        pdf_buffer = generate_pdf_report(results, investment_amount)
+        st.download_button(
+            label="📄 Download PDF Report",
+            data=pdf_buffer,
+            file_name=f"auto_portfolio_report_{datetime.now().strftime('%Y%m%d')}.pdf",
+            mime="application/pdf"
+        )
+    
+    with col3:
+        if st.button("🔄 Generate New Portfolio"):
+            st.session_state.auto_portfolio_generated = False
+            st.session_state.auto_portfolio_results = None
+            st.rerun()
 
 if __name__ == "__main__":
     main()
