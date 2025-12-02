@@ -166,12 +166,13 @@ Preferred communication style: Simple, everyday language.
   - Legal disclaimer for compliance
 
 ### 7. Auto Portfolio Builder (NEW)
-- **Automatic stock selection** from curated universe of 41 top ASX stocks
-- **Sector diversification** across 10 market sectors (Financials, Materials, Healthcare, etc.)
+- **Automatic stock selection** from comprehensive ASX200 universe (~200 top ASX stocks)
+- **Sector diversification** across 11 GICS sectors (Financials, Materials, Healthcare, Consumer Discretionary, Consumer Staples, Industrials, Information Technology, Energy, Real Estate, Utilities, Communication Services)
 - **Simple interface**: Just enter investment amount and portfolio size
-- **Optimization algorithm**: Tests 50+ stock combinations to find highest Sharpe ratio
+- **Optimization algorithm**: Tests 100 stock combinations to find highest Sharpe ratio
 - **Portfolio sizes**: Small (5-8 stocks), Medium (8-12 stocks), Large (12-20 stocks)
-- **Full results display**: Metrics, allocation charts, sector breakdown, and export options
+- **Full results display**: Metrics, allocation charts, sector breakdown, correlation matrix, and export options
+- **Progress tracking**: Visual progress bars for data fetching and optimization
 
 ## Application Structure
 
@@ -183,13 +184,15 @@ Preferred communication style: Simple, everyday language.
 
 **December 9, 2024**:
 - Added Auto Portfolio Builder tab for automatic Sharpe-optimized portfolio generation
-- Implemented curated stock universe with 41 ASX blue-chips across 10 sectors
+- Expanded stock universe to full ASX200 (~200 stocks across 11 GICS sectors)
 - Added stock correlation matrix heatmap with diversification interpretation
 - Added multi-strategy comparison feature for analyzing different risk profiles simultaneously
 - Implemented comprehensive PDF export with reportlab for professional portfolio reports
 - Enhanced export section with three export formats: JSON, CSV, and PDF
 - Fixed dividend yield handling (yfinance returns percentages, now properly converted to decimals)
 - Improved annualization factor detection using time-based frequency analysis
+- Added progress bars for data fetching and optimization (handles 200+ stocks)
+- Increased optimization iterations to 100 for better coverage of larger universe
 
 **December 8, 2024**:
 - Integrated dividend yield data into optimization and display

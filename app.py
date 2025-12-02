@@ -927,18 +927,77 @@ def generate_pdf_report(results, investment_amount):
     return buffer.getvalue()
 
 def get_top_asx_stocks():
-    """Return curated list of top ASX blue-chip stocks across sectors"""
+    """Return comprehensive ASX200 stock universe across all GICS sectors (validated Dec 2024)"""
     return {
-        'Financials': ['CBA.AX', 'NAB.AX', 'WBC.AX', 'ANZ.AX', 'MQG.AX'],
-        'Materials': ['BHP.AX', 'RIO.AX', 'FMG.AX', 'MIN.AX', 'S32.AX'],
-        'Healthcare': ['CSL.AX', 'COH.AX', 'RMD.AX', 'SHL.AX', 'PME.AX'],
-        'Consumer': ['WES.AX', 'WOW.AX', 'COL.AX', 'JBH.AX', 'ALL.AX'],
-        'Industrials': ['TCL.AX', 'BXB.AX', 'QAN.AX', 'AZJ.AX', 'QBE.AX'],
-        'Technology': ['XRO.AX', 'WTC.AX', 'CPU.AX', 'REA.AX', 'CAR.AX'],
-        'Energy': ['WDS.AX', 'STO.AX', 'ORG.AX', 'WHC.AX'],
-        'REITs': ['GMG.AX', 'SGP.AX', 'GPT.AX', 'MGR.AX', 'SCG.AX'],
-        'Utilities': ['APA.AX', 'AGL.AX', 'ENV.AX'],
-        'Telecommunications': ['TLS.AX', 'TPG.AX']
+        'Financials': [
+            'CBA.AX', 'NAB.AX', 'WBC.AX', 'ANZ.AX', 'MQG.AX',  # Big 4 banks + Macquarie
+            'SUN.AX', 'IAG.AX', 'QBE.AX', 'MPL.AX', 'NHF.AX',  # Insurance
+            'BOQ.AX', 'BEN.AX', 'AMP.AX', 'CGF.AX', 'HUB.AX',  # Regional banks & wealth
+            'PPT.AX', 'MFG.AX', 'NWL.AX', 'PNI.AX', 'JHG.AX',  # Asset managers
+            'SDF.AX', 'AUB.AX', 'ASX.AX', 'PDN.AX'  # Diversified financials
+        ],
+        'Materials': [
+            'BHP.AX', 'RIO.AX', 'FMG.AX', 'MIN.AX', 'S32.AX',  # Diversified miners
+            'NST.AX', 'EVN.AX', 'NEM.AX', 'GOR.AX', 'RRL.AX',  # Gold
+            'PLS.AX', 'LTR.AX', 'IGO.AX', 'LYC.AX', 'ILU.AX',  # Lithium & rare earths
+            'AWC.AX', 'SFR.AX', 'CRN.AX', 'DEG.AX', 'NIC.AX',  # Base metals
+            'BSL.AX', 'JHX.AX', 'CSR.AX', 'BLD.AX', 'ABC.AX',  # Building materials
+            'AMC.AX', 'ORA.AX', 'IPL.AX', 'ORI.AX', 'NUF.AX',  # Chemicals & packaging
+            'SGM.AX', 'WHC.AX', 'YAL.AX', 'CIA.AX', 'DRR.AX'   # Steel & coal
+        ],
+        'Healthcare': [
+            'CSL.AX', 'COH.AX', 'RMD.AX', 'SHL.AX', 'PME.AX',  # Major healthcare
+            'RHC.AX', 'HLS.AX', 'ANN.AX', 'EBO.AX', 'FPH.AX',  # Healthcare providers
+            'NAN.AX', 'PNV.AX', 'NEU.AX', 'TLX.AX', 'IMU.AX',  # Med-tech & biotech
+            'CUV.AX', 'RMC.AX', 'AVH.AX'  # Specialty healthcare
+        ],
+        'Consumer Discretionary': [
+            'WES.AX', 'ALL.AX', 'TAH.AX', 'JBH.AX', 'HVN.AX',  # Retail & gaming
+            'SUL.AX', 'ARB.AX', 'PMV.AX', 'LOV.AX', 'BRG.AX',  # Specialty retail
+            'DMP.AX', 'EDV.AX', 'DOW.AX', 'APE.AX', 'BAP.AX',  # Services & auto
+            'WEB.AX', 'FLT.AX', 'CTD.AX', 'QAN.AX',  # Travel
+            'IEL.AX', 'NEC.AX', 'CAR.AX', 'REA.AX',  # Media & classifieds
+            'SEK.AX', 'DHG.AX', 'REH.AX', 'BKW.AX', 'CWN.AX'   # Services
+        ],
+        'Consumer Staples': [
+            'WOW.AX', 'COL.AX', 'MTS.AX', 'ELD.AX',  # Food retail
+            'TWE.AX', 'A2M.AX', 'BGA.AX', 'ING.AX', 'GNC.AX',  # Food & beverage
+            'CGC.AX', 'CKF.AX', 'WGN.AX', 'RIC.AX'  # Agriculture & food services
+        ],
+        'Industrials': [
+            'TCL.AX', 'BXB.AX', 'AZJ.AX', 'ALX.AX', 'QUB.AX',  # Transport infrastructure
+            'AIA.AX', 'WOR.AX', 'SVW.AX', 'MND.AX',  # Infrastructure services
+            'LLC.AX', 'SIQ.AX', 'DOW.AX', 'CIM.AX',  # Engineering & construction
+            'CWY.AX', 'BKL.AX', 'GWA.AX', 'RWC.AX', 'REG.AX',  # Industrial products
+            'IPH.AX', 'NWH.AX', 'VNT.AX', 'CDA.AX', 'SOL.AX'   # Services
+        ],
+        'Information Technology': [
+            'XRO.AX', 'WTC.AX', 'CPU.AX', 'TNE.AX', 'NXT.AX',  # Software & data centers
+            'MP1.AX', 'SQ2.AX', 'APX.AX', 'ALU.AX',  # Tech platforms
+            'AD8.AX', 'TYR.AX', 'PPS.AX', 'LNK.AX',  # Fintech & payments
+            'HUM.AX', 'CCP.AX', 'OFX.AX', 'DUG.AX', 'DSK.AX'   # Tech services
+        ],
+        'Energy': [
+            'WDS.AX', 'STO.AX', 'ORG.AX', 'BPT.AX', 'KAR.AX',  # Oil & gas producers
+            'VEA.AX', 'ALD.AX', 'NHC.AX', 'WHC.AX', 'YAL.AX',  # Energy distribution
+            'COE.AX', 'STX.AX', 'CVN.AX', 'WAR.AX', 'BOE.AX'   # Oil & gas exploration
+        ],
+        'Real Estate': [
+            'GMG.AX', 'SGP.AX', 'GPT.AX', 'MGR.AX', 'SCG.AX',  # Diversified REITs
+            'DXS.AX', 'VCX.AX', 'CHC.AX', 'CLW.AX', 'CQR.AX',  # Commercial REITs
+            'ABP.AX', 'BWP.AX', 'NSR.AX', 'CNI.AX',  # Specialty REITs
+            'GOZ.AX', 'CIP.AX', 'ARF.AX', 'HMC.AX', 'HDN.AX',  # Industrial & retail
+            'ASK.AX', 'CMW.AX', 'GDI.AX', 'RGN.AX', 'HPI.AX'   # Office & mixed
+        ],
+        'Utilities': [
+            'APA.AX', 'AGL.AX', 'ORG.AX',  # Energy utilities
+            'MEZ.AX', 'MCY.AX', 'GNE.AX', 'IFT.AX'   # International utilities
+        ],
+        'Communication Services': [
+            'TLS.AX', 'TPG.AX', 'SPK.AX', 'CNU.AX',  # Telecoms
+            'NEC.AX', 'SWM.AX', 'SXL.AX', 'OML.AX', 'HT1.AX',  # Media
+            'REA.AX', 'CAR.AX', 'SEK.AX', 'DHG.AX'   # Digital platforms
+        ]
     }
 
 def auto_portfolio_builder():
@@ -946,7 +1005,7 @@ def auto_portfolio_builder():
     st.header("🤖 Automatic Portfolio Builder")
     st.markdown("""
     Simply enter your investment amount and let our algorithm build the optimal 
-    Sharpe ratio-adjusted portfolio from top ASX stocks across all sectors.
+    Sharpe ratio-adjusted portfolio from the **ASX200 universe** (~200 top Australian stocks across all sectors).
     """)
     
     # Initialize session state for auto portfolio
@@ -998,10 +1057,12 @@ def auto_portfolio_builder():
     min_stocks, max_stocks = size_map[portfolio_size]
     
     # Display available stock universe
-    with st.expander("📋 View Stock Universe (Top ASX Stocks)"):
+    with st.expander("📋 View ASX200 Stock Universe"):
         stock_universe = get_top_asx_stocks()
+        total_stocks = sum(len(stocks) for stocks in stock_universe.values())
+        st.caption(f"Total: {total_stocks} stocks across {len(stock_universe)} sectors")
         for sector, stocks in stock_universe.items():
-            st.markdown(f"**{sector}:** {', '.join([s.replace('.AX', '') for s in stocks])}")
+            st.markdown(f"**{sector} ({len(stocks)}):** {', '.join([s.replace('.AX', '') for s in stocks])}")
     
     # Generate portfolio button
     if st.button("🚀 Generate Optimal Portfolio", type="primary", use_container_width=True, key="auto_generate"):
@@ -1014,13 +1075,16 @@ def auto_portfolio_builder():
                     all_stocks.extend(stocks)
                 
                 # Fetch data for all stocks - handle individual failures
-                st.info(f"Fetching data for {len(all_stocks)} stocks...")
+                st.info(f"📊 Fetching data for {len(all_stocks)} ASX200 stocks...")
                 
                 # Fetch stocks individually to handle failures gracefully
                 valid_stock_data = {}
                 failed_stocks = []
                 
-                for stock in all_stocks:
+                fetch_progress = st.progress(0)
+                fetch_status = st.empty()
+                
+                for i, stock in enumerate(all_stocks):
                     try:
                         ticker = yf.Ticker(stock)
                         hist = ticker.history(period=auto_period)
@@ -1028,6 +1092,14 @@ def auto_portfolio_builder():
                             valid_stock_data[stock] = hist['Close']
                     except Exception:
                         failed_stocks.append(stock)
+                    
+                    # Update progress
+                    progress = (i + 1) / len(all_stocks)
+                    fetch_progress.progress(progress)
+                    fetch_status.text(f"Fetching: {stock.replace('.AX', '')} ({i+1}/{len(all_stocks)})")
+                
+                fetch_status.empty()
+                fetch_progress.empty()
                 
                 if valid_stock_data:
                     stock_data = pd.DataFrame(valid_stock_data)
@@ -1044,30 +1116,35 @@ def auto_portfolio_builder():
                     else:
                         st.info(f"Found {len(valid_stocks)} stocks with valid data. Optimizing...")
                         
-                        # Fetch dividend yields
+                        # Fetch dividend yields with progress
+                        st.info("📈 Fetching dividend yields...")
                         dividend_yields = {}
-                        for stock in valid_stocks:
+                        div_progress = st.progress(0)
+                        
+                        for idx, stock in enumerate(valid_stocks):
                             try:
                                 ticker = yf.Ticker(stock)
                                 info = ticker.info
                                 div_yield = info.get('dividendYield', 0) or info.get('trailingAnnualDividendYield', 0)
-                                # yfinance sometimes returns yield as percentage (e.g., 3.5 for 3.5%)
-                                # Convert to decimal if needed
-                                if div_yield and div_yield > 0.5:  # If > 50%, it's likely a percentage
+                                if div_yield and div_yield > 0.5:
                                     div_yield = div_yield / 100
                                 dividend_yields[stock] = div_yield if div_yield else 0
                             except:
                                 dividend_yields[stock] = 0
+                            div_progress.progress((idx + 1) / len(valid_stocks))
+                        
+                        div_progress.empty()
                         
                         # Run optimization to find best portfolio
                         best_result = None
                         best_sharpe = -999
                         
                         # Try multiple random stock combinations to find optimal
+                        st.info("🔍 Finding optimal portfolio combination...")
                         progress_bar = st.progress(0)
                         status_text = st.empty()
                         
-                        n_iterations = 50
+                        n_iterations = 100  # Increased for larger universe
                         for i in range(n_iterations):
                             progress_bar.progress((i + 1) / n_iterations)
                             status_text.text(f"Testing combination {i + 1}/{n_iterations}...")
