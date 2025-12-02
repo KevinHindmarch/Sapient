@@ -11,6 +11,66 @@ class PortfolioOptimizer:
     def __init__(self):
         self.risk_free_rate = 0.035  # Australian risk-free rate approximation
     
+    def _infer_annualization_factor(self, price_data):
+        """
+        Infer the annualization factor based on data frequency
+        
+        Args:
+            price_data (pd.DataFrame): Historical price data (or returns data)
+            
+        Returns:
+            int: Annualization factor (252 for daily, 52 for weekly, 12 for monthly)
+        """
+        if len(price_data) < 2:
+            return 252  # Default to daily
+        
+        try:
+            # Use time-based frequency detection
+            if hasattr(price_data.index, 'to_series'):
+                time_series = price_data.index.to_series()
+            else:
+                time_series = pd.Series(price_data.index)
+            
+            # Calculate time differences
+            time_diff = time_series.diff().dropna()
+            
+            # Convert to days (handle both Timedelta and datetime differences)
+            if len(time_diff) > 0:
+                # Get median time difference in days
+                if hasattr(time_diff.iloc[0], 'days'):
+                    median_days = time_diff.apply(lambda x: x.days).median()
+                else:
+                    # Try to convert to timedelta
+                    median_days = pd.to_timedelta(time_diff).dt.days.median()
+                
+                # Classify based on median days between observations
+                if median_days <= 3:  # Daily data (accounts for weekends)
+                    return 252
+                elif median_days <= 10:  # Weekly data
+                    return 52
+                elif median_days <= 45:  # Monthly data
+                    return 12
+                else:  # Quarterly or less frequent
+                    return 4
+            
+            return 252  # Default to daily
+            
+        except Exception:
+            return 252  # Default to daily if any error
+    
+    def calculate_correlation_matrix(self, price_data):
+        """
+        Calculate correlation matrix for portfolio stocks
+        
+        Args:
+            price_data (pd.DataFrame): Historical price data
+            
+        Returns:
+            pd.DataFrame: Correlation matrix
+        """
+        returns = price_data.pct_change().dropna()
+        return returns.corr()
+    
     def optimize_portfolio(self, price_data, investment_amount, risk_tolerance='moderate', dividend_yields=None):
         """
         Optimize portfolio to maximize Sharpe ratio with risk tolerance constraints
@@ -45,22 +105,31 @@ class PortfolioOptimizer:
             }
             
             params = risk_params.get(risk_tolerance, risk_params['moderate'])
-            # Calculate returns
-            returns = price_data.pct_change().dropna()
+            
+            # Forward fill missing values then calculate returns
+            price_data_filled = price_data.ffill().bfill()
+            returns = price_data_filled.pct_change().dropna()
             
             if returns.empty:
                 return None
             
+            # Infer annualization factor based on actual returns data frequency
+            annualization_factor = self._infer_annualization_factor(returns)
+            
             # Calculate mean returns and covariance matrix
-            mean_returns = returns.mean() * 252  # Annualized
+            mean_returns = returns.mean() * annualization_factor  # Annualized
             
             # Add dividend yields to expected returns if provided
             if dividend_yields:
                 for col in returns.columns:
                     if col in dividend_yields:
-                        mean_returns[col] += dividend_yields[col]
+                        div_yield = dividend_yields[col]
+                        # Ensure dividend yield is in decimal form
+                        if div_yield > 0.5:  # If > 50%, it's a percentage
+                            div_yield = div_yield / 100
+                        mean_returns[col] += div_yield
             
-            cov_matrix = returns.cov() * 252     # Annualized
+            cov_matrix = returns.cov() * annualization_factor     # Annualized
             
             num_assets = len(returns.columns)
             
@@ -293,24 +362,28 @@ class PortfolioOptimizer:
             dict: Backtesting results
         """
         try:
-            # Calculate daily returns
-            returns = price_data.pct_change().dropna()
+            # Forward fill missing values then calculate returns
+            price_data_filled = price_data.ffill().bfill()
+            returns = price_data_filled.pct_change().dropna()
+            
+            # Infer annualization factor based on actual returns data frequency
+            annualization_factor = self._infer_annualization_factor(returns)
             
             # Align weights with columns
             weight_array = np.array([weights.get(col, 0) for col in returns.columns])
             
-            # Calculate portfolio daily returns
+            # Calculate portfolio returns
             portfolio_returns = returns.dot(weight_array)
             
             # Calculate cumulative returns
             cumulative_returns = (1 + portfolio_returns).cumprod()
             portfolio_value = initial_investment * cumulative_returns
             
-            # Calculate metrics
+            # Calculate metrics with correct annualization
             total_return = (portfolio_value.iloc[-1] / initial_investment - 1) * 100
-            annual_return = portfolio_returns.mean() * 252 * 100
-            annual_volatility = portfolio_returns.std() * np.sqrt(252) * 100
-            sharpe = (portfolio_returns.mean() * 252 - self.risk_free_rate) / (portfolio_returns.std() * np.sqrt(252))
+            annual_return = portfolio_returns.mean() * annualization_factor * 100
+            annual_volatility = portfolio_returns.std() * np.sqrt(annualization_factor) * 100
+            sharpe = (portfolio_returns.mean() * annualization_factor - self.risk_free_rate) / (portfolio_returns.std() * np.sqrt(annualization_factor))
             
             # Calculate drawdowns
             running_max = portfolio_value.expanding().max()

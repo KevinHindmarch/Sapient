@@ -174,11 +174,12 @@ class StockDataManager:
                 ticker = yf.Ticker(symbol)
                 info = ticker.info
                 
-                # Get dividend yield (already as percentage in yfinance)
+                # Get dividend yield from yfinance
                 div_yield = info.get('dividendYield', 0)
                 
-                # Convert to decimal if it's a percentage
-                if div_yield and div_yield > 1:
+                # yfinance sometimes returns yield as percentage (e.g., 3.5 for 3.5%)
+                # Convert to decimal if needed (yields above 50% are definitely percentages)
+                if div_yield and div_yield > 0.5:
                     div_yield = div_yield / 100
                 
                 dividend_yields[symbol] = div_yield if div_yield else 0

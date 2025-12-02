@@ -184,9 +184,12 @@ Preferred communication style: Simple, everyday language.
 **December 9, 2024**:
 - Added Auto Portfolio Builder tab for automatic Sharpe-optimized portfolio generation
 - Implemented curated stock universe with 41 ASX blue-chips across 10 sectors
+- Added stock correlation matrix heatmap with diversification interpretation
 - Added multi-strategy comparison feature for analyzing different risk profiles simultaneously
 - Implemented comprehensive PDF export with reportlab for professional portfolio reports
 - Enhanced export section with three export formats: JSON, CSV, and PDF
+- Fixed dividend yield handling (yfinance returns percentages, now properly converted to decimals)
+- Improved annualization factor detection using time-based frequency analysis
 
 **December 8, 2024**:
 - Integrated dividend yield data into optimization and display

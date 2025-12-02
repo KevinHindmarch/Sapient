@@ -1051,6 +1051,10 @@ def auto_portfolio_builder():
                                 ticker = yf.Ticker(stock)
                                 info = ticker.info
                                 div_yield = info.get('dividendYield', 0) or info.get('trailingAnnualDividendYield', 0)
+                                # yfinance sometimes returns yield as percentage (e.g., 3.5 for 3.5%)
+                                # Convert to decimal if needed
+                                if div_yield and div_yield > 0.5:  # If > 50%, it's likely a percentage
+                                    div_yield = div_yield / 100
                                 dividend_yields[stock] = div_yield if div_yield else 0
                             except:
                                 dividend_yields[stock] = 0
@@ -1223,6 +1227,52 @@ def display_auto_portfolio_results(results, investment_amount):
         labels={'Weight': 'Weight (%)', 'Sector': ''}
     )
     st.plotly_chart(fig_sector, use_container_width=True)
+    
+    # Correlation matrix
+    st.subheader("Stock Correlation Matrix")
+    
+    if results.get('historical_data') is not None:
+        optimizer = PortfolioOptimizer()
+        portfolio_stocks = list(results['weights'].keys())
+        
+        # Get only the stocks in our portfolio
+        if isinstance(results['historical_data'], pd.DataFrame):
+            available_cols = [col for col in portfolio_stocks if col in results['historical_data'].columns]
+            if available_cols:
+                portfolio_data = results['historical_data'][available_cols]
+                corr_matrix = optimizer.calculate_correlation_matrix(portfolio_data)
+                
+                # Create heatmap
+                fig_corr = go.Figure(data=go.Heatmap(
+                    z=corr_matrix.values,
+                    x=[s.replace('.AX', '') for s in corr_matrix.columns],
+                    y=[s.replace('.AX', '') for s in corr_matrix.index],
+                    colorscale='RdBu_r',
+                    zmin=-1,
+                    zmax=1,
+                    text=np.round(corr_matrix.values, 2),
+                    texttemplate='%{text}',
+                    textfont={"size": 10},
+                    hovertemplate='%{x} vs %{y}<br>Correlation: %{z:.2f}<extra></extra>'
+                ))
+                
+                fig_corr.update_layout(
+                    title="Correlation Between Portfolio Stocks",
+                    xaxis_title="",
+                    yaxis_title="",
+                    height=400
+                )
+                
+                st.plotly_chart(fig_corr, use_container_width=True)
+                
+                # Interpretation
+                avg_corr = corr_matrix.values[np.triu_indices_from(corr_matrix.values, k=1)].mean()
+                if avg_corr < 0.3:
+                    st.success(f"📊 Average correlation: {avg_corr:.2f} - Excellent diversification! Your stocks move relatively independently.")
+                elif avg_corr < 0.5:
+                    st.info(f"📊 Average correlation: {avg_corr:.2f} - Good diversification. Stocks have moderate correlation.")
+                else:
+                    st.warning(f"📊 Average correlation: {avg_corr:.2f} - High correlation. Consider adding less correlated assets for better diversification.")
     
     # Risk metrics
     st.subheader("Risk Analysis")
