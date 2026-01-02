@@ -235,8 +235,27 @@ class PortfolioManager:
             
             portfolio_id = cur.fetchone()['id']
             
-            allocations = optimization_results.get('allocations', [])
-            for alloc in allocations:
+            # Build allocations from optimizer output - handle 'weights' dict format
+            weights = optimization_results.get('weights', {})
+            
+            # Fetch current prices for each stock
+            import yfinance as yf
+            for symbol, weight in weights.items():
+                if weight < 0.001:  # Skip negligible weights
+                    continue
+                    
+                allocation_amount = weight * investment_amount
+                
+                # Get current price for the stock
+                try:
+                    ticker = yf.Ticker(symbol)
+                    hist = ticker.history(period='1d')
+                    current_price = hist['Close'].iloc[-1] if not hist.empty else 0
+                except:
+                    current_price = 0
+                
+                quantity = allocation_amount / current_price if current_price > 0 else 0
+                
                 cur.execute("""
                     INSERT INTO portfolio_positions (
                         portfolio_id, symbol, quantity, avg_cost,
@@ -245,11 +264,11 @@ class PortfolioManager:
                     VALUES (%s, %s, %s, %s, %s, %s, 'active')
                 """, (
                     portfolio_id,
-                    alloc.get('symbol', alloc.get('Stock', '')),
-                    alloc.get('shares', alloc.get('Investment', 0) / alloc.get('price', 1)),
-                    alloc.get('price', 0),
-                    alloc.get('weight', alloc.get('Weight', 0)),
-                    alloc.get('investment', alloc.get('Investment', 0))
+                    symbol,
+                    quantity,
+                    current_price,
+                    weight,
+                    allocation_amount
                 ))
             
             cur.execute("""

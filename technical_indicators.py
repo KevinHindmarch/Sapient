@@ -14,7 +14,7 @@ class TechnicalIndicators:
     @staticmethod
     def calculate_rsi(prices: pd.Series, period: int = 14) -> pd.Series:
         """
-        Calculate Relative Strength Index (RSI).
+        Calculate Relative Strength Index (RSI) using Wilder's smoothing method.
         
         RSI measures the speed and magnitude of price changes.
         - RSI > 70: Overbought (potential sell signal)
@@ -28,11 +28,20 @@ class TechnicalIndicators:
             Series of RSI values
         """
         delta = prices.diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+        gains = delta.where(delta > 0, 0)
+        losses = -delta.where(delta < 0, 0)
         
-        rs = gain / loss
+        # Use Wilder's smoothing (exponential moving average with alpha = 1/period)
+        # First value is simple average, then use EMA
+        avg_gain = gains.ewm(alpha=1/period, min_periods=period, adjust=False).mean()
+        avg_loss = losses.ewm(alpha=1/period, min_periods=period, adjust=False).mean()
+        
+        rs = avg_gain / avg_loss
         rsi = 100 - (100 / (1 + rs))
+        
+        # Handle edge cases
+        rsi = rsi.replace([np.inf, -np.inf], np.nan)
+        
         return rsi
     
     @staticmethod

@@ -180,6 +180,17 @@ Preferred communication style: Simple, everyday language.
 1. **Manual Portfolio Builder**: Original functionality for selecting specific ASX stocks
 2. **Auto Portfolio Builder**: Automatic portfolio generation for maximum Sharpe ratio
 
+## Recent Changes (January 2025)
+
+**January 2, 2025**:
+- **User Authentication System**: Added secure login/register with bcrypt password hashing
+- **PostgreSQL Database**: 7 tables (users, portfolios, positions, snapshots, transactions, signals) for persistent storage
+- **My Portfolios Tab**: View saved portfolios with predicted vs actual performance comparison
+- **Individual Stock P/L Tracking**: Real-time profit/loss analysis for each position
+- **Trading Functionality**: Buy/sell stocks within portfolios with transaction history
+- **Stock Analysis Tab**: Technical indicators (RSI, MACD, Bollinger Bands) for trading signals
+- **Portfolio Saving**: Save optimized portfolios from Auto Builder to track performance over time
+
 ## Recent Changes (December 2024)
 
 **December 9, 2024**:
