@@ -17,6 +17,8 @@ import io
 from stock_data import StockDataManager
 from portfolio_optimizer import PortfolioOptimizer
 from utils import format_currency, validate_investment_amount, get_asx_stock_suggestions
+from models import init_database, UserManager, PortfolioManager
+from technical_indicators import TechnicalIndicators
 
 # Page configuration
 st.set_page_config(
@@ -26,6 +28,12 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# Initialize database on first run
+try:
+    init_database()
+except Exception as e:
+    pass  # Database may already be initialized
+
 # Initialize session state
 if 'selected_stocks' not in st.session_state:
     st.session_state.selected_stocks = []
@@ -34,18 +42,101 @@ if 'portfolio_optimized' not in st.session_state:
 if 'optimization_results' not in st.session_state:
     st.session_state.optimization_results = None
 
+# Authentication session state
+if 'authenticated' not in st.session_state:
+    st.session_state.authenticated = False
+if 'user' not in st.session_state:
+    st.session_state.user = None
+if 'current_portfolio_id' not in st.session_state:
+    st.session_state.current_portfolio_id = None
+
+
+def show_auth_page():
+    """Display login/register page."""
+    st.title("🇦🇺 Australian Stock Portfolio Optimizer")
+    st.markdown("### Welcome! Please login or register to continue.")
+    
+    tab1, tab2 = st.tabs(["🔐 Login", "📝 Register"])
+    
+    with tab1:
+        st.subheader("Login to Your Account")
+        with st.form("login_form"):
+            email = st.text_input("Email", placeholder="your@email.com")
+            password = st.text_input("Password", type="password")
+            submitted = st.form_submit_button("Login", use_container_width=True)
+            
+            if submitted:
+                if not email or not password:
+                    st.error("Please enter both email and password")
+                else:
+                    result = UserManager.authenticate(email, password)
+                    if result['success']:
+                        st.session_state.authenticated = True
+                        st.session_state.user = result['user']
+                        st.success("Login successful!")
+                        st.rerun()
+                    else:
+                        st.error(result['error'])
+    
+    with tab2:
+        st.subheader("Create New Account")
+        with st.form("register_form"):
+            new_email = st.text_input("Email", placeholder="your@email.com", key="reg_email")
+            display_name = st.text_input("Display Name", placeholder="Your Name")
+            new_password = st.text_input("Password", type="password", key="reg_pass")
+            confirm_password = st.text_input("Confirm Password", type="password")
+            register_submitted = st.form_submit_button("Create Account", use_container_width=True)
+            
+            if register_submitted:
+                if not new_email or not new_password:
+                    st.error("Please fill in all required fields")
+                elif len(new_password) < 6:
+                    st.error("Password must be at least 6 characters")
+                elif new_password != confirm_password:
+                    st.error("Passwords do not match")
+                else:
+                    result = UserManager.create_user(new_email, new_password, display_name)
+                    if result['success']:
+                        st.session_state.authenticated = True
+                        st.session_state.user = result['user']
+                        st.success("Account created successfully!")
+                        st.rerun()
+                    else:
+                        st.error(result['error'])
+
+
 def main():
+    # Show user info and logout in sidebar
+    with st.sidebar:
+        st.markdown(f"### 👤 {st.session_state.user['display_name']}")
+        if st.button("🚪 Logout", use_container_width=True):
+            st.session_state.authenticated = False
+            st.session_state.user = None
+            st.rerun()
+        st.divider()
+    
     st.title("🇦🇺 Australian Stock Portfolio Optimizer")
     st.markdown("Optimize your ASX portfolio using Sharpe ratio maximization")
     
     # Create tabs for different modes
-    tab1, tab2 = st.tabs(["🎯 Manual Portfolio Builder", "🤖 Auto Portfolio Builder"])
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "🎯 Manual Portfolio Builder", 
+        "🤖 Auto Portfolio Builder",
+        "📊 My Portfolios",
+        "📈 Stock Analysis"
+    ])
     
     with tab1:
         manual_portfolio_builder()
     
     with tab2:
         auto_portfolio_builder()
+    
+    with tab3:
+        portfolio_dashboard()
+    
+    with tab4:
+        stock_analysis_page()
 
 def manual_portfolio_builder():
     """Original manual stock selection and optimization"""
@@ -1405,6 +1496,430 @@ def display_auto_portfolio_results(results, investment_amount):
             st.session_state.auto_portfolio_generated = False
             st.session_state.auto_portfolio_results = None
             st.rerun()
+    
+    # Save to My Portfolios button
+    st.divider()
+    st.subheader("💾 Save Portfolio")
+    
+    portfolio_name = st.text_input(
+        "Portfolio Name",
+        value=f"Auto Portfolio {datetime.now().strftime('%Y-%m-%d')}",
+        key="save_portfolio_name"
+    )
+    
+    if st.button("💾 Save to My Portfolios", type="primary", use_container_width=True):
+        if st.session_state.authenticated and st.session_state.user:
+            result = PortfolioManager.save_portfolio(
+                user_id=st.session_state.user['id'],
+                name=portfolio_name,
+                optimization_results=results,
+                investment_amount=investment_amount,
+                mode='auto',
+                risk_tolerance='moderate'
+            )
+            if result['success']:
+                st.success(f"✅ Portfolio saved! Go to 'My Portfolios' tab to track performance.")
+            else:
+                st.error(f"Failed to save: {result['error']}")
+        else:
+            st.warning("Please login to save portfolios")
+
+
+def portfolio_dashboard():
+    """Display user's saved portfolios and performance tracking."""
+    st.header("📊 My Portfolios")
+    
+    if not st.session_state.authenticated or not st.session_state.user:
+        st.warning("Please login to view your portfolios")
+        return
+    
+    user_id = st.session_state.user['id']
+    portfolios = PortfolioManager.get_user_portfolios(user_id)
+    
+    if not portfolios:
+        st.info("You haven't saved any portfolios yet. Generate a portfolio and save it to track its performance!")
+        return
+    
+    # Portfolio selector
+    portfolio_options = {f"{p['name']} ({p['created_at'].strftime('%Y-%m-%d')})": p['id'] for p in portfolios}
+    selected_portfolio_name = st.selectbox(
+        "Select Portfolio",
+        options=list(portfolio_options.keys())
+    )
+    
+    if selected_portfolio_name:
+        portfolio_id = portfolio_options[selected_portfolio_name]
+        details = PortfolioManager.get_portfolio_details(portfolio_id, user_id)
+        
+        if details:
+            portfolio = details['portfolio']
+            positions = details['positions']
+            snapshots = details['snapshots']
+            transactions = details['transactions']
+            
+            # Portfolio overview
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric("Initial Investment", f"${float(portfolio['initial_investment']):,.2f}")
+            
+            with col2:
+                exp_return = float(portfolio['expected_return'] or 0) * 100
+                st.metric("Expected Return", f"{exp_return:.2f}%")
+            
+            with col3:
+                exp_sharpe = float(portfolio['expected_sharpe'] or 0)
+                st.metric("Expected Sharpe", f"{exp_sharpe:.2f}")
+            
+            with col4:
+                st.metric("Positions", len([p for p in positions if p['status'] == 'active']))
+            
+            # Update portfolio with current prices
+            if st.button("🔄 Update with Current Prices"):
+                with st.spinner("Fetching current prices..."):
+                    current_prices = {}
+                    for pos in positions:
+                        if pos['status'] == 'active':
+                            try:
+                                ticker = yf.Ticker(pos['symbol'])
+                                hist = ticker.history(period='1d')
+                                if not hist.empty:
+                                    current_prices[pos['symbol']] = hist['Close'].iloc[-1]
+                            except:
+                                pass
+                    
+                    if current_prices:
+                        result = PortfolioManager.update_portfolio_snapshot(portfolio_id, current_prices)
+                        if result['success']:
+                            st.success(f"Portfolio updated! Current value: ${result['total_value']:,.2f} ({result['cumulative_return']:+.2f}%)")
+                            st.rerun()
+                        else:
+                            st.error(result['error'])
+            
+            st.divider()
+            
+            # Predicted vs Actual Performance
+            st.subheader("📈 Predicted vs Actual Performance")
+            
+            if snapshots:
+                snapshot_df = pd.DataFrame(snapshots)
+                snapshot_df['snapshot_date'] = pd.to_datetime(snapshot_df['snapshot_date'])
+                snapshot_df = snapshot_df.sort_values('snapshot_date')
+                
+                fig = go.Figure()
+                
+                fig.add_trace(go.Scatter(
+                    x=snapshot_df['snapshot_date'],
+                    y=snapshot_df['cumulative_return'],
+                    name='Actual Return',
+                    line=dict(color='#00CC66', width=2)
+                ))
+                
+                expected_return_daily = float(portfolio['expected_return'] or 0) / 252
+                days = (snapshot_df['snapshot_date'].max() - snapshot_df['snapshot_date'].min()).days
+                expected_cumulative = [(expected_return_daily * i * 100) for i in range(len(snapshot_df))]
+                
+                fig.add_trace(go.Scatter(
+                    x=snapshot_df['snapshot_date'],
+                    y=expected_cumulative,
+                    name='Expected Return (Projected)',
+                    line=dict(color='#FF6B6B', width=2, dash='dash')
+                ))
+                
+                fig.update_layout(
+                    title="Portfolio Performance: Actual vs Predicted",
+                    xaxis_title="Date",
+                    yaxis_title="Cumulative Return (%)",
+                    hovermode='x unified'
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Performance metrics
+                if len(snapshot_df) > 1:
+                    actual_return = float(snapshot_df['cumulative_return'].iloc[-1])
+                    exp_return_total = expected_cumulative[-1] if expected_cumulative else 0
+                    
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Actual Return", f"{actual_return:+.2f}%")
+                    with col2:
+                        st.metric("Expected Return (Projected)", f"{exp_return_total:+.2f}%")
+                    with col3:
+                        diff = actual_return - exp_return_total
+                        st.metric("Difference", f"{diff:+.2f}%", delta=f"{diff:+.2f}%")
+            else:
+                st.info("No performance data yet. Click 'Update with Current Prices' to start tracking.")
+            
+            st.divider()
+            
+            # Individual Stock Performance
+            st.subheader("📊 Individual Stock Performance")
+            
+            active_positions = [p for p in positions if p['status'] == 'active']
+            
+            if active_positions:
+                stock_data = []
+                for pos in active_positions:
+                    symbol = pos['symbol']
+                    avg_cost = float(pos['avg_cost'])
+                    quantity = float(pos['quantity'])
+                    allocation = float(pos['allocation_amount'] or 0)
+                    
+                    try:
+                        ticker = yf.Ticker(symbol)
+                        hist = ticker.history(period='1d')
+                        current_price = hist['Close'].iloc[-1] if not hist.empty else avg_cost
+                    except:
+                        current_price = avg_cost
+                    
+                    market_value = current_price * quantity
+                    return_pct = ((current_price - avg_cost) / avg_cost) * 100 if avg_cost > 0 else 0
+                    profit_loss = market_value - allocation
+                    
+                    stock_data.append({
+                        'Symbol': symbol.replace('.AX', ''),
+                        'Shares': f"{quantity:.2f}",
+                        'Avg Cost': f"${avg_cost:.2f}",
+                        'Current Price': f"${current_price:.2f}",
+                        'Market Value': f"${market_value:,.2f}",
+                        'Return': f"{return_pct:+.2f}%",
+                        'P/L': f"${profit_loss:+,.2f}"
+                    })
+                
+                st.dataframe(pd.DataFrame(stock_data), use_container_width=True, hide_index=True)
+            
+            st.divider()
+            
+            # Trading Section
+            st.subheader("💼 Trade Stocks")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                trade_type = st.radio("Trade Type", ["Buy", "Sell"], horizontal=True)
+            
+            with col2:
+                if trade_type == "Sell":
+                    sell_options = [p['symbol'] for p in active_positions]
+                    trade_symbol = st.selectbox("Select Stock", sell_options) if sell_options else None
+                else:
+                    trade_symbol = st.text_input("Stock Symbol (e.g., CBA.AX)").upper()
+                    if trade_symbol and not trade_symbol.endswith('.AX'):
+                        trade_symbol += '.AX'
+            
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                trade_quantity = st.number_input("Quantity", min_value=0.01, value=10.0, step=1.0)
+            
+            with col2:
+                if trade_symbol:
+                    try:
+                        ticker = yf.Ticker(trade_symbol)
+                        hist = ticker.history(period='1d')
+                        current_price = hist['Close'].iloc[-1] if not hist.empty else 0
+                        trade_price = st.number_input("Price", value=float(current_price), step=0.01)
+                    except:
+                        trade_price = st.number_input("Price", value=0.0, step=0.01)
+                else:
+                    trade_price = st.number_input("Price", value=0.0, step=0.01)
+            
+            with col3:
+                st.metric("Total", f"${trade_quantity * trade_price:,.2f}")
+            
+            trade_notes = st.text_input("Notes (optional)")
+            
+            if st.button(f"Execute {trade_type} Order", type="primary"):
+                if trade_symbol and trade_quantity > 0 and trade_price > 0:
+                    result = PortfolioManager.execute_trade(
+                        portfolio_id=portfolio_id,
+                        user_id=user_id,
+                        symbol=trade_symbol,
+                        txn_type=trade_type.lower(),
+                        quantity=trade_quantity,
+                        price=trade_price,
+                        notes=trade_notes
+                    )
+                    if result['success']:
+                        st.success(result['message'])
+                        st.rerun()
+                    else:
+                        st.error(result['error'])
+                else:
+                    st.warning("Please fill in all trade details")
+            
+            # Transaction history
+            st.divider()
+            st.subheader("📜 Transaction History")
+            
+            if transactions:
+                txn_df = pd.DataFrame([{
+                    'Date': t['txn_time'].strftime('%Y-%m-%d %H:%M'),
+                    'Type': t['txn_type'].upper(),
+                    'Symbol': t['symbol'].replace('.AX', ''),
+                    'Quantity': f"{float(t['quantity']):.2f}",
+                    'Price': f"${float(t['price']):,.2f}",
+                    'Total': f"${float(t['total_amount']):,.2f}",
+                    'Notes': t['notes'] or ''
+                } for t in transactions])
+                
+                st.dataframe(txn_df, use_container_width=True, hide_index=True)
+            else:
+                st.info("No transactions yet")
+
+
+def stock_analysis_page():
+    """Technical analysis page for individual stocks."""
+    st.header("📈 Stock Analysis & Trading Signals")
+    st.markdown("Analyze individual stocks using technical indicators (RSI, MACD, Bollinger Bands)")
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        analysis_symbol = st.text_input(
+            "Enter ASX Stock Symbol",
+            placeholder="e.g., CBA, BHP, CSL"
+        ).upper()
+    
+    with col2:
+        analysis_period = st.selectbox(
+            "Analysis Period",
+            options=["3mo", "6mo", "1y", "2y"],
+            index=2
+        )
+    
+    if analysis_symbol:
+        if not analysis_symbol.endswith('.AX'):
+            analysis_symbol += '.AX'
+        
+        if st.button("🔍 Analyze Stock", type="primary"):
+            with st.spinner(f"Analyzing {analysis_symbol}..."):
+                try:
+                    ticker = yf.Ticker(analysis_symbol)
+                    hist = ticker.history(period=analysis_period)
+                    
+                    if hist.empty:
+                        st.error(f"No data found for {analysis_symbol}")
+                    else:
+                        info = ticker.info
+                        company_name = info.get('longName', analysis_symbol)
+                        
+                        st.subheader(f"{company_name} ({analysis_symbol.replace('.AX', '')})")
+                        
+                        # Current price info
+                        current_price = hist['Close'].iloc[-1]
+                        prev_close = hist['Close'].iloc[-2] if len(hist) > 1 else current_price
+                        price_change = current_price - prev_close
+                        price_change_pct = (price_change / prev_close) * 100
+                        
+                        col1, col2, col3, col4 = st.columns(4)
+                        with col1:
+                            st.metric("Current Price", f"${current_price:.2f}", f"{price_change:+.2f} ({price_change_pct:+.2f}%)")
+                        with col2:
+                            st.metric("52W High", f"${hist['High'].max():.2f}")
+                        with col3:
+                            st.metric("52W Low", f"${hist['Low'].min():.2f}")
+                        with col4:
+                            div_yield = info.get('dividendYield', 0) or 0
+                            if div_yield > 0.5:
+                                div_yield = div_yield / 100
+                            st.metric("Div Yield", f"{div_yield*100:.2f}%")
+                        
+                        # Technical Analysis
+                        analysis = TechnicalIndicators.analyze_stock(hist, analysis_symbol)
+                        
+                        st.divider()
+                        
+                        # Overall Signal
+                        signal = analysis['overall_signal']
+                        signal_color = {'buy': '🟢', 'sell': '🔴', 'hold': '🟡'}
+                        st.subheader(f"Overall Signal: {signal_color.get(signal, '⚪')} {signal.upper()}")
+                        
+                        # Active signals
+                        if analysis.get('active_signals'):
+                            st.markdown("**Active Signals:**")
+                            for indicator, sig, strength in analysis['active_signals']:
+                                st.markdown(f"- **{indicator}**: {sig.upper()} ({strength})")
+                        
+                        st.divider()
+                        
+                        # Price chart with indicators
+                        st.subheader("📊 Price Chart with Indicators")
+                        
+                        fig = make_subplots(
+                            rows=3, cols=1,
+                            shared_xaxes=True,
+                            vertical_spacing=0.05,
+                            row_heights=[0.5, 0.25, 0.25],
+                            subplot_titles=('Price & Bollinger Bands', 'MACD', 'RSI')
+                        )
+                        
+                        # Bollinger Bands
+                        upper, middle, lower = TechnicalIndicators.calculate_bollinger_bands(hist['Close'])
+                        
+                        fig.add_trace(go.Scatter(x=hist.index, y=upper, name='Upper BB', line=dict(color='rgba(173, 204, 255, 0.5)')), row=1, col=1)
+                        fig.add_trace(go.Scatter(x=hist.index, y=lower, name='Lower BB', line=dict(color='rgba(173, 204, 255, 0.5)'), fill='tonexty', fillcolor='rgba(173, 204, 255, 0.2)'), row=1, col=1)
+                        fig.add_trace(go.Scatter(x=hist.index, y=hist['Close'], name='Price', line=dict(color='#00CC66', width=2)), row=1, col=1)
+                        fig.add_trace(go.Scatter(x=hist.index, y=TechnicalIndicators.calculate_sma(hist['Close'], 20), name='SMA 20', line=dict(color='orange', width=1)), row=1, col=1)
+                        
+                        # MACD
+                        macd_line, signal_line, histogram = TechnicalIndicators.calculate_macd(hist['Close'])
+                        colors_macd = ['green' if val >= 0 else 'red' for val in histogram]
+                        fig.add_trace(go.Bar(x=hist.index, y=histogram, name='MACD Histogram', marker_color=colors_macd), row=2, col=1)
+                        fig.add_trace(go.Scatter(x=hist.index, y=macd_line, name='MACD', line=dict(color='blue', width=1)), row=2, col=1)
+                        fig.add_trace(go.Scatter(x=hist.index, y=signal_line, name='Signal', line=dict(color='orange', width=1)), row=2, col=1)
+                        
+                        # RSI
+                        rsi = TechnicalIndicators.calculate_rsi(hist['Close'])
+                        fig.add_trace(go.Scatter(x=hist.index, y=rsi, name='RSI', line=dict(color='purple', width=1)), row=3, col=1)
+                        fig.add_hline(y=70, line_dash="dash", line_color="red", row=3, col=1)
+                        fig.add_hline(y=30, line_dash="dash", line_color="green", row=3, col=1)
+                        
+                        fig.update_layout(height=700, showlegend=True, hovermode='x unified')
+                        fig.update_yaxes(title_text="Price ($)", row=1, col=1)
+                        fig.update_yaxes(title_text="MACD", row=2, col=1)
+                        fig.update_yaxes(title_text="RSI", row=3, col=1)
+                        
+                        st.plotly_chart(fig, use_container_width=True)
+                        
+                        # Detailed Indicator Values
+                        st.divider()
+                        st.subheader("📋 Indicator Details")
+                        
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            st.markdown("**RSI (Relative Strength Index)**")
+                            rsi_info = analysis['indicators']['rsi']
+                            st.write(f"Current Value: {rsi_info['value']:.2f}")
+                            st.write(rsi_info['signal']['explanation'])
+                        
+                        with col2:
+                            st.markdown("**MACD (Moving Average Convergence Divergence)**")
+                            macd_info = analysis['indicators']['macd']
+                            st.write(f"MACD Line: {macd_info['macd_line']:.4f}")
+                            st.write(f"Signal Line: {macd_info['signal_line']:.4f}")
+                            st.write(f"Histogram: {macd_info['histogram']:.4f}")
+                            st.write(macd_info['signal']['explanation'])
+                        
+                        # Moving Averages
+                        st.markdown("**Moving Averages**")
+                        ma_info = analysis['indicators']['moving_averages']
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.write(f"SMA 20: ${ma_info['sma_20']:.2f} ({ma_info['price_vs_sma20']})")
+                        with col2:
+                            st.write(f"SMA 50: ${ma_info['sma_50']:.2f} ({ma_info['price_vs_sma50']})")
+                        with col3:
+                            st.write(f"Trend: {analysis['trend'].upper()}")
+                        
+                except Exception as e:
+                    st.error(f"Error analyzing stock: {str(e)}")
+
 
 if __name__ == "__main__":
-    main()
+    if st.session_state.authenticated:
+        main()
+    else:
+        show_auth_page()
