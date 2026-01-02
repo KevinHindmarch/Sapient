@@ -390,21 +390,23 @@ class PortfolioManager:
             
             for pos in positions:
                 symbol = pos['symbol']
-                current_price = current_prices.get(symbol, float(pos['avg_cost']))
+                # Convert all values to Python floats to avoid numpy type issues
+                current_price = float(current_prices.get(symbol, float(pos['avg_cost'])))
                 quantity = float(pos['quantity'])
-                market_value = current_price * quantity
+                market_value = float(current_price * quantity)
                 total_value += market_value
                 
-                return_pct = ((current_price - float(pos['avg_cost'])) / float(pos['avg_cost'])) * 100 if float(pos['avg_cost']) > 0 else 0
+                avg_cost = float(pos['avg_cost'])
+                return_pct = float(((current_price - avg_cost) / avg_cost) * 100) if avg_cost > 0 else 0.0
                 
                 cur.execute("""
                     INSERT INTO position_snapshots (portfolio_position_id, snapshot_date, price, market_value, return_pct)
                     VALUES (%s, %s, %s, %s, %s)
                     ON CONFLICT (portfolio_position_id, snapshot_date) 
                     DO UPDATE SET price = EXCLUDED.price, market_value = EXCLUDED.market_value, return_pct = EXCLUDED.return_pct
-                """, (pos['id'], today, current_price, market_value, return_pct))
+                """, (pos['id'], today, float(current_price), float(market_value), float(return_pct)))
             
-            cumulative_return = ((total_value - initial_investment) / initial_investment) * 100 if initial_investment > 0 else 0
+            cumulative_return = float(((total_value - initial_investment) / initial_investment) * 100) if initial_investment > 0 else 0.0
             
             cur.execute("""
                 SELECT cumulative_return FROM portfolio_snapshots 
@@ -413,15 +415,15 @@ class PortfolioManager:
             """, (portfolio_id, today))
             
             prev = cur.fetchone()
-            prev_cum_return = float(prev['cumulative_return']) if prev else 0
-            daily_return = cumulative_return - prev_cum_return
+            prev_cum_return = float(prev['cumulative_return']) if prev else 0.0
+            daily_return = float(cumulative_return - prev_cum_return)
             
             cur.execute("""
                 INSERT INTO portfolio_snapshots (portfolio_id, snapshot_date, total_value, daily_return, cumulative_return)
                 VALUES (%s, %s, %s, %s, %s)
                 ON CONFLICT (portfolio_id, snapshot_date)
                 DO UPDATE SET total_value = EXCLUDED.total_value, daily_return = EXCLUDED.daily_return, cumulative_return = EXCLUDED.cumulative_return
-            """, (portfolio_id, today, total_value, daily_return, cumulative_return))
+            """, (portfolio_id, today, float(total_value), float(daily_return), float(cumulative_return)))
             
             conn.commit()
             return {'success': True, 'total_value': total_value, 'cumulative_return': cumulative_return}
