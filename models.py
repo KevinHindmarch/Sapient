@@ -216,6 +216,12 @@ class PortfolioManager:
         cur = conn.cursor(cursor_factory=RealDictCursor)
         
         try:
+            # Convert numpy types to Python native types for PostgreSQL
+            expected_return = float(optimization_results.get('expected_return', 0) or 0)
+            volatility = float(optimization_results.get('volatility', 0) or 0)
+            sharpe_ratio = float(optimization_results.get('sharpe_ratio', 0) or 0)
+            dividend_yield = float(optimization_results.get('portfolio_dividend_yield', 0) or 0)
+            
             cur.execute("""
                 INSERT INTO portfolios (
                     user_id, name, mode, initial_investment, 
@@ -225,11 +231,11 @@ class PortfolioManager:
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
             """, (
-                user_id, name, mode, investment_amount,
-                optimization_results.get('expected_return', 0),
-                optimization_results.get('volatility', 0),
-                optimization_results.get('sharpe_ratio', 0),
-                optimization_results.get('portfolio_dividend_yield', 0),
+                user_id, name, mode, float(investment_amount),
+                expected_return,
+                volatility,
+                sharpe_ratio,
+                dividend_yield,
                 risk_tolerance
             ))
             
@@ -241,20 +247,21 @@ class PortfolioManager:
             # Fetch current prices for each stock
             import yfinance as yf
             for symbol, weight in weights.items():
-                if weight < 0.001:  # Skip negligible weights
+                weight_float = float(weight)
+                if weight_float < 0.001:  # Skip negligible weights
                     continue
                     
-                allocation_amount = weight * investment_amount
+                allocation_amount = weight_float * float(investment_amount)
                 
                 # Get current price for the stock
                 try:
                     ticker = yf.Ticker(symbol)
                     hist = ticker.history(period='1d')
-                    current_price = hist['Close'].iloc[-1] if not hist.empty else 0
+                    current_price = float(hist['Close'].iloc[-1]) if not hist.empty else 0.0
                 except:
-                    current_price = 0
+                    current_price = 0.0
                 
-                quantity = allocation_amount / current_price if current_price > 0 else 0
+                quantity = allocation_amount / current_price if current_price > 0 else 0.0
                 
                 cur.execute("""
                     INSERT INTO portfolio_positions (
@@ -265,10 +272,10 @@ class PortfolioManager:
                 """, (
                     portfolio_id,
                     symbol,
-                    quantity,
-                    current_price,
-                    weight,
-                    allocation_amount
+                    float(quantity),
+                    float(current_price),
+                    float(weight_float),
+                    float(allocation_amount)
                 ))
             
             cur.execute("""
@@ -276,7 +283,7 @@ class PortfolioManager:
                     portfolio_id, txn_type, symbol, quantity, price, total_amount, notes
                 )
                 VALUES (%s, 'buy', 'PORTFOLIO_INIT', 1, %s, %s, 'Initial portfolio creation')
-            """, (portfolio_id, investment_amount, investment_amount))
+            """, (portfolio_id, float(investment_amount), float(investment_amount)))
             
             conn.commit()
             return {'success': True, 'portfolio_id': portfolio_id}
