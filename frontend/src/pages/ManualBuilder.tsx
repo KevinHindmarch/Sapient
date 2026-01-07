@@ -5,7 +5,7 @@ import { z } from 'zod'
 import { stocksApi, portfolioApi } from '../lib/api'
 import { OptimizationResult } from '../types'
 import { toast } from 'sonner'
-import { Search, X, TrendingUp, Save, AlertTriangle, CheckCircle, Info } from 'lucide-react'
+import { Search, X, TrendingUp, Save, AlertTriangle, CheckCircle, Info, Loader2 } from 'lucide-react'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts'
 
 const COLORS = ['#0ea5e9', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#6366f1', '#14b8a6']
@@ -265,8 +265,12 @@ export default function ManualBuilder() {
               disabled={optimizing || selectedStocks.length < 2}
               className="btn-primary mt-4 flex items-center gap-2"
             >
-              <TrendingUp className="w-5 h-5" />
-              {optimizing ? 'Optimizing...' : 'Optimize Portfolio'}
+              {optimizing ? (
+                <Loader2 className="w-5 h-5 animate-spin" />
+              ) : (
+                <TrendingUp className="w-5 h-5" />
+              )}
+              {optimizing ? 'Fetching market data & optimizing...' : 'Optimize Portfolio'}
             </button>
           </form>
         </div>
@@ -397,8 +401,9 @@ export default function ManualBuilder() {
               <button
                 onClick={savePortfolio}
                 disabled={saving || !portfolioName.trim()}
-                className="btn-success flex-1"
+                className="btn-success flex-1 flex items-center justify-center gap-2"
               >
+                {saving && <Loader2 className="w-4 h-4 animate-spin" />}
                 {saving ? 'Saving...' : 'Save'}
               </button>
             </div>
