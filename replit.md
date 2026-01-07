@@ -49,23 +49,28 @@ The application has been rewritten from Streamlit to a modern **React + FastAPI*
 
 ### Running the Application
 
-**Development Mode** (run both services):
+**Production Mode** (FastAPI serves built React frontend):
 ```bash
-python run_dev.py
+python server.py
 ```
+This runs on port 5000 and serves both API and frontend.
 
-**Backend only**:
+**Development Mode** (separate servers for hot reload):
 ```bash
+# Terminal 1: Backend on port 8000
 uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
-```
 
-**Frontend only**:
-```bash
+# Terminal 2: Frontend on port 5000 (proxies /api to backend)
 cd frontend && npm run dev
 ```
 
+**Build Frontend**:
+```bash
+cd frontend && npm run build
+```
+
 ### Legacy Streamlit Application
-The original Streamlit app (`app.py`) is still available and runs on port 5000 via the Server workflow.
+The original Streamlit app (`app.py`) is still available. The current Server workflow runs Streamlit. To use the React+FastAPI version, change the workflow command to `python server.py`.
 
 ## Frontend Pages
 
