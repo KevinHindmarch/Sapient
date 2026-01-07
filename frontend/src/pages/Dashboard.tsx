@@ -29,50 +29,50 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-slate-900">
-          Welcome back, {user?.display_name || 'Investor'}!
+      <div className="page-header">
+        <h1 className="page-title">
+          Welcome back, <span className="gradient-text">{user?.display_name || 'Investor'}</span>!
         </h1>
-        <p className="text-slate-600 mt-1">
+        <p className="page-subtitle">
           Manage your ASX portfolio with intelligent optimization
         </p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="card">
-          <div className="flex items-center gap-3">
-            <div className="p-3 bg-sky-100 rounded-lg">
-              <Briefcase className="w-6 h-6 text-sky-600" />
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="stat-card">
+          <div className="flex items-center gap-4">
+            <div className="p-4 bg-gradient-to-br from-sky-400 to-sky-600 rounded-2xl shadow-lg">
+              <Briefcase className="w-7 h-7 text-white" />
             </div>
             <div>
-              <p className="text-sm text-slate-600">Total Portfolios</p>
-              <p className="text-2xl font-bold text-slate-900">{portfolios.length}</p>
+              <p className="text-sm font-medium text-slate-500">Total Portfolios</p>
+              <p className="stat-value">{portfolios.length}</p>
             </div>
           </div>
         </div>
 
-        <div className="card">
-          <div className="flex items-center gap-3">
-            <div className="p-3 bg-emerald-100 rounded-lg">
-              <TrendingUp className="w-6 h-6 text-emerald-600" />
+        <div className="stat-card">
+          <div className="flex items-center gap-4">
+            <div className="p-4 bg-gradient-to-br from-emerald-400 to-emerald-600 rounded-2xl shadow-lg">
+              <TrendingUp className="w-7 h-7 text-white" />
             </div>
             <div>
-              <p className="text-sm text-slate-600">Total Invested</p>
-              <p className="text-2xl font-bold text-slate-900">
+              <p className="text-sm font-medium text-slate-500">Total Invested</p>
+              <p className="stat-value">
                 ${totalInvestment.toLocaleString()}
               </p>
             </div>
           </div>
         </div>
 
-        <div className="card">
-          <div className="flex items-center gap-3">
-            <div className="p-3 bg-purple-100 rounded-lg">
-              <Wand2 className="w-6 h-6 text-purple-600" />
+        <div className="stat-card">
+          <div className="flex items-center gap-4">
+            <div className="p-4 bg-gradient-to-br from-purple-400 to-purple-600 rounded-2xl shadow-lg">
+              <Wand2 className="w-7 h-7 text-white" />
             </div>
             <div>
-              <p className="text-sm text-slate-600">Active Positions</p>
-              <p className="text-2xl font-bold text-slate-900">
+              <p className="text-sm font-medium text-slate-500">Active Positions</p>
+              <p className="stat-value">
                 {portfolios.reduce((sum, p) => sum + (p.position_count || 0), 0)}
               </p>
             </div>

@@ -5,10 +5,70 @@ import { z } from 'zod'
 import { stocksApi, portfolioApi } from '../lib/api'
 import { OptimizationResult } from '../types'
 import { toast } from 'sonner'
-import { Search, X, TrendingUp, Save } from 'lucide-react'
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts'
+import { Search, X, TrendingUp, Save, AlertTriangle, CheckCircle, Info } from 'lucide-react'
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts'
 
 const COLORS = ['#0ea5e9', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#6366f1', '#14b8a6']
+
+const getCorrelationColor = (value: number): string => {
+  if (value >= 0.7) return 'bg-red-500 text-white'
+  if (value >= 0.4) return 'bg-amber-400 text-slate-900'
+  if (value >= 0) return 'bg-emerald-400 text-slate-900'
+  if (value >= -0.4) return 'bg-sky-400 text-slate-900'
+  return 'bg-blue-600 text-white'
+}
+
+const CorrelationMatrix = ({ matrix, symbols }: { matrix: number[][], symbols: string[] }) => {
+  const avgCorr = matrix.reduce((sum, row, i) => 
+    sum + row.reduce((rowSum, val, j) => i !== j ? rowSum + val : rowSum, 0), 0
+  ) / (matrix.length * (matrix.length - 1))
+  
+  return (
+    <div className="space-y-4">
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr>
+              <th className="p-2"></th>
+              {symbols.map(s => (
+                <th key={s} className="p-2 font-semibold text-slate-700 text-center">{s}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {matrix.map((row, i) => (
+              <tr key={symbols[i]}>
+                <td className="p-2 font-semibold text-slate-700">{symbols[i]}</td>
+                {row.map((val, j) => (
+                  <td key={j} className={`p-2 text-center rounded ${i === j ? 'bg-slate-200' : getCorrelationColor(val)}`}>
+                    {val.toFixed(2)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      
+      <div className={`flex items-center gap-2 p-3 rounded-lg ${
+        avgCorr < 0.3 ? 'bg-emerald-50 text-emerald-700' :
+        avgCorr < 0.5 ? 'bg-sky-50 text-sky-700' :
+        'bg-amber-50 text-amber-700'
+      }`}>
+        {avgCorr < 0.3 ? <CheckCircle className="w-5 h-5" /> :
+         avgCorr < 0.5 ? <Info className="w-5 h-5" /> :
+         <AlertTriangle className="w-5 h-5" />}
+        <span className="text-sm font-medium">
+          Avg. correlation: {avgCorr.toFixed(2)} - {
+            avgCorr < 0.3 ? 'Excellent diversification!' :
+            avgCorr < 0.5 ? 'Good diversification' :
+            'Consider adding less correlated assets'
+          }
+        </span>
+      </div>
+    </div>
+  )
+}
 
 const formSchema = z.object({
   investment_amount: z.number().min(1000, 'Minimum $1,000').max(10000000, 'Maximum $10,000,000'),
@@ -209,31 +269,38 @@ export default function ManualBuilder() {
             <>
               <div className="card">
                 <h2 className="text-lg font-semibold text-slate-900 mb-4">Portfolio Metrics</h2>
-                <div className="space-y-3">
-                  <div className="flex justify-between">
-                    <span className="text-slate-600">Expected Return</span>
-                    <span className="font-medium text-emerald-600">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-gradient-to-br from-emerald-50 to-emerald-100 p-4 rounded-xl">
+                    <p className="text-sm text-emerald-600">Expected Return</p>
+                    <p className="text-2xl font-bold text-emerald-700">
                       {(result.expected_return * 100).toFixed(2)}%
-                    </span>
+                    </p>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-600">Volatility</span>
-                    <span className="font-medium">{(result.volatility * 100).toFixed(2)}%</span>
+                  <div className="bg-gradient-to-br from-sky-50 to-sky-100 p-4 rounded-xl">
+                    <p className="text-sm text-sky-600">Sharpe Ratio</p>
+                    <p className="text-2xl font-bold text-sky-700">{result.sharpe_ratio.toFixed(3)}</p>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-600">Sharpe Ratio</span>
-                    <span className="font-medium">{result.sharpe_ratio.toFixed(3)}</span>
+                  <div className="bg-gradient-to-br from-amber-50 to-amber-100 p-4 rounded-xl">
+                    <p className="text-sm text-amber-600">Volatility</p>
+                    <p className="text-2xl font-bold text-amber-700">{(result.volatility * 100).toFixed(2)}%</p>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-600">Max Drawdown</span>
-                    <span className="font-medium text-red-600">
-                      {(result.max_drawdown * 100).toFixed(2)}%
-                    </span>
+                  <div className="bg-gradient-to-br from-red-50 to-red-100 p-4 rounded-xl">
+                    <p className="text-sm text-red-600">Max Drawdown</p>
+                    <p className="text-2xl font-bold text-red-700">{(result.max_drawdown * 100).toFixed(2)}%</p>
                   </div>
-                  <div className="flex justify-between">
+                </div>
+                
+                <div className="mt-4 p-4 bg-slate-50 rounded-xl">
+                  <div className="flex justify-between items-center">
                     <span className="text-slate-600">Dividend Yield</span>
-                    <span className="font-medium">
+                    <span className="font-semibold text-purple-600">
                       {(result.portfolio_dividend_yield * 100).toFixed(2)}%
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center mt-2">
+                    <span className="text-slate-600">Value at Risk (95%)</span>
+                    <span className="font-semibold text-slate-700">
+                      {(result.var_95 * 100).toFixed(2)}%
                     </span>
                   </div>
                 </div>
@@ -268,6 +335,29 @@ export default function ManualBuilder() {
                     <Tooltip formatter={(value: number) => `${value.toFixed(2)}%`} />
                     <Legend />
                   </PieChart>
+                </ResponsiveContainer>
+              </div>
+
+              {result.correlation_matrix && result.correlation_symbols && (
+                <div className="card">
+                  <h2 className="text-lg font-semibold text-slate-900 mb-4">Correlation Matrix</h2>
+                  <CorrelationMatrix 
+                    matrix={result.correlation_matrix} 
+                    symbols={result.correlation_symbols} 
+                  />
+                </div>
+              )}
+
+              <div className="card">
+                <h2 className="text-lg font-semibold text-slate-900 mb-4">Allocation Breakdown</h2>
+                <ResponsiveContainer width="100%" height={200}>
+                  <BarChart data={chartData} layout="vertical">
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis type="number" domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
+                    <YAxis type="category" dataKey="name" width={60} />
+                    <Tooltip formatter={(value: number) => `${value.toFixed(2)}%`} />
+                    <Bar dataKey="value" fill="#0ea5e9" radius={[0, 4, 4, 0]} />
+                  </BarChart>
                 </ResponsiveContainer>
               </div>
             </>

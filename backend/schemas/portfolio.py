@@ -21,6 +21,8 @@ class OptimizeResponse(BaseModel):
     portfolio_dividend_yield: float
     risk_tolerance: str
     optimization_success: bool
+    correlation_matrix: Optional[List[List[float]]] = None
+    correlation_symbols: Optional[List[str]] = None
 
 
 class BacktestRequest(BaseModel):

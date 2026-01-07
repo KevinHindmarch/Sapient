@@ -46,6 +46,17 @@ async def optimize_portfolio(request: OptimizeRequest):
     if result is None:
         raise HTTPException(status_code=400, detail="Optimization failed")
     
+    correlation_matrix = None
+    correlation_symbols = None
+    try:
+        returns = price_data.pct_change().dropna()
+        if len(returns) > 1:
+            corr = returns.corr()
+            correlation_matrix = corr.values.tolist()
+            correlation_symbols = [s.replace('.AX', '') for s in corr.columns.tolist()]
+    except Exception:
+        pass
+    
     return OptimizeResponse(
         weights=result['weights'],
         expected_return=result['expected_return'],
@@ -56,7 +67,9 @@ async def optimize_portfolio(request: OptimizeRequest):
         beta=result['beta'],
         portfolio_dividend_yield=result['portfolio_dividend_yield'],
         risk_tolerance=result['risk_tolerance'],
-        optimization_success=result['optimization_success']
+        optimization_success=result['optimization_success'],
+        correlation_matrix=correlation_matrix,
+        correlation_symbols=correlation_symbols
     )
 
 

@@ -32,9 +32,9 @@ export default function Layout() {
 
   return (
     <div className="min-h-screen flex">
-      <aside className="hidden lg:flex lg:flex-col lg:w-64 bg-slate-900 text-white">
-        <div className="p-6 border-b border-slate-700">
-          <h1 className="text-2xl font-bold text-sky-400">Sapient</h1>
+      <aside className="hidden lg:flex lg:flex-col lg:w-64 bg-gradient-to-b from-slate-900 via-slate-900 to-slate-800 text-white">
+        <div className="p-6 border-b border-slate-700/50">
+          <h1 className="text-2xl font-bold bg-gradient-to-r from-sky-400 to-cyan-300 bg-clip-text text-transparent">Sapient</h1>
           <p className="text-sm text-slate-400 mt-1">Smart Portfolios, Smarter Returns</p>
         </div>
         
@@ -58,13 +58,14 @@ export default function Layout() {
           ))}
         </nav>
 
-        <div className="p-4 border-t border-slate-700">
-          <div className="flex items-center gap-3 px-4 py-2 mb-2">
-            <div className="w-8 h-8 rounded-full bg-sky-500 flex items-center justify-center text-sm font-medium">
+        <div className="p-4 border-t border-slate-700/50">
+          <div className="flex items-center gap-3 px-4 py-3 mb-2 bg-slate-800/50 rounded-xl">
+            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-sky-400 to-cyan-500 flex items-center justify-center text-sm font-bold shadow-lg">
               {user?.display_name?.[0] || user?.email?.[0] || 'U'}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium truncate">{user?.display_name || user?.email}</p>
+              <p className="text-sm font-semibold truncate text-white">{user?.display_name || user?.email}</p>
+              <p className="text-xs text-slate-400">Investor</p>
             </div>
           </div>
           <button

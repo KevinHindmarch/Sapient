@@ -25,6 +25,8 @@ export interface OptimizationResult {
   portfolio_dividend_yield: number
   risk_tolerance: string
   optimization_success: boolean
+  correlation_matrix?: number[][]
+  correlation_symbols?: string[]
 }
 
 export interface BacktestResult {
