@@ -84,6 +84,8 @@ export default function ManualBuilder() {
   const [optimizing, setOptimizing] = useState(false)
   const [result, setResult] = useState<OptimizationResult | null>(null)
   const [saving, setSaving] = useState(false)
+  const [showSaveModal, setShowSaveModal] = useState(false)
+  const [portfolioName, setPortfolioName] = useState('')
 
   const { register, handleSubmit, formState: { errors }, watch } = useForm<FormData>({
     resolver: zodResolver(formSchema),
@@ -145,16 +147,21 @@ export default function ManualBuilder() {
     }
   }
 
-  const savePortfolio = async () => {
+  const openSaveModal = () => {
     if (!result) return
+    setPortfolioName('')
+    setShowSaveModal(true)
+  }
 
-    const name = prompt('Enter a name for this portfolio:')
-    if (!name) return
+  const savePortfolio = async () => {
+    if (!result || !portfolioName.trim()) return
 
     setSaving(true)
     try {
-      await portfolioApi.save(name, result, investmentAmount, 'manual', riskTolerance)
+      await portfolioApi.save(portfolioName.trim(), result, investmentAmount, 'manual', riskTolerance)
       toast.success('Portfolio saved successfully!')
+      setShowSaveModal(false)
+      setPortfolioName('')
     } catch (error: unknown) {
       const err = error as { response?: { data?: { detail?: string } } }
       toast.error(err.response?.data?.detail || 'Failed to save portfolio')
@@ -306,12 +313,12 @@ export default function ManualBuilder() {
                 </div>
 
                 <button
-                  onClick={savePortfolio}
+                  onClick={openSaveModal}
                   disabled={saving}
                   className="btn-success w-full mt-4 flex items-center justify-center gap-2"
                 >
                   <Save className="w-5 h-5" />
-                  {saving ? 'Saving...' : 'Save Portfolio'}
+                  Save Portfolio
                 </button>
               </div>
 
@@ -364,6 +371,40 @@ export default function ManualBuilder() {
           )}
         </div>
       </div>
+
+      {showSaveModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-xl">
+            <h3 className="text-xl font-bold text-slate-900 mb-4">Save Portfolio</h3>
+            <p className="text-slate-600 mb-4">Enter a name for your optimized portfolio:</p>
+            <input
+              type="text"
+              value={portfolioName}
+              onChange={(e) => setPortfolioName(e.target.value)}
+              placeholder="e.g., My ASX Portfolio"
+              className="input mb-4"
+              autoFocus
+              onKeyDown={(e) => e.key === 'Enter' && portfolioName.trim() && savePortfolio()}
+            />
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowSaveModal(false)}
+                className="btn-secondary flex-1"
+                disabled={saving}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={savePortfolio}
+                disabled={saving || !portfolioName.trim()}
+                className="btn-success flex-1"
+              >
+                {saving ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

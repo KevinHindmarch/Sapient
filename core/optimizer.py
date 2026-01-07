@@ -117,7 +117,7 @@ class PortfolioOptimizerService:
             num_assets = len(returns.columns)
             
             if num_assets < params['min_stocks']:
-                return None
+                return {'error': f"Minimum {params['min_stocks']} stocks required for {risk_tolerance} risk profile"}
             
             def objective(weights):
                 portfolio_return = np.sum(mean_returns * weights)

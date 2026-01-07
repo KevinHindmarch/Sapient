@@ -46,6 +46,9 @@ async def optimize_portfolio(request: OptimizeRequest):
     if result is None:
         raise HTTPException(status_code=400, detail="Optimization failed")
     
+    if 'error' in result:
+        raise HTTPException(status_code=400, detail=result['error'])
+    
     correlation_matrix = None
     correlation_symbols = None
     try:
