@@ -167,8 +167,11 @@ async def get_portfolio_detail(
     if result is None:
         raise HTTPException(status_code=404, detail="Portfolio not found")
     
+    portfolio_data = result['portfolio']
+    portfolio_data['position_count'] = len(result['positions'])
+    
     return PortfolioDetailResponse(
-        portfolio=PortfolioResponse(**result['portfolio']),
+        portfolio=PortfolioResponse(**portfolio_data),
         positions=[PositionResponse(**p) for p in result['positions']],
         snapshots=result['snapshots'],
         transactions=result['transactions']
@@ -191,7 +194,7 @@ async def execute_trade(
         txn_type=trade.txn_type,
         quantity=trade.quantity,
         price=trade.price,
-        notes=trade.notes
+        notes=trade.notes or ""
     )
     
     if not result['success']:

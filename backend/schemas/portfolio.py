@@ -80,14 +80,14 @@ class PortfolioResponse(BaseModel):
     name: str
     mode: str
     initial_investment: float
-    expected_return: Optional[float]
-    expected_volatility: Optional[float]
-    expected_sharpe: Optional[float]
-    expected_dividend_yield: Optional[float]
+    expected_return: Optional[float] = None
+    expected_volatility: Optional[float] = None
+    expected_sharpe: Optional[float] = None
+    expected_dividend_yield: Optional[float] = None
     risk_tolerance: str
     created_at: datetime
     status: str
-    position_count: Optional[int]
+    position_count: Optional[int] = 0
 
 
 class PortfolioDetailResponse(BaseModel):
