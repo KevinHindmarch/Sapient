@@ -97,11 +97,11 @@ export default function AutoBuilder() {
   }
 
   const chartData = result ? Object.entries(result.weights)
-    .sort(([, a], [, b]) => b - a)
+    .sort(([, a], [, b]) => (b as number) - (a as number))
     .slice(0, 8)
     .map(([symbol, weight]) => ({
       name: symbol.replace('.AX', ''),
-      value: weight * 100,
+      value: (weight as number) * 100,
     })) : []
 
   return (

@@ -2,12 +2,13 @@
 Sapient API - FastAPI Backend for Australian Stock Portfolio Optimizer
 """
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 import os
 
 import sys
-import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from backend.routers import auth, stocks, portfolio, indicators
 
@@ -34,3 +35,20 @@ app.include_router(indicators.router, prefix="/api/indicators", tags=["Technical
 @app.get("/api/health")
 async def health_check():
     return {"status": "healthy", "service": "Sapient API"}
+
+
+FRONTEND_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend", "dist")
+
+if os.path.exists(FRONTEND_DIR):
+    app.mount("/assets", StaticFiles(directory=os.path.join(FRONTEND_DIR, "assets")), name="assets")
+
+    @app.get("/{full_path:path}")
+    async def serve_frontend(request: Request, full_path: str):
+        if full_path.startswith("api/"):
+            return {"error": "Not found"}
+        
+        file_path = os.path.join(FRONTEND_DIR, full_path)
+        if os.path.isfile(file_path):
+            return FileResponse(file_path)
+        
+        return FileResponse(os.path.join(FRONTEND_DIR, "index.html"))

@@ -105,7 +105,7 @@ export default function ManualBuilder() {
 
   const chartData = result ? Object.entries(result.weights).map(([symbol, weight]) => ({
     name: symbol.replace('.AX', ''),
-    value: weight * 100,
+    value: (weight as number) * 100,
   })) : []
 
   return (
