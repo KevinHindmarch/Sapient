@@ -77,7 +77,6 @@ ASX200_STOCKS = {
     'CPU.AX': ('Computershare', 'Information Technology'),
     'WTC.AX': ('WiseTech Global', 'Information Technology'),
     'JHX.AX': ('James Hardie', 'Materials'),
-    'NCM.AX': ('Newcrest Mining', 'Materials'),
     'STO.AX': ('Santos', 'Energy'),
     'S32.AX': ('South32', 'Materials'),
     'MIN.AX': ('Mineral Resources', 'Materials'),
@@ -143,6 +142,13 @@ class StockDataService:
                     data = data['Close']
                 else:
                     return None
+            
+            # Remove columns (stocks) with too much missing data (>50% NaN)
+            valid_threshold = len(data) * 0.5
+            valid_columns = [col for col in data.columns if data[col].notna().sum() >= valid_threshold]
+            if len(valid_columns) == 0:
+                return None
+            data = data[valid_columns]
             
             return data.dropna()
             

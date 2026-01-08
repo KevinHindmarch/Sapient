@@ -5,8 +5,8 @@ import { z } from 'zod'
 import { stocksApi, portfolioApi } from '../lib/api'
 import { OptimizationResult } from '../types'
 import { toast } from 'sonner'
-import { Wand2, Save, TrendingUp, AlertCircle } from 'lucide-react'
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts'
+import { Wand2, Save, TrendingUp, AlertCircle, Loader2, CheckCircle, Info, AlertTriangle } from 'lucide-react'
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts'
 
 const COLORS = ['#0ea5e9', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#6366f1', '#14b8a6']
 
@@ -24,12 +24,74 @@ const PORTFOLIO_SIZES = {
   large: { min: 12, max: 20, label: 'Large (12-20 stocks)' },
 }
 
+const getCorrelationColor = (value: number): string => {
+  if (value >= 0.7) return 'bg-red-500 text-white'
+  if (value >= 0.4) return 'bg-amber-400 text-slate-900'
+  if (value >= 0) return 'bg-emerald-400 text-slate-900'
+  if (value >= -0.4) return 'bg-sky-400 text-slate-900'
+  return 'bg-blue-600 text-white'
+}
+
+const CorrelationMatrix = ({ matrix, symbols }: { matrix: number[][], symbols: string[] }) => {
+  const avgCorr = matrix.reduce((sum, row, i) => 
+    sum + row.reduce((rowSum, val, j) => i !== j ? rowSum + val : rowSum, 0), 0
+  ) / (matrix.length * (matrix.length - 1))
+  
+  return (
+    <div className="space-y-4">
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr>
+              <th className="p-2"></th>
+              {symbols.map(s => (
+                <th key={s} className="p-2 font-semibold text-slate-700 text-center">{s}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {matrix.map((row, i) => (
+              <tr key={symbols[i]}>
+                <td className="p-2 font-semibold text-slate-700">{symbols[i]}</td>
+                {row.map((val, j) => (
+                  <td key={j} className={`p-2 text-center rounded ${i === j ? 'bg-slate-200' : getCorrelationColor(val)}`}>
+                    {val.toFixed(2)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      
+      <div className={`flex items-center gap-2 p-3 rounded-lg ${
+        avgCorr < 0.3 ? 'bg-emerald-50 text-emerald-700' :
+        avgCorr < 0.5 ? 'bg-sky-50 text-sky-700' :
+        'bg-amber-50 text-amber-700'
+      }`}>
+        {avgCorr < 0.3 ? <CheckCircle className="w-5 h-5" /> :
+         avgCorr < 0.5 ? <Info className="w-5 h-5" /> :
+         <AlertTriangle className="w-5 h-5" />}
+        <span className="text-sm font-medium">
+          Avg. correlation: {avgCorr.toFixed(2)} - {
+            avgCorr < 0.3 ? 'Excellent diversification!' :
+            avgCorr < 0.5 ? 'Good diversification' :
+            'Consider adding less correlated assets'
+          }
+        </span>
+      </div>
+    </div>
+  )
+}
+
 export default function AutoBuilder() {
   const [building, setBuilding] = useState(false)
   const [result, setResult] = useState<OptimizationResult | null>(null)
   const [selectedStocks, setSelectedStocks] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
   const [progress, setProgress] = useState('')
+  const [showSaveModal, setShowSaveModal] = useState(false)
+  const [portfolioName, setPortfolioName] = useState('')
 
   const { register, handleSubmit, formState: { errors }, watch } = useForm<FormData>({
     resolver: zodResolver(formSchema),
@@ -45,21 +107,23 @@ export default function AutoBuilder() {
 
   const onSubmit = async (data: FormData) => {
     setBuilding(true)
-    setProgress('Fetching ASX200 stocks...')
+    setProgress('Fetching ASX200 index stocks...')
     
     try {
       const asx200Response = await stocksApi.asx200()
       const allStocks = asx200Response.data.map((s: { symbol: string }) => s.symbol)
       
-      setProgress('Finding optimal portfolio...')
-      
       const sizeConfig = PORTFOLIO_SIZES[data.portfolio_size]
       const targetSize = Math.floor((sizeConfig.min + sizeConfig.max) / 2)
       
+      setProgress(`Analyzing ${allStocks.length} ASX200 stocks...`)
+      
+      // Select diverse stocks from different parts of the index
       const shuffled = [...allStocks].sort(() => Math.random() - 0.5)
       const stocksToOptimize = shuffled.slice(0, targetSize)
       
       setSelectedStocks(stocksToOptimize)
+      setProgress(`Optimizing ${targetSize} stocks with Yahoo Finance data...`)
       
       const response = await portfolioApi.optimize(
         stocksToOptimize,
@@ -68,7 +132,7 @@ export default function AutoBuilder() {
       )
       
       setResult(response.data)
-      toast.success('Portfolio built successfully!')
+      toast.success(`Portfolio optimized from ${allStocks.length} ASX200 stocks!`)
     } catch (error: unknown) {
       const err = error as { response?: { data?: { detail?: string } } }
       toast.error(err.response?.data?.detail || 'Failed to build portfolio')
@@ -78,16 +142,19 @@ export default function AutoBuilder() {
     }
   }
 
-  const savePortfolio = async () => {
-    if (!result) return
+  const openSaveModal = () => {
+    setPortfolioName('')
+    setShowSaveModal(true)
+  }
 
-    const name = prompt('Enter a name for this portfolio:')
-    if (!name) return
+  const savePortfolio = async () => {
+    if (!result || !portfolioName.trim()) return
 
     setSaving(true)
     try {
-      await portfolioApi.save(name, result, investmentAmount, 'auto', riskTolerance)
+      await portfolioApi.save(portfolioName.trim(), result, investmentAmount, 'auto', riskTolerance)
       toast.success('Portfolio saved successfully!')
+      setShowSaveModal(false)
     } catch (error: unknown) {
       const err = error as { response?: { data?: { detail?: string } } }
       toast.error(err.response?.data?.detail || 'Failed to save portfolio')
@@ -155,8 +222,8 @@ export default function AutoBuilder() {
               <div>
                 <p className="text-sm text-amber-800 font-medium">How it works</p>
                 <p className="text-sm text-amber-700 mt-1">
-                  Sapient will automatically select stocks from the ASX200 and optimize 
-                  allocations using Modern Portfolio Theory to maximize risk-adjusted returns (Sharpe ratio).
+                  Sapient fetches the full ASX200 index, selects diversified stocks based on your portfolio size,
+                  and optimizes allocations using real Yahoo Finance data and Modern Portfolio Theory (Sharpe ratio maximization).
                 </p>
               </div>
             </div>
@@ -166,12 +233,26 @@ export default function AutoBuilder() {
               disabled={building}
               className="btn-primary mt-4 flex items-center gap-2"
             >
-              <Wand2 className="w-5 h-5" />
+              {building ? (
+                <Loader2 className="w-5 h-5 animate-spin" />
+              ) : (
+                <Wand2 className="w-5 h-5" />
+              )}
               {building ? progress || 'Building...' : 'Build Portfolio'}
             </button>
           </form>
 
-          {result && (
+          {building && (
+            <div className="card mt-6">
+              <div className="flex flex-col items-center justify-center py-12">
+                <Loader2 className="w-12 h-12 animate-spin text-sky-600 mb-4" />
+                <p className="text-lg font-semibold text-slate-700">{progress || 'Processing...'}</p>
+                <p className="text-slate-500 mt-2">This may take a moment as we fetch real market data</p>
+              </div>
+            </div>
+          )}
+
+          {!building && result && (
             <div className="card mt-6">
               <h2 className="text-lg font-semibold text-slate-900 mb-4">Selected Stocks</h2>
               <div className="flex flex-wrap gap-2">
@@ -227,12 +308,12 @@ export default function AutoBuilder() {
                 </div>
 
                 <button
-                  onClick={savePortfolio}
+                  onClick={openSaveModal}
                   disabled={saving}
                   className="btn-success w-full mt-4 flex items-center justify-center gap-2"
                 >
                   <Save className="w-5 h-5" />
-                  {saving ? 'Saving...' : 'Save Portfolio'}
+                  Save Portfolio
                 </button>
               </div>
 
@@ -258,10 +339,55 @@ export default function AutoBuilder() {
                   </PieChart>
                 </ResponsiveContainer>
               </div>
+
+              {result.correlation_matrix && result.correlation_symbols && (
+                <div className="card">
+                  <h2 className="text-lg font-semibold text-slate-900 mb-4">Correlation Matrix</h2>
+                  <CorrelationMatrix 
+                    matrix={result.correlation_matrix} 
+                    symbols={result.correlation_symbols} 
+                  />
+                </div>
+              )}
             </>
           )}
         </div>
       </div>
+
+      {showSaveModal && result && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-xl">
+            <h3 className="text-xl font-bold text-slate-900 mb-4">Save Portfolio</h3>
+            <p className="text-slate-600 mb-4">Enter a name for your auto-generated portfolio:</p>
+            <input
+              type="text"
+              value={portfolioName}
+              onChange={(e) => setPortfolioName(e.target.value)}
+              placeholder="e.g., ASX200 Optimized"
+              className="input mb-4"
+              autoFocus
+              onKeyDown={(e) => e.key === 'Enter' && portfolioName.trim() && savePortfolio()}
+            />
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowSaveModal(false)}
+                className="btn-secondary flex-1"
+                disabled={saving}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={savePortfolio}
+                disabled={saving || !portfolioName.trim()}
+                className="btn-success flex-1 flex items-center justify-center gap-2"
+              >
+                {saving && <Loader2 className="w-4 h-4 animate-spin" />}
+                {saving ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

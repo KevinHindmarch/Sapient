@@ -276,7 +276,17 @@ export default function ManualBuilder() {
         </div>
 
         <div className="space-y-6">
-          {result && (
+          {optimizing && (
+            <div className="card">
+              <div className="flex flex-col items-center justify-center py-12">
+                <Loader2 className="w-12 h-12 animate-spin text-sky-600 mb-4" />
+                <p className="text-lg font-semibold text-slate-700">Fetching market data from Yahoo Finance...</p>
+                <p className="text-slate-500 mt-2">Running portfolio optimization algorithm</p>
+              </div>
+            </div>
+          )}
+          
+          {!optimizing && result && (
             <>
               <div className="card">
                 <h2 className="text-lg font-semibold text-slate-900 mb-4">Portfolio Metrics</h2>
@@ -376,7 +386,7 @@ export default function ManualBuilder() {
         </div>
       </div>
 
-      {showSaveModal && (
+      {showSaveModal && result && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-xl">
             <h3 className="text-xl font-bold text-slate-900 mb-4">Save Portfolio</h3>
