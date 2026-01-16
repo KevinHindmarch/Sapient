@@ -83,8 +83,9 @@ async def rank_stocks_by_performance():
     """
     Rank all ASX200 stocks by their individual Sharpe ratio.
     Returns stocks sorted by best risk-adjusted returns.
+    Uses 3 years of historical data for more reliable analysis.
     """
     asx200_symbols = [s["symbol"] for s in StockDataService.get_asx200_stocks()]
-    rankings = StockDataService.rank_stocks_by_sharpe(asx200_symbols, period="2y")
+    rankings = StockDataService.rank_stocks_by_sharpe(asx200_symbols, period="3y")
     
     return {"rankings": rankings, "total_analyzed": len(rankings)}
