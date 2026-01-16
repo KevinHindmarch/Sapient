@@ -420,6 +420,13 @@ class PortfolioService:
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 """, (portfolio_id, position_id, txn_type, symbol, quantity, price, total_amount, notes))
                 
+                if txn_type == 'buy':
+                    cur.execute("""
+                        UPDATE portfolios 
+                        SET initial_investment = initial_investment + %s
+                        WHERE id = %s
+                    """, (total_amount, portfolio_id))
+                
                 conn.commit()
                 return {'success': True, 'message': f'{txn_type.upper()} order executed'}
             except Exception as e:
@@ -476,6 +483,13 @@ class PortfolioService:
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                     """, (portfolio_id, position_id, txn_type, position['symbol'], 
                           txn_qty, new_avg_cost, txn_qty * new_avg_cost, 'Position adjustment'))
+                    
+                    if txn_type == 'buy':
+                        cur.execute("""
+                            UPDATE portfolios 
+                            SET initial_investment = initial_investment + %s
+                            WHERE id = %s
+                        """, (txn_qty * new_avg_cost, portfolio_id))
                 
                 conn.commit()
                 return {'success': True, 'message': 'Position updated'}
