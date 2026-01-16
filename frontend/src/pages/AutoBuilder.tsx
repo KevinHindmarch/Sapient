@@ -262,19 +262,56 @@ export default function AutoBuilder() {
           )}
 
           {!building && result && (
-            <div className="card mt-6">
-              <h2 className="text-lg font-semibold text-slate-900 mb-4">Selected Stocks</h2>
-              <div className="flex flex-wrap gap-2">
-                {selectedStocks.map((symbol) => (
-                  <span
-                    key={symbol}
-                    className="px-3 py-1 bg-sky-100 text-sky-700 rounded-full text-sm"
-                  >
-                    {symbol}
-                  </span>
-                ))}
+            <>
+              <div className="card mt-6">
+                <h2 className="text-lg font-semibold text-slate-900 mb-4">Recommended Allocation</h2>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="text-left text-sm text-slate-500 border-b">
+                        <th className="pb-3 font-medium">Stock</th>
+                        <th className="pb-3 font-medium text-right">Weight</th>
+                        <th className="pb-3 font-medium text-right">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Object.entries(result.weights)
+                        .sort(([, a], [, b]) => (b as number) - (a as number))
+                        .map(([symbol, weight], index) => {
+                          const weightNum = weight as number
+                          const amount = weightNum * investmentAmount
+                          return (
+                            <tr key={symbol} className="border-b border-slate-100 last:border-0">
+                              <td className="py-3">
+                                <div className="flex items-center gap-2">
+                                  <div 
+                                    className="w-3 h-3 rounded-full" 
+                                    style={{ backgroundColor: COLORS[index % COLORS.length] }}
+                                  />
+                                  <span className="font-medium text-slate-900">{symbol.replace('.AX', '')}</span>
+                                </div>
+                              </td>
+                              <td className="py-3 text-right">
+                                <span className="font-medium text-sky-600">{(weightNum * 100).toFixed(1)}%</span>
+                              </td>
+                              <td className="py-3 text-right">
+                                <span className="text-slate-700">${amount.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                    </tbody>
+                    <tfoot>
+                      <tr className="border-t-2 border-slate-200">
+                        <td className="py-3 font-semibold text-slate-900">Total</td>
+                        <td className="py-3 text-right font-semibold text-sky-600">100%</td>
+                        <td className="py-3 text-right font-semibold text-slate-900">${investmentAmount.toLocaleString()}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
               </div>
-            </div>
+            </>
           )}
         </div>
 
