@@ -71,9 +71,11 @@ export default function Dashboard() {
               <Wand2 className="w-7 h-7 text-white" />
             </div>
             <div>
-              <p className="text-sm font-medium text-slate-500">Return Generated</p>
-              <p className="stat-value">
-                {portfolios.reduce((sum, p) => sum + (p.position_count || 0), 0)}
+              <p className="text-sm font-medium text-slate-500">Avg Expected Return</p>
+              <p className="stat-value text-emerald-600">
+                {portfolios.length > 0 
+                  ? `+${(portfolios.reduce((sum, p) => sum + (Number(p.expected_return) || 0), 0) / portfolios.length * 100).toFixed(1)}%`
+                  : '0%'}
               </p>
             </div>
           </div>
