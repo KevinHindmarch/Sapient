@@ -35,11 +35,8 @@ export default function Layout() {
       <aside className="hidden lg:flex lg:flex-col lg:w-64 bg-gradient-to-b from-slate-900 via-slate-900 to-slate-800 text-white">
         <div className="p-4 border-b border-slate-700/50">
           <div className="flex items-center gap-3">
-            <img src="/logo.png" alt="Sapient" className="w-12 h-12 rounded-lg" />
-            <div>
-              <h1 className="text-xl font-bold bg-gradient-to-r from-sky-400 to-cyan-300 bg-clip-text text-transparent">Sapient</h1>
-              <p className="text-xs text-slate-400">Smart Portfolios, Smarter Returns</p>
-            </div>
+            <img src="/logo.png" alt="Sapient" className="w-24 h-24 rounded-xl" />
+            <h1 className="text-2xl font-bold bg-gradient-to-r from-sky-400 to-cyan-300 bg-clip-text text-transparent">Sapient</h1>
           </div>
         </div>
         
