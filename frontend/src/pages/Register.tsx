@@ -51,6 +51,7 @@ export default function Register() {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 to-slate-800 px-4">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
+          <img src="/logo.png" alt="Sapient" className="w-20 h-20 mx-auto mb-4 rounded-xl" />
           <h1 className="text-4xl font-bold text-sky-400">Sapient</h1>
           <p className="text-slate-400 mt-2">Smart Portfolios, Smarter Returns</p>
         </div>

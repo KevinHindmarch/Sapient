@@ -33,9 +33,14 @@ export default function Layout() {
   return (
     <div className="min-h-screen flex">
       <aside className="hidden lg:flex lg:flex-col lg:w-64 bg-gradient-to-b from-slate-900 via-slate-900 to-slate-800 text-white">
-        <div className="p-6 border-b border-slate-700/50">
-          <h1 className="text-2xl font-bold bg-gradient-to-r from-sky-400 to-cyan-300 bg-clip-text text-transparent">Sapient</h1>
-          <p className="text-sm text-slate-400 mt-1">Smart Portfolios, Smarter Returns</p>
+        <div className="p-4 border-b border-slate-700/50">
+          <div className="flex items-center gap-3">
+            <img src="/logo.png" alt="Sapient" className="w-12 h-12 rounded-lg" />
+            <div>
+              <h1 className="text-xl font-bold bg-gradient-to-r from-sky-400 to-cyan-300 bg-clip-text text-transparent">Sapient</h1>
+              <p className="text-xs text-slate-400">Smart Portfolios, Smarter Returns</p>
+            </div>
+          </div>
         </div>
         
         <nav className="flex-1 p-4 space-y-1">
@@ -87,6 +92,7 @@ export default function Layout() {
             >
               {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
             </button>
+            <img src="/logo.png" alt="Sapient" className="w-8 h-8 rounded" />
             <h1 className="text-xl font-bold text-sky-500">Sapient</h1>
           </div>
         </header>
