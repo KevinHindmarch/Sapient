@@ -5,7 +5,8 @@ import { Portfolio, Position, Transaction } from '../types'
 import { toast } from 'sonner'
 import { ArrowLeft, TrendingUp, TrendingDown, DollarSign, Pencil, Trash2, Plus, X, Search } from 'lucide-react'
 import { format } from 'date-fns'
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts'
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, LineChart, Line, XAxis, YAxis, CartesianGrid } from 'recharts'
+import { differenceInDays } from 'date-fns'
 
 const COLORS = ['#0ea5e9', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#6366f1', '#14b8a6']
 
@@ -238,6 +239,63 @@ export default function PortfolioDetail() {
   const totalReturn = totalValue - Number(portfolio.initial_investment)
   const totalReturnPct = (totalReturn / Number(portfolio.initial_investment)) * 100
 
+  const generateGrowthData = () => {
+    const initial = Number(portfolio.initial_investment)
+    const expectedReturn = Number(portfolio.expected_return || 0.10)
+    const createdAt = new Date(portfolio.created_at)
+    const today = new Date()
+    const daysSinceCreation = differenceInDays(today, createdAt)
+    
+    const dataPoints: { date: string; expected: number; actual: number | null }[] = []
+    
+    const snapshotMap = new Map<string, number>()
+    if (data?.snapshots) {
+      data.snapshots.forEach((s: Record<string, unknown>) => {
+        const dateStr = format(new Date(s.snapshot_date as string), 'MMM d')
+        snapshotMap.set(dateStr, Number(s.total_value))
+      })
+    }
+    
+    const dailyRate = expectedReturn / 365
+    const numPoints = Math.min(Math.max(daysSinceCreation, 1), 365)
+    const interval = Math.max(1, Math.floor(numPoints / 30))
+    
+    for (let i = 0; i <= numPoints; i += interval) {
+      const date = new Date(createdAt)
+      date.setDate(date.getDate() + i)
+      const dateStr = format(date, 'MMM d')
+      
+      const expectedValue = initial * (1 + dailyRate * i)
+      const actualValue = snapshotMap.get(dateStr) || null
+      
+      dataPoints.push({
+        date: dateStr,
+        expected: Math.round(expectedValue),
+        actual: actualValue ? Math.round(actualValue) : null
+      })
+    }
+    
+    const todayStr = format(today, 'MMM d')
+    const lastPoint = dataPoints[dataPoints.length - 1]
+    if (lastPoint && lastPoint.date !== todayStr) {
+      dataPoints.push({
+        date: todayStr,
+        expected: Math.round(initial * (1 + dailyRate * daysSinceCreation)),
+        actual: Math.round(totalValue)
+      })
+    } else if (lastPoint) {
+      lastPoint.actual = Math.round(totalValue)
+    }
+    
+    if (dataPoints.length > 0 && dataPoints[0].actual === null) {
+      dataPoints[0].actual = initial
+    }
+    
+    return dataPoints.filter(p => p.expected > 0)
+  }
+
+  const growthChartData = generateGrowthData()
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -306,6 +364,68 @@ export default function PortfolioDetail() {
           <p className="text-2xl font-bold text-sky-600">
             {Number(portfolio.expected_sharpe || 0).toFixed(2)}
           </p>
+        </div>
+      </div>
+
+      <div className="card">
+        <h2 className="text-lg font-semibold text-slate-900 mb-4">Portfolio Growth</h2>
+        <ResponsiveContainer width="100%" height={300}>
+          <LineChart data={growthChartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+            <XAxis 
+              dataKey="date" 
+              tick={{ fontSize: 12, fill: '#64748b' }}
+              tickLine={{ stroke: '#cbd5e1' }}
+            />
+            <YAxis 
+              tick={{ fontSize: 12, fill: '#64748b' }}
+              tickFormatter={(value) => `$${(value / 1000).toFixed(0)}k`}
+              tickLine={{ stroke: '#cbd5e1' }}
+            />
+            <Tooltip 
+              formatter={(value: number, name: string) => [
+                `$${value.toLocaleString()}`,
+                name === 'expected' ? 'Expected' : 'Actual'
+              ]}
+              contentStyle={{ 
+                backgroundColor: 'white', 
+                border: '1px solid #e2e8f0',
+                borderRadius: '8px',
+                boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'
+              }}
+            />
+            <Legend 
+              formatter={(value) => value === 'expected' ? 'Expected Growth' : 'Actual Growth'}
+            />
+            <Line 
+              type="monotone" 
+              dataKey="expected" 
+              stroke="#94a3b8" 
+              strokeWidth={2}
+              strokeDasharray="5 5"
+              dot={false}
+              name="expected"
+            />
+            <Line 
+              type="monotone" 
+              dataKey="actual" 
+              stroke="#10b981" 
+              strokeWidth={3}
+              dot={{ fill: '#10b981', strokeWidth: 2, r: 4 }}
+              connectNulls
+              name="actual"
+            />
+          </LineChart>
+        </ResponsiveContainer>
+        <div className="flex justify-center gap-6 mt-4 text-sm">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-0.5 bg-slate-400" style={{ backgroundImage: 'repeating-linear-gradient(90deg, #94a3b8 0, #94a3b8 5px, transparent 5px, transparent 10px)' }}></div>
+            <span className="text-slate-600">Expected ({((portfolio.expected_return || 0.10) * 100).toFixed(1)}% p.a.)</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-0.5 bg-emerald-500"></div>
+            <span className="text-slate-600">Actual ({totalReturnPct >= 0 ? '+' : ''}{totalReturnPct.toFixed(1)}%)</span>
+          </div>
         </div>
       </div>
 
