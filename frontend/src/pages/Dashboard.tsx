@@ -96,12 +96,30 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="stat-card">
           <div className="flex items-center gap-4">
-            <div className="p-4 bg-gradient-to-br from-sky-400 to-sky-600 rounded-2xl shadow-lg">
-              <Briefcase className="w-7 h-7 text-white" />
+            <div className={`p-4 rounded-2xl shadow-lg ${
+              totalReturn !== null && totalReturn >= 0 
+                ? 'bg-gradient-to-br from-emerald-400 to-emerald-600' 
+                : 'bg-gradient-to-br from-red-400 to-red-600'
+            }`}>
+              {totalReturn !== null && totalReturn >= 0 
+                ? <TrendingUp className="w-7 h-7 text-white" />
+                : <TrendingDown className="w-7 h-7 text-white" />
+              }
             </div>
             <div>
-              <p className="text-sm font-medium text-slate-500">Total Portfolios</p>
-              <p className="stat-value">{portfolios.length}</p>
+              <p className="text-sm font-medium text-slate-500">Total Gain</p>
+              {loadingReturns ? (
+                <div className="flex items-center gap-2">
+                  <Loader2 className="w-5 h-5 animate-spin text-slate-400" />
+                  <span className="text-sm text-slate-400">Calculating...</span>
+                </div>
+              ) : totalReturn !== null ? (
+                <p className={`stat-value ${totalReturn >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                  {totalReturn >= 0 ? '+' : ''}${Math.abs(Math.round(totalReturn)).toLocaleString()}
+                </p>
+              ) : (
+                <p className="stat-value text-slate-400">$0</p>
+              )}
             </div>
           </div>
         </div>
