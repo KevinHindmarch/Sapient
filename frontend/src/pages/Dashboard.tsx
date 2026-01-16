@@ -71,7 +71,7 @@ export default function Dashboard() {
               <Wand2 className="w-7 h-7 text-white" />
             </div>
             <div>
-              <p className="text-sm font-medium text-slate-500">Active Positions</p>
+              <p className="text-sm font-medium text-slate-500">Return Generated</p>
               <p className="stat-value">
                 {portfolios.reduce((sum, p) => sum + (p.position_count || 0), 0)}
               </p>
@@ -81,23 +81,6 @@ export default function Dashboard() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <Link to="/manual-builder" className="card hover:shadow-md transition-shadow group">
-          <div className="flex items-start gap-4">
-            <div className="p-3 bg-slate-100 rounded-lg group-hover:bg-sky-100 transition-colors">
-              <Wrench className="w-6 h-6 text-slate-600 group-hover:text-sky-600" />
-            </div>
-            <div className="flex-1">
-              <h3 className="text-lg font-semibold text-slate-900 group-hover:text-sky-600">
-                Manual Portfolio Builder
-              </h3>
-              <p className="text-slate-600 mt-1">
-                Select specific ASX stocks and optimize your portfolio with custom risk settings.
-              </p>
-            </div>
-            <ArrowRight className="w-5 h-5 text-slate-400 group-hover:text-sky-500 group-hover:translate-x-1 transition-all" />
-          </div>
-        </Link>
-
         <Link to="/auto-builder" className="card hover:shadow-md transition-shadow group">
           <div className="flex items-start gap-4">
             <div className="p-3 bg-slate-100 rounded-lg group-hover:bg-purple-100 transition-colors">
@@ -114,11 +97,28 @@ export default function Dashboard() {
             <ArrowRight className="w-5 h-5 text-slate-400 group-hover:text-purple-500 group-hover:translate-x-1 transition-all" />
           </div>
         </Link>
+
+        <Link to="/manual-builder" className="card hover:shadow-md transition-shadow group">
+          <div className="flex items-start gap-4">
+            <div className="p-3 bg-slate-100 rounded-lg group-hover:bg-sky-100 transition-colors">
+              <Wrench className="w-6 h-6 text-slate-600 group-hover:text-sky-600" />
+            </div>
+            <div className="flex-1">
+              <h3 className="text-lg font-semibold text-slate-900 group-hover:text-sky-600">
+                Manual Portfolio Builder
+              </h3>
+              <p className="text-slate-600 mt-1">
+                Select specific ASX stocks and optimize your portfolio with custom risk settings.
+              </p>
+            </div>
+            <ArrowRight className="w-5 h-5 text-slate-400 group-hover:text-sky-500 group-hover:translate-x-1 transition-all" />
+          </div>
+        </Link>
       </div>
 
       <div className="card">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xl font-semibold text-slate-900">Recent Portfolios</h2>
+          <h2 className="text-xl font-semibold text-slate-900">Active Portfolios</h2>
           <Link to="/portfolios" className="text-sky-500 hover:text-sky-600 text-sm font-medium">
             View all
           </Link>
