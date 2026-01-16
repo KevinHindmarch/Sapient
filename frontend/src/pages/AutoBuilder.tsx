@@ -88,6 +88,7 @@ export default function AutoBuilder() {
   const [building, setBuilding] = useState(false)
   const [result, setResult] = useState<OptimizationResult | null>(null)
   const [selectedStocks, setSelectedStocks] = useState<string[]>([])
+  const [stockSectors, setStockSectors] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
   const [progress, setProgress] = useState('')
   const [showSaveModal, setShowSaveModal] = useState(false)
@@ -111,7 +112,7 @@ export default function AutoBuilder() {
     
     try {
       const rankResponse = await stocksApi.rankByPerformance()
-      const rankings = rankResponse.data.rankings as Array<{symbol: string, sharpe_ratio: number, annual_return: number}>
+      const rankings = rankResponse.data.rankings as Array<{symbol: string, sharpe_ratio: number, annual_return: number, sector?: string}>
       
       if (!rankings || rankings.length === 0) {
         throw new Error('No stock data available')
@@ -122,10 +123,17 @@ export default function AutoBuilder() {
       const sizeConfig = PORTFOLIO_SIZES[data.portfolio_size]
       const targetSize = Math.floor((sizeConfig.min + sizeConfig.max) / 2)
       
-      const topStocks = rankings
+      const topRankings = rankings
         .filter(s => s.sharpe_ratio > 0)
         .slice(0, targetSize)
-        .map(s => s.symbol)
+      
+      const sectors: Record<string, string> = {}
+      topRankings.forEach(s => {
+        sectors[s.symbol] = s.sector || 'Unknown'
+      })
+      setStockSectors(sectors)
+      
+      const topStocks = topRankings.map(s => s.symbol)
       
       if (topStocks.length < 3) {
         throw new Error('Not enough stocks with positive Sharpe ratio')
@@ -270,6 +278,7 @@ export default function AutoBuilder() {
                     <thead>
                       <tr className="text-left text-sm text-slate-500 border-b">
                         <th className="pb-3 font-medium">Stock</th>
+                        <th className="pb-3 font-medium">Sector</th>
                         <th className="pb-3 font-medium text-right">Weight</th>
                         <th className="pb-3 font-medium text-right">Amount</th>
                       </tr>
@@ -280,6 +289,7 @@ export default function AutoBuilder() {
                         .map(([symbol, weight], index) => {
                           const weightNum = weight as number
                           const amount = weightNum * investmentAmount
+                          const sector = stockSectors[symbol] || 'Unknown'
                           return (
                             <tr key={symbol} className="border-b border-slate-100 last:border-0">
                               <td className="py-3">
@@ -290,6 +300,9 @@ export default function AutoBuilder() {
                                   />
                                   <span className="font-medium text-slate-900">{symbol.replace('.AX', '')}</span>
                                 </div>
+                              </td>
+                              <td className="py-3">
+                                <span className="text-sm text-slate-600">{sector}</span>
                               </td>
                               <td className="py-3 text-right">
                                 <span className="font-medium text-sky-600">{(weightNum * 100).toFixed(1)}%</span>
@@ -303,7 +316,7 @@ export default function AutoBuilder() {
                     </tbody>
                     <tfoot>
                       <tr className="border-t-2 border-slate-200">
-                        <td className="py-3 font-semibold text-slate-900">Total</td>
+                        <td className="py-3 font-semibold text-slate-900" colSpan={2}>Total</td>
                         <td className="py-3 text-right font-semibold text-sky-600">100%</td>
                         <td className="py-3 text-right font-semibold text-slate-900">${investmentAmount.toLocaleString()}</td>
                       </tr>
