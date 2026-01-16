@@ -455,9 +455,12 @@ class StockDataService:
                 else:
                     sharpe_ratio = 0
                 
-                sector = ASX200_STOCKS.get(symbol, ('Unknown', 'Unknown'))[1] if symbol in ASX200_STOCKS else 'Unknown'
+                stock_data = ASX200_STOCKS.get(symbol, ('Unknown', 'Unknown'))
+                name = stock_data[0] if symbol in ASX200_STOCKS else 'Unknown'
+                sector = stock_data[1] if symbol in ASX200_STOCKS else 'Unknown'
                 results.append({
                     'symbol': symbol,
+                    'name': name,
                     'sharpe_ratio': round(sharpe_ratio, 3),
                     'annual_return': round(mean_return * 100, 2),
                     'volatility': round(volatility * 100, 2),

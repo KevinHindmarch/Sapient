@@ -89,6 +89,7 @@ export default function AutoBuilder() {
   const [result, setResult] = useState<OptimizationResult | null>(null)
   const [selectedStocks, setSelectedStocks] = useState<string[]>([])
   const [stockSectors, setStockSectors] = useState<Record<string, string>>({})
+  const [stockNames, setStockNames] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
   const [progress, setProgress] = useState('')
   const [showSaveModal, setShowSaveModal] = useState(false)
@@ -112,7 +113,7 @@ export default function AutoBuilder() {
     
     try {
       const rankResponse = await stocksApi.rankByPerformance()
-      const rankings = rankResponse.data.rankings as Array<{symbol: string, sharpe_ratio: number, annual_return: number, sector?: string}>
+      const rankings = rankResponse.data.rankings as Array<{symbol: string, name?: string, sharpe_ratio: number, annual_return: number, sector?: string}>
       
       if (!rankings || rankings.length === 0) {
         throw new Error('No stock data available')
@@ -128,10 +129,13 @@ export default function AutoBuilder() {
         .slice(0, targetSize)
       
       const sectors: Record<string, string> = {}
+      const names: Record<string, string> = {}
       topRankings.forEach(s => {
         sectors[s.symbol] = s.sector || 'Unknown'
+        names[s.symbol] = s.name || s.symbol.replace('.AX', '')
       })
       setStockSectors(sectors)
+      setStockNames(names)
       
       const topStocks = topRankings.map(s => s.symbol)
       
@@ -298,7 +302,10 @@ export default function AutoBuilder() {
                                     className="w-3 h-3 rounded-full" 
                                     style={{ backgroundColor: COLORS[index % COLORS.length] }}
                                   />
-                                  <span className="font-medium text-slate-900">{symbol.replace('.AX', '')}</span>
+                                  <div>
+                                    <span className="font-medium text-slate-900">{symbol.replace('.AX', '')}</span>
+                                    <p className="text-xs text-slate-500">{stockNames[symbol] || ''}</p>
+                                  </div>
                                 </div>
                               </td>
                               <td className="py-3">
