@@ -96,6 +96,20 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="stat-card">
           <div className="flex items-center gap-4">
+            <div className="p-4 bg-gradient-to-br from-sky-400 to-sky-600 rounded-2xl shadow-lg">
+              <Briefcase className="w-7 h-7 text-white" />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-slate-500">Total Invested</p>
+              <p className="stat-value">
+                ${totalInvestment.toLocaleString()}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="stat-card">
+          <div className="flex items-center gap-4">
             <div className={`p-4 rounded-2xl shadow-lg ${
               totalReturn !== null && totalReturn >= 0 
                 ? 'bg-gradient-to-br from-emerald-400 to-emerald-600' 
@@ -120,20 +134,6 @@ export default function Dashboard() {
               ) : (
                 <p className="stat-value text-slate-400">$0</p>
               )}
-            </div>
-          </div>
-        </div>
-
-        <div className="stat-card">
-          <div className="flex items-center gap-4">
-            <div className="p-4 bg-gradient-to-br from-emerald-400 to-emerald-600 rounded-2xl shadow-lg">
-              <TrendingUp className="w-7 h-7 text-white" />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-slate-500">Total Invested</p>
-              <p className="stat-value">
-                ${totalInvestment.toLocaleString()}
-              </p>
             </div>
           </div>
         </div>
