@@ -1,14 +1,22 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { portfolioApi } from '../lib/api'
-import { Portfolio } from '../types'
+import { portfolioApi, stocksApi } from '../lib/api'
+import { Portfolio, Position } from '../types'
 import { useAuth } from '../lib/auth'
-import { Briefcase, TrendingUp, Wand2, Wrench, ArrowRight } from 'lucide-react'
+import { Briefcase, TrendingUp, TrendingDown, Wand2, Wrench, ArrowRight, Loader2 } from 'lucide-react'
+
+interface PortfolioWithPositions {
+  portfolio: Portfolio
+  positions: Position[]
+}
 
 export default function Dashboard() {
   const { user } = useAuth()
   const [portfolios, setPortfolios] = useState<Portfolio[]>([])
   const [loading, setLoading] = useState(true)
+  const [totalReturn, setTotalReturn] = useState<number | null>(null)
+  const [totalCurrentValue, setTotalCurrentValue] = useState<number>(0)
+  const [loadingReturns, setLoadingReturns] = useState(false)
 
   useEffect(() => {
     loadPortfolios()
@@ -18,6 +26,10 @@ export default function Dashboard() {
     try {
       const response = await portfolioApi.list()
       setPortfolios(response.data)
+      
+      if (response.data.length > 0) {
+        loadRealReturns(response.data)
+      }
     } catch (error) {
       console.error('Failed to load portfolios:', error)
     } finally {
@@ -25,7 +37,50 @@ export default function Dashboard() {
     }
   }
 
+  const loadRealReturns = async (portfolioList: Portfolio[]) => {
+    setLoadingReturns(true)
+    try {
+      let allInvestment = 0
+      let allCurrentValue = 0
+      
+      for (const p of portfolioList) {
+        const detail = await portfolioApi.detail(p.id)
+        const positions = detail.data.positions as Position[]
+        allInvestment += Number(p.initial_investment)
+        
+        const symbols = positions.filter(pos => pos.status === 'active').map(pos => pos.symbol)
+        const prices: Record<string, number> = {}
+        
+        for (const symbol of symbols) {
+          try {
+            const info = await stocksApi.info(symbol)
+            prices[symbol] = info.data.current_price
+          } catch {
+            prices[symbol] = 0
+          }
+        }
+        
+        const portfolioValue = positions
+          .filter(pos => pos.status === 'active')
+          .reduce((sum, pos) => {
+            const price = prices[pos.symbol] || Number(pos.avg_cost)
+            return sum + (price * Number(pos.quantity))
+          }, 0)
+        
+        allCurrentValue += portfolioValue
+      }
+      
+      setTotalCurrentValue(allCurrentValue)
+      setTotalReturn(allCurrentValue - allInvestment)
+    } catch (error) {
+      console.error('Failed to load returns:', error)
+    } finally {
+      setLoadingReturns(false)
+    }
+  }
+
   const totalInvestment = portfolios.reduce((sum, p) => sum + Number(p.initial_investment), 0)
+  const returnPct = totalInvestment > 0 && totalReturn !== null ? (totalReturn / totalInvestment) * 100 : 0
 
   return (
     <div className="space-y-6">
@@ -67,16 +122,30 @@ export default function Dashboard() {
 
         <div className="stat-card">
           <div className="flex items-center gap-4">
-            <div className="p-4 bg-gradient-to-br from-purple-400 to-purple-600 rounded-2xl shadow-lg">
-              <Wand2 className="w-7 h-7 text-white" />
+            <div className={`p-4 rounded-2xl shadow-lg ${
+              totalReturn !== null && totalReturn >= 0 
+                ? 'bg-gradient-to-br from-emerald-400 to-emerald-600' 
+                : 'bg-gradient-to-br from-red-400 to-red-600'
+            }`}>
+              {totalReturn !== null && totalReturn >= 0 
+                ? <TrendingUp className="w-7 h-7 text-white" />
+                : <TrendingDown className="w-7 h-7 text-white" />
+              }
             </div>
             <div>
-              <p className="text-sm font-medium text-slate-500">Expected Annual Return</p>
-              <p className="stat-value text-emerald-600">
-                {portfolios.length > 0 
-                  ? `+$${Math.round(portfolios.reduce((sum, p) => sum + (Number(p.initial_investment) * (Number(p.expected_return) || 0)), 0)).toLocaleString()}`
-                  : '$0'}
-              </p>
+              <p className="text-sm font-medium text-slate-500">Current Return</p>
+              {loadingReturns ? (
+                <div className="flex items-center gap-2">
+                  <Loader2 className="w-5 h-5 animate-spin text-slate-400" />
+                  <span className="text-sm text-slate-400">Fetching prices...</span>
+                </div>
+              ) : totalReturn !== null ? (
+                <p className={`stat-value ${totalReturn >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                  {totalReturn >= 0 ? '+' : ''}{returnPct.toFixed(2)}%
+                </p>
+              ) : (
+                <p className="stat-value text-slate-400">--</p>
+              )}
             </div>
           </div>
         </div>
