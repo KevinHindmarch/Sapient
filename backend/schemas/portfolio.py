@@ -103,3 +103,14 @@ class TradeRequest(BaseModel):
     quantity: float
     price: float
     notes: Optional[str] = None
+
+
+class UpdatePositionRequest(BaseModel):
+    quantity: float
+    avg_cost: Optional[float] = None
+
+
+class AddStockRequest(BaseModel):
+    symbol: str
+    quantity: float
+    avg_cost: float

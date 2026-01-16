@@ -16,7 +16,9 @@ from backend.schemas.portfolio import (
     PortfolioResponse,
     PortfolioDetailResponse,
     PositionResponse,
-    TradeRequest
+    TradeRequest,
+    UpdatePositionRequest,
+    AddStockRequest
 )
 from core.stocks import StockDataService
 from core.optimizer import PortfolioOptimizerService
@@ -195,6 +197,70 @@ async def execute_trade(
         quantity=trade.quantity,
         price=trade.price,
         notes=trade.notes or ""
+    )
+    
+    if not result['success']:
+        raise HTTPException(status_code=400, detail=result['error'])
+    
+    return result
+
+
+@router.put("/{portfolio_id}/positions/{position_id}")
+async def update_position(
+    portfolio_id: int,
+    position_id: int,
+    update: UpdatePositionRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """Update position quantity and optionally avg cost."""
+    result = PortfolioService.update_position(
+        portfolio_id=portfolio_id,
+        user_id=current_user['id'],
+        position_id=position_id,
+        quantity=update.quantity,
+        avg_cost=update.avg_cost
+    )
+    
+    if not result['success']:
+        raise HTTPException(status_code=400, detail=result['error'])
+    
+    return result
+
+
+@router.delete("/{portfolio_id}/positions/{position_id}")
+async def remove_position(
+    portfolio_id: int,
+    position_id: int,
+    current_user: dict = Depends(get_current_user)
+):
+    """Remove a position from portfolio."""
+    result = PortfolioService.remove_position(
+        portfolio_id=portfolio_id,
+        user_id=current_user['id'],
+        position_id=position_id
+    )
+    
+    if not result['success']:
+        raise HTTPException(status_code=400, detail=result['error'])
+    
+    return result
+
+
+@router.post("/{portfolio_id}/stocks")
+async def add_stock(
+    portfolio_id: int,
+    stock: AddStockRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """Add a new stock to an existing portfolio."""
+    symbol = StockDataService.format_symbol(stock.symbol)
+    
+    result = PortfolioService.add_stock_to_portfolio(
+        portfolio_id=portfolio_id,
+        user_id=current_user['id'],
+        symbol=symbol,
+        quantity=stock.quantity,
+        avg_cost=stock.avg_cost
     )
     
     if not result['success']:

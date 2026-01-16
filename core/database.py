@@ -424,3 +424,102 @@ class PortfolioService:
                 return {'success': True, 'message': f'{txn_type.upper()} order executed'}
             except Exception as e:
                 return {'success': False, 'error': str(e)}
+
+    @staticmethod
+    def update_position(portfolio_id: int, user_id: int, position_id: int, 
+                        quantity: float, avg_cost: float = None) -> dict:
+        """Update position quantity and optionally avg cost."""
+        with get_db_cursor() as (cur, conn):
+            try:
+                cur.execute("""
+                    SELECT pp.id, pp.avg_cost FROM portfolio_positions pp
+                    JOIN portfolios p ON p.id = pp.portfolio_id
+                    WHERE pp.id = %s AND pp.portfolio_id = %s AND p.user_id = %s AND pp.status = 'active'
+                """, (position_id, portfolio_id, user_id))
+                
+                position = cur.fetchone()
+                if not position:
+                    return {'success': False, 'error': 'Position not found'}
+                
+                if quantity <= 0:
+                    cur.execute("""
+                        UPDATE portfolio_positions 
+                        SET status = 'sold', quantity = 0, closed_at = CURRENT_TIMESTAMP
+                        WHERE id = %s
+                    """, (position_id,))
+                else:
+                    new_avg_cost = avg_cost if avg_cost is not None else position['avg_cost']
+                    cur.execute("""
+                        UPDATE portfolio_positions 
+                        SET quantity = %s, avg_cost = %s, allocation_amount = %s
+                        WHERE id = %s
+                    """, (quantity, new_avg_cost, quantity * new_avg_cost, position_id))
+                
+                conn.commit()
+                return {'success': True, 'message': 'Position updated'}
+            except Exception as e:
+                return {'success': False, 'error': str(e)}
+
+    @staticmethod
+    def remove_position(portfolio_id: int, user_id: int, position_id: int) -> dict:
+        """Remove a position from portfolio."""
+        with get_db_cursor() as (cur, conn):
+            try:
+                cur.execute("""
+                    SELECT pp.id FROM portfolio_positions pp
+                    JOIN portfolios p ON p.id = pp.portfolio_id
+                    WHERE pp.id = %s AND pp.portfolio_id = %s AND p.user_id = %s
+                """, (position_id, portfolio_id, user_id))
+                
+                if not cur.fetchone():
+                    return {'success': False, 'error': 'Position not found'}
+                
+                cur.execute("DELETE FROM transactions WHERE portfolio_position_id = %s", (position_id,))
+                cur.execute("DELETE FROM portfolio_positions WHERE id = %s", (position_id,))
+                
+                conn.commit()
+                return {'success': True, 'message': 'Position removed'}
+            except Exception as e:
+                return {'success': False, 'error': str(e)}
+
+    @staticmethod
+    def add_stock_to_portfolio(portfolio_id: int, user_id: int, symbol: str, 
+                               quantity: float, avg_cost: float) -> dict:
+        """Add a new stock to an existing portfolio."""
+        with get_db_cursor() as (cur, conn):
+            try:
+                cur.execute("""
+                    SELECT id FROM portfolios WHERE id = %s AND user_id = %s
+                """, (portfolio_id, user_id))
+                
+                if not cur.fetchone():
+                    return {'success': False, 'error': 'Portfolio not found'}
+                
+                cur.execute("""
+                    SELECT id FROM portfolio_positions 
+                    WHERE portfolio_id = %s AND symbol = %s AND status = 'active'
+                """, (portfolio_id, symbol))
+                
+                if cur.fetchone():
+                    return {'success': False, 'error': f'{symbol} already exists in portfolio. Use edit to modify.'}
+                
+                cur.execute("""
+                    INSERT INTO portfolio_positions (portfolio_id, symbol, quantity, avg_cost, allocation_amount, status)
+                    VALUES (%s, %s, %s, %s, %s, 'active')
+                    RETURNING id
+                """, (portfolio_id, symbol, quantity, avg_cost, quantity * avg_cost))
+                
+                position_id = cur.fetchone()['id']
+                
+                cur.execute("""
+                    INSERT INTO transactions (
+                        portfolio_id, portfolio_position_id, txn_type, symbol, 
+                        quantity, price, total_amount, notes
+                    )
+                    VALUES (%s, %s, 'buy', %s, %s, %s, %s, 'Initial position added')
+                """, (portfolio_id, position_id, symbol, quantity, avg_cost, quantity * avg_cost))
+                
+                conn.commit()
+                return {'success': True, 'message': 'Stock added to portfolio', 'position_id': position_id}
+            except Exception as e:
+                return {'success': False, 'error': str(e)}

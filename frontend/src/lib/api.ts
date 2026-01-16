@@ -60,6 +60,12 @@ export const portfolioApi = {
   detail: (id: number) => api.get(`/portfolio/${id}`),
   trade: (portfolioId: number, symbol: string, txn_type: string, quantity: number, price: number, notes?: string) =>
     api.post(`/portfolio/${portfolioId}/trade`, { symbol, txn_type, quantity, price, notes }),
+  updatePosition: (portfolioId: number, positionId: number, quantity: number, avg_cost?: number) =>
+    api.put(`/portfolio/${portfolioId}/positions/${positionId}`, { quantity, avg_cost }),
+  removePosition: (portfolioId: number, positionId: number) =>
+    api.delete(`/portfolio/${portfolioId}/positions/${positionId}`),
+  addStock: (portfolioId: number, symbol: string, quantity: number, avg_cost: number) =>
+    api.post(`/portfolio/${portfolioId}/stocks`, { symbol, quantity, avg_cost }),
 }
 
 export const indicatorsApi = {

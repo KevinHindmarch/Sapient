@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import { portfolioApi, stocksApi } from '../lib/api'
 import { Portfolio, Position, Transaction } from '../types'
 import { toast } from 'sonner'
-import { ArrowLeft, TrendingUp, TrendingDown, DollarSign } from 'lucide-react'
+import { ArrowLeft, TrendingUp, TrendingDown, DollarSign, Pencil, Trash2, Plus, X, Search } from 'lucide-react'
 import { format } from 'date-fns'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts'
 
@@ -16,11 +16,33 @@ interface PortfolioData {
   transactions: Transaction[]
 }
 
+interface StockSearchResult {
+  symbol: string
+  name: string
+}
+
 export default function PortfolioDetail() {
   const { id } = useParams<{ id: string }>()
   const [data, setData] = useState<PortfolioData | null>(null)
   const [loading, setLoading] = useState(true)
   const [currentPrices, setCurrentPrices] = useState<Record<string, number>>({})
+
+  const [showEditModal, setShowEditModal] = useState(false)
+  const [editingPosition, setEditingPosition] = useState<Position | null>(null)
+  const [editQuantity, setEditQuantity] = useState('')
+  const [editAvgCost, setEditAvgCost] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
+  const [deletingPosition, setDeletingPosition] = useState<Position | null>(null)
+
+  const [showAddModal, setShowAddModal] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<StockSearchResult[]>([])
+  const [searching, setSearching] = useState(false)
+  const [selectedStock, setSelectedStock] = useState<StockSearchResult | null>(null)
+  const [addQuantity, setAddQuantity] = useState('')
+  const [addAvgCost, setAddAvgCost] = useState('')
 
   useEffect(() => {
     if (id) {
@@ -55,6 +77,128 @@ export default function PortfolioDetail() {
       }
     }
     setCurrentPrices(prices)
+  }
+
+  const openEditModal = (position: Position) => {
+    setEditingPosition(position)
+    setEditQuantity(String(Number(position.quantity)))
+    setEditAvgCost(String(Number(position.avg_cost)))
+    setShowEditModal(true)
+  }
+
+  const handleUpdatePosition = async () => {
+    if (!editingPosition || !id) return
+
+    const quantity = parseFloat(editQuantity)
+    const avgCost = parseFloat(editAvgCost)
+
+    if (isNaN(quantity) || quantity < 0) {
+      toast.error('Please enter a valid quantity')
+      return
+    }
+    if (isNaN(avgCost) || avgCost <= 0) {
+      toast.error('Please enter a valid average cost')
+      return
+    }
+
+    setSaving(true)
+    try {
+      await portfolioApi.updatePosition(Number(id), editingPosition.id, quantity, avgCost)
+      toast.success('Position updated successfully')
+      setShowEditModal(false)
+      loadPortfolio()
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { detail?: string } } }
+      toast.error(err.response?.data?.detail || 'Failed to update position')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const openDeleteModal = (position: Position) => {
+    setDeletingPosition(position)
+    setShowDeleteModal(true)
+  }
+
+  const handleDeletePosition = async () => {
+    if (!deletingPosition || !id) return
+
+    setSaving(true)
+    try {
+      await portfolioApi.removePosition(Number(id), deletingPosition.id)
+      toast.success('Position removed successfully')
+      setShowDeleteModal(false)
+      loadPortfolio()
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { detail?: string } } }
+      toast.error(err.response?.data?.detail || 'Failed to remove position')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleSearch = async (query: string) => {
+    setSearchQuery(query)
+    if (query.length < 2) {
+      setSearchResults([])
+      return
+    }
+
+    setSearching(true)
+    try {
+      const response = await stocksApi.search(query)
+      setSearchResults(response.data.slice(0, 10))
+    } catch {
+      setSearchResults([])
+    } finally {
+      setSearching(false)
+    }
+  }
+
+  const selectStockToAdd = async (stock: StockSearchResult) => {
+    setSelectedStock(stock)
+    setSearchResults([])
+    setSearchQuery(stock.symbol.replace('.AX', ''))
+    
+    try {
+      const response = await stocksApi.info(stock.symbol)
+      setAddAvgCost(String(response.data.current_price.toFixed(2)))
+    } catch {
+      setAddAvgCost('')
+    }
+  }
+
+  const handleAddStock = async () => {
+    if (!selectedStock || !id) return
+
+    const quantity = parseFloat(addQuantity)
+    const avgCost = parseFloat(addAvgCost)
+
+    if (isNaN(quantity) || quantity <= 0) {
+      toast.error('Please enter a valid quantity')
+      return
+    }
+    if (isNaN(avgCost) || avgCost <= 0) {
+      toast.error('Please enter a valid price')
+      return
+    }
+
+    setSaving(true)
+    try {
+      await portfolioApi.addStock(Number(id), selectedStock.symbol, quantity, avgCost)
+      toast.success(`${selectedStock.symbol.replace('.AX', '')} added to portfolio`)
+      setShowAddModal(false)
+      setSelectedStock(null)
+      setSearchQuery('')
+      setAddQuantity('')
+      setAddAvgCost('')
+      loadPortfolio()
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { detail?: string } } }
+      toast.error(err.response?.data?.detail || 'Failed to add stock')
+    } finally {
+      setSaving(false)
+    }
   }
 
   if (loading) {
@@ -96,34 +240,43 @@ export default function PortfolioDetail() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-4">
-        <Link to="/portfolios" className="p-2 hover:bg-slate-100 rounded-lg transition-colors">
-          <ArrowLeft className="w-5 h-5 text-slate-600" />
-        </Link>
-        <div>
-          <h1 className="text-3xl font-bold text-slate-900">{portfolio.name}</h1>
-          <div className="flex items-center gap-2 mt-1">
-            <span className={`text-xs px-2 py-0.5 rounded-full ${
-              portfolio.mode === 'auto' 
-                ? 'bg-purple-100 text-purple-700' 
-                : 'bg-sky-100 text-sky-700'
-            }`}>
-              {portfolio.mode === 'auto' ? 'Auto' : 'Manual'}
-            </span>
-            <span className={`text-xs px-2 py-0.5 rounded-full ${
-              portfolio.risk_tolerance === 'conservative'
-                ? 'bg-green-100 text-green-700'
-                : portfolio.risk_tolerance === 'aggressive'
-                ? 'bg-red-100 text-red-700'
-                : 'bg-amber-100 text-amber-700'
-            }`}>
-              {portfolio.risk_tolerance}
-            </span>
-            <span className="text-sm text-slate-500">
-              Created {format(new Date(portfolio.created_at), 'MMM d, yyyy')}
-            </span>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <Link to="/portfolios" className="p-2 hover:bg-slate-100 rounded-lg transition-colors">
+            <ArrowLeft className="w-5 h-5 text-slate-600" />
+          </Link>
+          <div>
+            <h1 className="text-3xl font-bold text-slate-900">{portfolio.name}</h1>
+            <div className="flex items-center gap-2 mt-1">
+              <span className={`text-xs px-2 py-0.5 rounded-full ${
+                portfolio.mode === 'auto' 
+                  ? 'bg-purple-100 text-purple-700' 
+                  : 'bg-sky-100 text-sky-700'
+              }`}>
+                {portfolio.mode === 'auto' ? 'Auto' : 'Manual'}
+              </span>
+              <span className={`text-xs px-2 py-0.5 rounded-full ${
+                portfolio.risk_tolerance === 'conservative'
+                  ? 'bg-green-100 text-green-700'
+                  : portfolio.risk_tolerance === 'aggressive'
+                  ? 'bg-red-100 text-red-700'
+                  : 'bg-amber-100 text-amber-700'
+              }`}>
+                {portfolio.risk_tolerance}
+              </span>
+              <span className="text-sm text-slate-500">
+                Created {format(new Date(portfolio.created_at), 'MMM d, yyyy')}
+              </span>
+            </div>
           </div>
         </div>
+        <button
+          onClick={() => setShowAddModal(true)}
+          className="btn-primary flex items-center gap-2"
+        >
+          <Plus className="w-5 h-5" />
+          Add Stock
+        </button>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -169,6 +322,7 @@ export default function PortfolioDetail() {
                   <th className="pb-3 font-medium">Current</th>
                   <th className="pb-3 font-medium">Value</th>
                   <th className="pb-3 font-medium">P/L</th>
+                  <th className="pb-3 font-medium text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -177,7 +331,7 @@ export default function PortfolioDetail() {
                   const marketValue = currentPrice * Number(position.quantity)
                   const costBasis = Number(position.avg_cost) * Number(position.quantity)
                   const pl = marketValue - costBasis
-                  const plPct = (pl / costBasis) * 100
+                  const plPct = costBasis > 0 ? (pl / costBasis) * 100 : 0
 
                   return (
                     <tr key={position.id} className="border-b last:border-b-0">
@@ -188,6 +342,24 @@ export default function PortfolioDetail() {
                       <td className="py-3">${marketValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
                       <td className={`py-3 font-medium ${pl >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                         {pl >= 0 ? '+' : ''}{plPct.toFixed(1)}%
+                      </td>
+                      <td className="py-3 text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <button
+                            onClick={() => openEditModal(position)}
+                            className="p-1.5 text-slate-400 hover:text-sky-600 hover:bg-sky-50 rounded transition-colors"
+                            title="Edit position"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => openDeleteModal(position)}
+                            className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                            title="Remove position"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   )
@@ -258,6 +430,207 @@ export default function PortfolioDetail() {
           </div>
         )}
       </div>
+
+      {showEditModal && editingPosition && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 w-full max-w-md mx-4 shadow-xl">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold">
+                Edit {editingPosition.symbol.replace('.AX', '')}
+              </h3>
+              <button onClick={() => setShowEditModal(false)} className="text-slate-400 hover:text-slate-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="label">Quantity (shares)</label>
+                <input
+                  type="number"
+                  value={editQuantity}
+                  onChange={(e) => setEditQuantity(e.target.value)}
+                  className="input"
+                  min="0"
+                  step="0.01"
+                />
+                <p className="text-xs text-slate-500 mt-1">Set to 0 to close the position</p>
+              </div>
+              <div>
+                <label className="label">Average Cost ($)</label>
+                <input
+                  type="number"
+                  value={editAvgCost}
+                  onChange={(e) => setEditAvgCost(e.target.value)}
+                  className="input"
+                  min="0"
+                  step="0.01"
+                />
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button
+                  onClick={() => setShowEditModal(false)}
+                  className="btn-secondary flex-1"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleUpdatePosition}
+                  disabled={saving}
+                  className="btn-primary flex-1"
+                >
+                  {saving ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showDeleteModal && deletingPosition && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 w-full max-w-md mx-4 shadow-xl">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-red-600">Remove Position</h3>
+              <button onClick={() => setShowDeleteModal(false)} className="text-slate-400 hover:text-slate-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <p className="text-slate-600 mb-6">
+              Are you sure you want to remove <span className="font-semibold">{deletingPosition.symbol.replace('.AX', '')}</span> from this portfolio? This action cannot be undone.
+            </p>
+            
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowDeleteModal(false)}
+                className="btn-secondary flex-1"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeletePosition}
+                disabled={saving}
+                className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors flex-1"
+              >
+                {saving ? 'Removing...' : 'Remove'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAddModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 w-full max-w-md mx-4 shadow-xl">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold">Add Stock to Portfolio</h3>
+              <button 
+                onClick={() => {
+                  setShowAddModal(false)
+                  setSelectedStock(null)
+                  setSearchQuery('')
+                  setAddQuantity('')
+                  setAddAvgCost('')
+                }} 
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="space-y-4">
+              <div className="relative">
+                <label className="label">Search Stock</label>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => handleSearch(e.target.value)}
+                    placeholder="Search ASX stocks..."
+                    className="input pl-10"
+                  />
+                </div>
+                {searchResults.length > 0 && (
+                  <div className="absolute z-10 mt-1 w-full bg-white border rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                    {searchResults.map((stock) => (
+                      <button
+                        key={stock.symbol}
+                        onClick={() => selectStockToAdd(stock)}
+                        className="w-full text-left px-4 py-2 hover:bg-slate-50 flex justify-between"
+                      >
+                        <span className="font-medium">{stock.symbol.replace('.AX', '')}</span>
+                        <span className="text-sm text-slate-500 truncate ml-2">{stock.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {searching && (
+                  <p className="text-sm text-slate-500 mt-1">Searching...</p>
+                )}
+              </div>
+
+              {selectedStock && (
+                <>
+                  <div className="p-3 bg-sky-50 rounded-lg">
+                    <p className="font-medium text-sky-700">{selectedStock.symbol.replace('.AX', '')}</p>
+                    <p className="text-sm text-sky-600">{selectedStock.name}</p>
+                  </div>
+                  
+                  <div>
+                    <label className="label">Quantity (shares)</label>
+                    <input
+                      type="number"
+                      value={addQuantity}
+                      onChange={(e) => setAddQuantity(e.target.value)}
+                      className="input"
+                      min="0"
+                      step="0.01"
+                      placeholder="e.g., 100"
+                    />
+                  </div>
+                  <div>
+                    <label className="label">Purchase Price ($)</label>
+                    <input
+                      type="number"
+                      value={addAvgCost}
+                      onChange={(e) => setAddAvgCost(e.target.value)}
+                      className="input"
+                      min="0"
+                      step="0.01"
+                      placeholder="e.g., 25.50"
+                    />
+                    <p className="text-xs text-slate-500 mt-1">Pre-filled with current market price</p>
+                  </div>
+                </>
+              )}
+              
+              <div className="flex gap-3 pt-2">
+                <button
+                  onClick={() => {
+                    setShowAddModal(false)
+                    setSelectedStock(null)
+                    setSearchQuery('')
+                    setAddQuantity('')
+                    setAddAvgCost('')
+                  }}
+                  className="btn-secondary flex-1"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleAddStock}
+                  disabled={saving || !selectedStock}
+                  className="btn-primary flex-1"
+                >
+                  {saving ? 'Adding...' : 'Add Stock'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
