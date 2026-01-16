@@ -428,11 +428,16 @@ class PortfolioService:
     @staticmethod
     def update_position(portfolio_id: int, user_id: int, position_id: int, 
                         quantity: float, avg_cost: float = None) -> dict:
-        """Update position quantity and optionally avg cost."""
+        """Update position quantity and optionally avg cost. Records adjustment transaction."""
+        if quantity < 0:
+            return {'success': False, 'error': 'Quantity cannot be negative'}
+        if avg_cost is not None and avg_cost <= 0:
+            return {'success': False, 'error': 'Average cost must be positive'}
+            
         with get_db_cursor() as (cur, conn):
             try:
                 cur.execute("""
-                    SELECT pp.id, pp.avg_cost FROM portfolio_positions pp
+                    SELECT pp.id, pp.quantity, pp.avg_cost, pp.symbol FROM portfolio_positions pp
                     JOIN portfolios p ON p.id = pp.portfolio_id
                     WHERE pp.id = %s AND pp.portfolio_id = %s AND p.user_id = %s AND pp.status = 'active'
                 """, (position_id, portfolio_id, user_id))
@@ -441,19 +446,36 @@ class PortfolioService:
                 if not position:
                     return {'success': False, 'error': 'Position not found'}
                 
+                old_qty = float(position['quantity'])
+                new_avg_cost = avg_cost if avg_cost is not None else float(position['avg_cost'])
+                qty_diff = quantity - old_qty
+                
                 if quantity <= 0:
                     cur.execute("""
                         UPDATE portfolio_positions 
                         SET status = 'sold', quantity = 0, closed_at = CURRENT_TIMESTAMP
                         WHERE id = %s
                     """, (position_id,))
+                    txn_type = 'sell'
+                    txn_qty = old_qty
                 else:
-                    new_avg_cost = avg_cost if avg_cost is not None else position['avg_cost']
                     cur.execute("""
                         UPDATE portfolio_positions 
                         SET quantity = %s, avg_cost = %s, allocation_amount = %s
                         WHERE id = %s
                     """, (quantity, new_avg_cost, quantity * new_avg_cost, position_id))
+                    txn_type = 'buy' if qty_diff > 0 else 'sell'
+                    txn_qty = abs(qty_diff) if qty_diff != 0 else 0
+                
+                if txn_qty > 0:
+                    cur.execute("""
+                        INSERT INTO transactions (
+                            portfolio_id, portfolio_position_id, txn_type, symbol, 
+                            quantity, price, total_amount, notes
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    """, (portfolio_id, position_id, txn_type, position['symbol'], 
+                          txn_qty, new_avg_cost, txn_qty * new_avg_cost, 'Position adjustment'))
                 
                 conn.commit()
                 return {'success': True, 'message': 'Position updated'}
@@ -462,20 +484,35 @@ class PortfolioService:
 
     @staticmethod
     def remove_position(portfolio_id: int, user_id: int, position_id: int) -> dict:
-        """Remove a position from portfolio."""
+        """Remove a position from portfolio by marking as sold. Preserves audit trail."""
         with get_db_cursor() as (cur, conn):
             try:
                 cur.execute("""
-                    SELECT pp.id FROM portfolio_positions pp
+                    SELECT pp.id, pp.quantity, pp.avg_cost, pp.symbol FROM portfolio_positions pp
                     JOIN portfolios p ON p.id = pp.portfolio_id
-                    WHERE pp.id = %s AND pp.portfolio_id = %s AND p.user_id = %s
+                    WHERE pp.id = %s AND pp.portfolio_id = %s AND p.user_id = %s AND pp.status = 'active'
                 """, (position_id, portfolio_id, user_id))
                 
-                if not cur.fetchone():
+                position = cur.fetchone()
+                if not position:
                     return {'success': False, 'error': 'Position not found'}
                 
-                cur.execute("DELETE FROM transactions WHERE portfolio_position_id = %s", (position_id,))
-                cur.execute("DELETE FROM portfolio_positions WHERE id = %s", (position_id,))
+                cur.execute("""
+                    UPDATE portfolio_positions 
+                    SET status = 'sold', quantity = 0, closed_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                """, (position_id,))
+                
+                qty = float(position['quantity'])
+                price = float(position['avg_cost'])
+                cur.execute("""
+                    INSERT INTO transactions (
+                        portfolio_id, portfolio_position_id, txn_type, symbol, 
+                        quantity, price, total_amount, notes
+                    )
+                    VALUES (%s, %s, 'sell', %s, %s, %s, %s, %s)
+                """, (portfolio_id, position_id, position['symbol'], 
+                      qty, price, qty * price, 'Position removed'))
                 
                 conn.commit()
                 return {'success': True, 'message': 'Position removed'}
@@ -486,6 +523,13 @@ class PortfolioService:
     def add_stock_to_portfolio(portfolio_id: int, user_id: int, symbol: str, 
                                quantity: float, avg_cost: float) -> dict:
         """Add a new stock to an existing portfolio."""
+        if quantity <= 0:
+            return {'success': False, 'error': 'Quantity must be positive'}
+        if avg_cost <= 0:
+            return {'success': False, 'error': 'Price must be positive'}
+        if not symbol or len(symbol) < 2:
+            return {'success': False, 'error': 'Invalid stock symbol'}
+            
         with get_db_cursor() as (cur, conn):
             try:
                 cur.execute("""
@@ -516,7 +560,7 @@ class PortfolioService:
                         portfolio_id, portfolio_position_id, txn_type, symbol, 
                         quantity, price, total_amount, notes
                     )
-                    VALUES (%s, %s, 'buy', %s, %s, %s, %s, 'Initial position added')
+                    VALUES (%s, %s, 'buy', %s, %s, %s, %s, 'Stock added to portfolio')
                 """, (portfolio_id, position_id, symbol, quantity, avg_cost, quantity * avg_cost))
                 
                 conn.commit()
