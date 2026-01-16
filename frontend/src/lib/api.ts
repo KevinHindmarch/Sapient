@@ -44,6 +44,7 @@ export const stocksApi = {
     api.get(`/stocks/dividends?symbols=${symbols.join(',')}`),
   asx200: () => api.get('/stocks/asx200'),
   validate: (symbol: string) => api.get(`/stocks/validate/${symbol}`),
+  rankByPerformance: () => api.get('/stocks/rank'),
 }
 
 export const portfolioApi = {

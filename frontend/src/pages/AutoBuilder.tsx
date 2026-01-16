@@ -107,32 +107,41 @@ export default function AutoBuilder() {
 
   const onSubmit = async (data: FormData) => {
     setBuilding(true)
-    setProgress('Fetching ASX200 index stocks...')
+    setProgress('Analyzing all ASX200 stocks by Sharpe ratio...')
     
     try {
-      const asx200Response = await stocksApi.asx200()
-      const allStocks = asx200Response.data.map((s: { symbol: string }) => s.symbol)
+      const rankResponse = await stocksApi.rankByPerformance()
+      const rankings = rankResponse.data.rankings as Array<{symbol: string, sharpe_ratio: number, annual_return: number}>
+      
+      if (!rankings || rankings.length === 0) {
+        throw new Error('No stock data available')
+      }
+      
+      setProgress(`Ranked ${rankings.length} stocks - selecting top performers...`)
       
       const sizeConfig = PORTFOLIO_SIZES[data.portfolio_size]
       const targetSize = Math.floor((sizeConfig.min + sizeConfig.max) / 2)
       
-      setProgress(`Analyzing ${allStocks.length} ASX200 stocks...`)
+      const topStocks = rankings
+        .filter(s => s.sharpe_ratio > 0)
+        .slice(0, targetSize)
+        .map(s => s.symbol)
       
-      // Select diverse stocks from different parts of the index
-      const shuffled = [...allStocks].sort(() => Math.random() - 0.5)
-      const stocksToOptimize = shuffled.slice(0, targetSize)
+      if (topStocks.length < 3) {
+        throw new Error('Not enough stocks with positive Sharpe ratio')
+      }
       
-      setSelectedStocks(stocksToOptimize)
-      setProgress(`Optimizing ${targetSize} stocks with Yahoo Finance data...`)
+      setSelectedStocks(topStocks)
+      setProgress(`Optimizing top ${topStocks.length} performers for maximum Sharpe ratio...`)
       
       const response = await portfolioApi.optimize(
-        stocksToOptimize,
+        topStocks,
         data.investment_amount,
         data.risk_tolerance
       )
       
       setResult(response.data)
-      toast.success(`Portfolio optimized from ${allStocks.length} ASX200 stocks!`)
+      toast.success(`Selected top ${topStocks.length} stocks from ${rankings.length} analyzed!`)
     } catch (error: unknown) {
       const err = error as { response?: { data?: { detail?: string } } }
       toast.error(err.response?.data?.detail || 'Failed to build portfolio')

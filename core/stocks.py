@@ -4,6 +4,7 @@ Core stock data service - shared between Streamlit and FastAPI
 
 import yfinance as yf
 import pandas as pd
+import numpy as np
 from typing import List, Dict, Optional
 
 
@@ -255,3 +256,53 @@ class StockDataService:
     def get_risk_free_rate() -> float:
         """Get Australian risk-free rate (approximation)."""
         return 0.035
+    
+    @staticmethod
+    def rank_stocks_by_sharpe(symbols: List[str], period: str = "2y") -> List[Dict]:
+        """
+        Rank stocks by their individual Sharpe ratio.
+        
+        Args:
+            symbols: List of stock symbols to analyze
+            period: Historical period for analysis
+            
+        Returns:
+            List of stocks sorted by Sharpe ratio (highest first)
+        """
+        results = []
+        risk_free_rate = StockDataService.get_risk_free_rate()
+        
+        price_data = StockDataService.get_stock_data(symbols, period)
+        
+        if price_data is None or price_data.empty:
+            return []
+        
+        returns = price_data.pct_change().dropna()
+        
+        for symbol in returns.columns:
+            try:
+                stock_returns = returns[symbol]
+                
+                if stock_returns.isna().sum() > len(stock_returns) * 0.3:
+                    continue
+                
+                mean_return = stock_returns.mean() * 252
+                volatility = stock_returns.std() * np.sqrt(252)
+                
+                if volatility > 0:
+                    sharpe_ratio = (mean_return - risk_free_rate) / volatility
+                else:
+                    sharpe_ratio = 0
+                
+                results.append({
+                    'symbol': symbol,
+                    'sharpe_ratio': round(sharpe_ratio, 3),
+                    'annual_return': round(mean_return * 100, 2),
+                    'volatility': round(volatility * 100, 2)
+                })
+            except Exception:
+                continue
+        
+        results.sort(key=lambda x: x['sharpe_ratio'], reverse=True)
+        
+        return results

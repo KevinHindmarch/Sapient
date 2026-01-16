@@ -76,3 +76,15 @@ async def validate_stock(symbol: str):
     formatted_symbol = StockDataService.format_symbol(symbol)
     
     return {"valid": valid, "symbol": formatted_symbol}
+
+
+@router.get("/rank")
+async def rank_stocks_by_performance():
+    """
+    Rank all ASX200 stocks by their individual Sharpe ratio.
+    Returns stocks sorted by best risk-adjusted returns.
+    """
+    asx200_symbols = [s["symbol"] for s in StockDataService.get_asx200_stocks()]
+    rankings = StockDataService.rank_stocks_by_sharpe(asx200_symbols, period="2y")
+    
+    return {"rankings": rankings, "total_analyzed": len(rankings)}
