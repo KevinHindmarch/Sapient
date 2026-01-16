@@ -244,57 +244,70 @@ export default function PortfolioDetail() {
     const expectedReturn = Number(portfolio.expected_return || 0.10)
     const createdAt = new Date(portfolio.created_at)
     const today = new Date()
-    const daysSinceCreation = differenceInDays(today, createdAt)
+    const daysSinceCreation = Math.max(differenceInDays(today, createdAt), 1)
+    
+    const minProjectionDays = 365
+    const projectionDays = Math.max(daysSinceCreation, minProjectionDays)
     
     const dataPoints: { date: string; expected: number; actual: number | null }[] = []
     
     const snapshotMap = new Map<string, number>()
     if (data?.snapshots) {
       data.snapshots.forEach((s: Record<string, unknown>) => {
-        const dateStr = format(new Date(s.snapshot_date as string), 'MMM d')
+        const dateStr = format(new Date(s.snapshot_date as string), 'MMM d, yyyy')
         snapshotMap.set(dateStr, Number(s.total_value))
       })
     }
     
     const dailyRate = expectedReturn / 365
-    const numPoints = Math.min(Math.max(daysSinceCreation, 1), 365)
-    const interval = Math.max(1, Math.floor(numPoints / 30))
+    const numPoints = 12
+    const interval = Math.max(1, Math.floor(projectionDays / numPoints))
     
-    for (let i = 0; i <= numPoints; i += interval) {
+    for (let i = 0; i <= projectionDays; i += interval) {
       const date = new Date(createdAt)
       date.setDate(date.getDate() + i)
-      const dateStr = format(date, 'MMM d')
+      const dateStr = format(date, 'MMM d, yyyy')
+      const shortDate = format(date, 'MMM yyyy')
       
       const expectedValue = initial * (1 + dailyRate * i)
-      const actualValue = snapshotMap.get(dateStr) || null
+      
+      let actualValue: number | null = null
+      if (i <= daysSinceCreation) {
+        actualValue = snapshotMap.get(dateStr) || null
+        if (i === 0) actualValue = initial
+      }
       
       dataPoints.push({
-        date: dateStr,
+        date: shortDate,
         expected: Math.round(expectedValue),
-        actual: actualValue ? Math.round(actualValue) : null
+        actual: actualValue
       })
     }
     
-    const todayStr = format(today, 'MMM d')
-    const lastPoint = dataPoints[dataPoints.length - 1]
-    if (lastPoint && lastPoint.date !== todayStr) {
-      dataPoints.push({
-        date: todayStr,
-        expected: Math.round(initial * (1 + dailyRate * daysSinceCreation)),
-        actual: Math.round(totalValue)
-      })
-    } else if (lastPoint) {
-      lastPoint.actual = Math.round(totalValue)
+    const todayIdx = dataPoints.findIndex((_, idx) => {
+      const dayOffset = idx * interval
+      return dayOffset >= daysSinceCreation
+    })
+    
+    if (todayIdx > 0 && todayIdx < dataPoints.length) {
+      dataPoints[todayIdx].actual = Math.round(totalValue)
+    } else if (dataPoints.length > 1) {
+      dataPoints[1].actual = Math.round(totalValue)
     }
     
-    if (dataPoints.length > 0 && dataPoints[0].actual === null) {
-      dataPoints[0].actual = initial
-    }
-    
-    return dataPoints.filter(p => p.expected > 0)
+    return dataPoints
   }
 
   const growthChartData = generateGrowthData()
+  
+  const chartYDomain = (() => {
+    const values = growthChartData.flatMap(d => [d.expected, d.actual].filter(v => v !== null)) as number[]
+    if (values.length === 0) return [0, 100000]
+    const min = Math.min(...values)
+    const max = Math.max(...values)
+    const padding = (max - min) * 0.1 || max * 0.1
+    return [Math.floor((min - padding) / 1000) * 1000, Math.ceil((max + padding) / 1000) * 1000]
+  })()
 
   return (
     <div className="space-y-6">
@@ -381,6 +394,7 @@ export default function PortfolioDetail() {
               tick={{ fontSize: 12, fill: '#64748b' }}
               tickFormatter={(value) => `$${(value / 1000).toFixed(0)}k`}
               tickLine={{ stroke: '#cbd5e1' }}
+              domain={chartYDomain}
             />
             <Tooltip 
               formatter={(value: number, name: string) => [
