@@ -6,7 +6,7 @@ packages = ["cargo", "freetype", "glibcLocales", "libiconv", "libxcrypt", "pkg-c
 
 [deployment]
 deploymentTarget = "autoscale"
-run = ["streamlit", "run", "app.py", "--server.port", "5000"]
+run = ["python", "server.py"]
 
 [workflows]
 runButton = "Project"
