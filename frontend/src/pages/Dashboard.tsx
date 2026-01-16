@@ -71,11 +71,11 @@ export default function Dashboard() {
               <Wand2 className="w-7 h-7 text-white" />
             </div>
             <div>
-              <p className="text-sm font-medium text-slate-500">Avg Expected Return</p>
+              <p className="text-sm font-medium text-slate-500">Expected Annual Return</p>
               <p className="stat-value text-emerald-600">
                 {portfolios.length > 0 
-                  ? `+${(portfolios.reduce((sum, p) => sum + (Number(p.expected_return) || 0), 0) / portfolios.length * 100).toFixed(1)}%`
-                  : '0%'}
+                  ? `+$${Math.round(portfolios.reduce((sum, p) => sum + (Number(p.initial_investment) * (Number(p.expected_return) || 0)), 0)).toLocaleString()}`
+                  : '$0'}
               </p>
             </div>
           </div>
