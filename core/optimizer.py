@@ -131,7 +131,8 @@ class PortfolioOptimizerService:
                 return -sharpe_ratio
             
             constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
-            bounds = tuple((0, params['max_weight']) for _ in range(num_assets))
+            min_weight = max(0.02, 0.5 / num_assets)
+            bounds = tuple((min_weight, params['max_weight']) for _ in range(num_assets))
             initial_guess = np.array([1/num_assets] * num_assets)
             
             result = minimize(
