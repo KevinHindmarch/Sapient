@@ -393,6 +393,45 @@ export default function FundamentalsBuilder() {
                 </div>
 
                 <div className="card">
+                  <h2 className={`text-lg font-semibold mb-4 ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>How Much to Invest</h2>
+                  <div className="overflow-x-auto mb-4">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className={isDark ? 'text-slate-400' : 'text-slate-600'}>
+                          <th className="text-left p-2">Stock</th>
+                          <th className="text-right p-2">Weight</th>
+                          <th className="text-right p-2">Amount</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {Object.entries(result.weights)
+                          .sort(([,a], [,b]) => (b as number) - (a as number))
+                          .map(([symbol, weight]) => (
+                          <tr key={symbol} className={`border-t ${isDark ? 'border-slate-700/50' : 'border-slate-200'}`}>
+                            <td className={`p-2 font-medium ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+                              {symbol.replace('.AX', '')}
+                            </td>
+                            <td className={`p-2 text-right ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                              {((weight as number) * 100).toFixed(1)}%
+                            </td>
+                            <td className="p-2 text-right font-bold text-emerald-400">
+                              ${((weight as number) * investmentAmount).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                            </td>
+                          </tr>
+                        ))}
+                        <tr className={`border-t-2 ${isDark ? 'border-slate-600' : 'border-slate-300'}`}>
+                          <td className={`p-2 font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Total</td>
+                          <td className={`p-2 text-right font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>100%</td>
+                          <td className="p-2 text-right font-bold text-emerald-400">
+                            ${investmentAmount.toLocaleString()}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div className="card">
                   <h2 className={`text-lg font-semibold mb-4 ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Allocation</h2>
                   <ResponsiveContainer width="100%" height={250}>
                     <PieChart>
