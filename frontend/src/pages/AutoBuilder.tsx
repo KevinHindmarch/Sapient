@@ -25,11 +25,11 @@ const PORTFOLIO_SIZES = {
 }
 
 const getCorrelationColor = (value: number): string => {
-  if (value >= 0.7) return 'bg-red-500 text-white'
-  if (value >= 0.4) return 'bg-amber-400 text-slate-900'
-  if (value >= 0) return 'bg-emerald-400 text-slate-900'
-  if (value >= -0.4) return 'bg-sky-400 text-slate-900'
-  return 'bg-blue-600 text-white'
+  if (value >= 0.7) return 'bg-red-500/80 text-white'
+  if (value >= 0.4) return 'bg-amber-500/80 text-white'
+  if (value >= 0) return 'bg-emerald-500/80 text-white'
+  if (value >= -0.4) return 'bg-sky-500/80 text-white'
+  return 'bg-blue-600/80 text-white'
 }
 
 const CorrelationMatrix = ({ matrix, symbols }: { matrix: number[][], symbols: string[] }) => {
@@ -45,16 +45,16 @@ const CorrelationMatrix = ({ matrix, symbols }: { matrix: number[][], symbols: s
             <tr>
               <th className="p-2"></th>
               {symbols.map(s => (
-                <th key={s} className="p-2 font-semibold text-slate-700 text-center">{s}</th>
+                <th key={s} className="p-2 font-semibold text-slate-300 text-center">{s}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {matrix.map((row, i) => (
               <tr key={symbols[i]}>
-                <td className="p-2 font-semibold text-slate-700">{symbols[i]}</td>
+                <td className="p-2 font-semibold text-slate-300">{symbols[i]}</td>
                 {row.map((val, j) => (
-                  <td key={j} className={`p-2 text-center rounded ${i === j ? 'bg-slate-200' : getCorrelationColor(val)}`}>
+                  <td key={j} className={`p-2 text-center rounded transition-all duration-300 ${i === j ? 'bg-slate-700' : getCorrelationColor(val)}`}>
                     {val.toFixed(2)}
                   </td>
                 ))}
@@ -64,10 +64,10 @@ const CorrelationMatrix = ({ matrix, symbols }: { matrix: number[][], symbols: s
         </table>
       </div>
       
-      <div className={`flex items-center gap-2 p-3 rounded-lg ${
-        avgCorr < 0.3 ? 'bg-emerald-50 text-emerald-700' :
-        avgCorr < 0.5 ? 'bg-sky-50 text-sky-700' :
-        'bg-amber-50 text-amber-700'
+      <div className={`flex items-center gap-2 p-3 rounded-lg border backdrop-blur-sm ${
+        avgCorr < 0.3 ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' :
+        avgCorr < 0.5 ? 'bg-sky-500/20 text-sky-300 border-sky-500/30' :
+        'bg-amber-500/20 text-amber-300 border-amber-500/30'
       }`}>
         {avgCorr < 0.3 ? <CheckCircle className="w-5 h-5" /> :
          avgCorr < 0.5 ? <Info className="w-5 h-5" /> :
@@ -193,10 +193,10 @@ export default function AutoBuilder() {
     })) : []
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-fade-in">
       <div>
-        <h1 className="text-3xl font-bold text-slate-900">Auto Portfolio Builder</h1>
-        <p className="text-slate-600 mt-1">
+        <h1 className="text-3xl font-bold text-slate-100">Auto Portfolio Builder</h1>
+        <p className="text-slate-400 mt-1">
           Automatically generate an optimized portfolio from ASX200 stocks
         </p>
       </div>
@@ -204,7 +204,7 @@ export default function AutoBuilder() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2">
           <form onSubmit={handleSubmit(onSubmit)} className="card">
-            <h2 className="text-lg font-semibold text-slate-900 mb-4">Build Settings</h2>
+            <h2 className="text-lg font-semibold text-slate-100 mb-4">Build Settings</h2>
             
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
@@ -238,11 +238,11 @@ export default function AutoBuilder() {
               </div>
             </div>
 
-            <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-3">
-              <AlertCircle className="w-5 h-5 text-amber-600 mt-0.5" />
+            <div className="mt-4 p-4 bg-amber-500/20 border border-amber-500/30 rounded-lg flex items-start gap-3 backdrop-blur-sm">
+              <AlertCircle className="w-5 h-5 text-amber-400 mt-0.5" />
               <div>
-                <p className="text-sm text-amber-800 font-medium">How it works</p>
-                <p className="text-sm text-amber-700 mt-1">
+                <p className="text-sm text-amber-300 font-medium">How it works</p>
+                <p className="text-sm text-amber-300/80 mt-1">
                   Sapient fetches the full ASX200 index, selects diversified stocks based on your portfolio size,
                   and optimizes allocations using real Yahoo Finance data and Modern Portfolio Theory (Sharpe ratio maximization).
                 </p>
@@ -266,9 +266,9 @@ export default function AutoBuilder() {
           {building && (
             <div className="card mt-6">
               <div className="flex flex-col items-center justify-center py-12">
-                <Loader2 className="w-12 h-12 animate-spin text-sky-600 mb-4" />
-                <p className="text-lg font-semibold text-slate-700">{progress || 'Processing...'}</p>
-                <p className="text-slate-500 mt-2">This may take a moment as we fetch real market data</p>
+                <Loader2 className="w-12 h-12 animate-spin text-sky-400 mb-4" />
+                <p className="text-lg font-semibold text-slate-100">{progress || 'Processing...'}</p>
+                <p className="text-slate-400 mt-2">This may take a moment as we fetch real market data</p>
               </div>
             </div>
           )}
@@ -276,11 +276,11 @@ export default function AutoBuilder() {
           {!building && result && (
             <>
               <div className="card mt-6">
-                <h2 className="text-lg font-semibold text-slate-900 mb-4">Recommended Allocation</h2>
+                <h2 className="text-lg font-semibold text-slate-100 mb-4">Recommended Allocation</h2>
                 <div className="overflow-x-auto">
                   <table className="w-full">
                     <thead>
-                      <tr className="text-left text-sm text-slate-500 border-b">
+                      <tr className="text-left text-sm text-slate-400 border-b border-slate-600/50">
                         <th className="pb-3 font-medium">Stock</th>
                         <th className="pb-3 font-medium">Sector</th>
                         <th className="pb-3 font-medium text-right">Weight</th>
@@ -295,7 +295,7 @@ export default function AutoBuilder() {
                           const amount = weightNum * investmentAmount
                           const sector = stockSectors[symbol] || 'Unknown'
                           return (
-                            <tr key={symbol} className="border-b border-slate-100 last:border-0">
+                            <tr key={symbol} className="border-b border-slate-700/50 last:border-0 hover:bg-slate-800/50 transition-all duration-300">
                               <td className="py-3">
                                 <div className="flex items-center gap-2">
                                   <div 
@@ -303,29 +303,29 @@ export default function AutoBuilder() {
                                     style={{ backgroundColor: COLORS[index % COLORS.length] }}
                                   />
                                   <div>
-                                    <span className="font-medium text-slate-900">{symbol.replace('.AX', '')}</span>
+                                    <span className="font-medium text-slate-100">{symbol.replace('.AX', '')}</span>
                                     <p className="text-xs text-slate-500">{stockNames[symbol] || ''}</p>
                                   </div>
                                 </div>
                               </td>
                               <td className="py-3">
-                                <span className="text-sm text-slate-600">{sector}</span>
+                                <span className="text-sm text-slate-400">{sector}</span>
                               </td>
                               <td className="py-3 text-right">
-                                <span className="font-medium text-sky-600">{(weightNum * 100).toFixed(1)}%</span>
+                                <span className="font-medium text-sky-400">{(weightNum * 100).toFixed(1)}%</span>
                               </td>
                               <td className="py-3 text-right">
-                                <span className="text-slate-700">${amount.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                                <span className="text-slate-300">${amount.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
                               </td>
                             </tr>
                           )
                         })}
                     </tbody>
                     <tfoot>
-                      <tr className="border-t-2 border-slate-200">
-                        <td className="py-3 font-semibold text-slate-900" colSpan={2}>Total</td>
-                        <td className="py-3 text-right font-semibold text-sky-600">100%</td>
-                        <td className="py-3 text-right font-semibold text-slate-900">${investmentAmount.toLocaleString()}</td>
+                      <tr className="border-t-2 border-slate-600/50">
+                        <td className="py-3 font-semibold text-slate-100" colSpan={2}>Total</td>
+                        <td className="py-3 text-right font-semibold text-sky-400">100%</td>
+                        <td className="py-3 text-right font-semibold text-slate-100">${investmentAmount.toLocaleString()}</td>
                       </tr>
                     </tfoot>
                   </table>
@@ -339,37 +339,37 @@ export default function AutoBuilder() {
           {result && (
             <>
               <div className="card">
-                <h2 className="text-lg font-semibold text-slate-900 mb-4">Portfolio Metrics</h2>
+                <h2 className="text-lg font-semibold text-slate-100 mb-4">Portfolio Metrics</h2>
                 <div className="space-y-3">
                   <div className="flex justify-between">
-                    <span className="text-slate-600">Expected Return</span>
-                    <span className="font-medium text-emerald-600">
+                    <span className="text-slate-400">Expected Return</span>
+                    <span className="font-medium text-emerald-400">
                       {(result.expected_return * 100).toFixed(2)}%
                     </span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-600">Volatility</span>
-                    <span className="font-medium">{(result.volatility * 100).toFixed(2)}%</span>
+                    <span className="text-slate-400">Volatility</span>
+                    <span className="font-medium text-slate-300">{(result.volatility * 100).toFixed(2)}%</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-600">Sharpe Ratio</span>
-                    <span className="font-medium text-sky-600">{result.sharpe_ratio.toFixed(3)}</span>
+                    <span className="text-slate-400">Sharpe Ratio</span>
+                    <span className="font-medium text-sky-400">{result.sharpe_ratio.toFixed(3)}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-600">Max Drawdown</span>
-                    <span className="font-medium text-red-600">
+                    <span className="text-slate-400">Max Drawdown</span>
+                    <span className="font-medium text-red-400">
                       {(result.max_drawdown * 100).toFixed(2)}%
                     </span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-600">Dividend Yield</span>
-                    <span className="font-medium">
+                    <span className="text-slate-400">Dividend Yield</span>
+                    <span className="font-medium text-purple-400">
                       {(result.portfolio_dividend_yield * 100).toFixed(2)}%
                     </span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-600">Stocks in Portfolio</span>
-                    <span className="font-medium">{Object.keys(result.weights).length}</span>
+                    <span className="text-slate-400">Stocks in Portfolio</span>
+                    <span className="font-medium text-slate-300">{Object.keys(result.weights).length}</span>
                   </div>
                 </div>
 
@@ -384,7 +384,7 @@ export default function AutoBuilder() {
               </div>
 
               <div className="card">
-                <h2 className="text-lg font-semibold text-slate-900 mb-4">Top Holdings</h2>
+                <h2 className="text-lg font-semibold text-slate-100 mb-4">Top Holdings</h2>
                 <ResponsiveContainer width="100%" height={250}>
                   <PieChart>
                     <Pie
@@ -395,20 +395,26 @@ export default function AutoBuilder() {
                       cy="50%"
                       outerRadius={80}
                       label={({ name, value }) => `${name}: ${value.toFixed(1)}%`}
+                      labelLine={{ stroke: '#94a3b8' }}
                     >
                       {chartData.map((_, index) => (
                         <Cell key={index} fill={COLORS[index % COLORS.length]} />
                       ))}
                     </Pie>
-                    <Tooltip formatter={(value: number) => `${value.toFixed(2)}%`} />
-                    <Legend />
+                    <Tooltip 
+                      formatter={(value: number) => `${value.toFixed(2)}%`}
+                      contentStyle={{ backgroundColor: 'rgba(15, 23, 42, 0.9)', border: '1px solid rgba(148, 163, 184, 0.2)', borderRadius: '8px' }}
+                      labelStyle={{ color: '#f1f5f9' }}
+                      itemStyle={{ color: '#94a3b8' }}
+                    />
+                    <Legend wrapperStyle={{ color: '#94a3b8' }} />
                   </PieChart>
                 </ResponsiveContainer>
               </div>
 
               {result.correlation_matrix && result.correlation_symbols && (
                 <div className="card">
-                  <h2 className="text-lg font-semibold text-slate-900 mb-4">Correlation Matrix</h2>
+                  <h2 className="text-lg font-semibold text-slate-100 mb-4">Correlation Matrix</h2>
                   <CorrelationMatrix 
                     matrix={result.correlation_matrix} 
                     symbols={result.correlation_symbols} 
@@ -421,10 +427,10 @@ export default function AutoBuilder() {
       </div>
 
       {showSaveModal && result && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-xl">
-            <h3 className="text-xl font-bold text-slate-900 mb-4">Save Portfolio</h3>
-            <p className="text-slate-600 mb-4">Enter a name for your auto-generated portfolio:</p>
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="rounded-2xl p-6 w-full max-w-md border transition-all duration-300" style={{ background: 'rgba(15, 23, 42, 0.9)', borderColor: 'rgba(148, 163, 184, 0.2)', boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5), 0 0 20px rgba(56, 189, 248, 0.1)' }}>
+            <h3 className="text-xl font-bold text-slate-100 mb-4">Save Portfolio</h3>
+            <p className="text-slate-400 mb-4">Enter a name for your auto-generated portfolio:</p>
             <input
               type="text"
               value={portfolioName}

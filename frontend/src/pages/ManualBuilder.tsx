@@ -11,11 +11,11 @@ import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, BarChart, Ba
 const COLORS = ['#0ea5e9', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#6366f1', '#14b8a6']
 
 const getCorrelationColor = (value: number): string => {
-  if (value >= 0.7) return 'bg-red-500 text-white'
-  if (value >= 0.4) return 'bg-amber-400 text-slate-900'
-  if (value >= 0) return 'bg-emerald-400 text-slate-900'
-  if (value >= -0.4) return 'bg-sky-400 text-slate-900'
-  return 'bg-blue-600 text-white'
+  if (value >= 0.7) return 'bg-red-500/80 text-white'
+  if (value >= 0.4) return 'bg-amber-500/80 text-white'
+  if (value >= 0) return 'bg-emerald-500/80 text-white'
+  if (value >= -0.4) return 'bg-sky-500/80 text-white'
+  return 'bg-blue-600/80 text-white'
 }
 
 const CorrelationMatrix = ({ matrix, symbols }: { matrix: number[][], symbols: string[] }) => {
@@ -31,16 +31,16 @@ const CorrelationMatrix = ({ matrix, symbols }: { matrix: number[][], symbols: s
             <tr>
               <th className="p-2"></th>
               {symbols.map(s => (
-                <th key={s} className="p-2 font-semibold text-slate-700 text-center">{s}</th>
+                <th key={s} className="p-2 font-semibold text-slate-300 text-center">{s}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {matrix.map((row, i) => (
               <tr key={symbols[i]}>
-                <td className="p-2 font-semibold text-slate-700">{symbols[i]}</td>
+                <td className="p-2 font-semibold text-slate-300">{symbols[i]}</td>
                 {row.map((val, j) => (
-                  <td key={j} className={`p-2 text-center rounded ${i === j ? 'bg-slate-200' : getCorrelationColor(val)}`}>
+                  <td key={j} className={`p-2 text-center rounded transition-all duration-300 ${i === j ? 'bg-slate-700' : getCorrelationColor(val)}`}>
                     {val.toFixed(2)}
                   </td>
                 ))}
@@ -50,10 +50,10 @@ const CorrelationMatrix = ({ matrix, symbols }: { matrix: number[][], symbols: s
         </table>
       </div>
       
-      <div className={`flex items-center gap-2 p-3 rounded-lg ${
-        avgCorr < 0.3 ? 'bg-emerald-50 text-emerald-700' :
-        avgCorr < 0.5 ? 'bg-sky-50 text-sky-700' :
-        'bg-amber-50 text-amber-700'
+      <div className={`flex items-center gap-2 p-3 rounded-lg border backdrop-blur-sm ${
+        avgCorr < 0.3 ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' :
+        avgCorr < 0.5 ? 'bg-sky-500/20 text-sky-300 border-sky-500/30' :
+        'bg-amber-500/20 text-amber-300 border-amber-500/30'
       }`}>
         {avgCorr < 0.3 ? <CheckCircle className="w-5 h-5" /> :
          avgCorr < 0.5 ? <Info className="w-5 h-5" /> :
@@ -176,16 +176,16 @@ export default function ManualBuilder() {
   })) : []
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-fade-in">
       <div>
-        <h1 className="text-3xl font-bold text-slate-900">Manual Portfolio Builder</h1>
-        <p className="text-slate-600 mt-1">Select ASX stocks and optimize your portfolio allocation</p>
+        <h1 className="text-3xl font-bold text-slate-100">Manual Portfolio Builder</h1>
+        <p className="text-slate-400 mt-1">Select ASX stocks and optimize your portfolio allocation</p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
           <div className="card">
-            <h2 className="text-lg font-semibold text-slate-900 mb-4">Select Stocks</h2>
+            <h2 className="text-lg font-semibold text-slate-100 mb-4">Select Stocks</h2>
             
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
@@ -202,15 +202,15 @@ export default function ManualBuilder() {
             </div>
 
             {searchResults.length > 0 && (
-              <div className="mt-2 border border-slate-200 rounded-lg overflow-hidden">
+              <div className="mt-2 border border-slate-600/50 rounded-lg overflow-hidden bg-slate-800/80 backdrop-blur-sm">
                 {searchResults.map((stock) => (
                   <button
                     key={stock.symbol}
                     onClick={() => addStock(stock.symbol)}
-                    className="w-full px-4 py-2 text-left hover:bg-slate-50 flex justify-between items-center border-b last:border-b-0"
+                    className="w-full px-4 py-2 text-left hover:bg-slate-700/50 flex justify-between items-center border-b border-slate-600/50 last:border-b-0 transition-all duration-300"
                   >
-                    <span className="font-medium">{stock.symbol}</span>
-                    <span className="text-sm text-slate-500">{stock.name}</span>
+                    <span className="font-medium text-slate-100">{stock.symbol}</span>
+                    <span className="text-sm text-slate-400">{stock.name}</span>
                   </button>
                 ))}
               </div>
@@ -220,10 +220,10 @@ export default function ManualBuilder() {
               {selectedStocks.map((symbol) => (
                 <span
                   key={symbol}
-                  className="inline-flex items-center gap-1 px-3 py-1 bg-sky-100 text-sky-700 rounded-full text-sm"
+                  className="inline-flex items-center gap-1 px-3 py-1 bg-sky-500/20 text-sky-300 border border-sky-500/30 rounded-full text-sm backdrop-blur-sm transition-all duration-300 hover:bg-sky-500/30"
                 >
                   {symbol}
-                  <button onClick={() => removeStock(symbol)} className="hover:text-sky-900">
+                  <button onClick={() => removeStock(symbol)} className="hover:text-sky-100 transition-colors">
                     <X className="w-4 h-4" />
                   </button>
                 </span>
@@ -235,7 +235,7 @@ export default function ManualBuilder() {
           </div>
 
           <form onSubmit={handleSubmit(onSubmit)} className="card">
-            <h2 className="text-lg font-semibold text-slate-900 mb-4">Optimization Settings</h2>
+            <h2 className="text-lg font-semibold text-slate-100 mb-4">Optimization Settings</h2>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
@@ -279,9 +279,9 @@ export default function ManualBuilder() {
           {optimizing && (
             <div className="card">
               <div className="flex flex-col items-center justify-center py-12">
-                <Loader2 className="w-12 h-12 animate-spin text-sky-600 mb-4" />
-                <p className="text-lg font-semibold text-slate-700">Fetching market data from Yahoo Finance...</p>
-                <p className="text-slate-500 mt-2">Running portfolio optimization algorithm</p>
+                <Loader2 className="w-12 h-12 animate-spin text-sky-400 mb-4" />
+                <p className="text-lg font-semibold text-slate-100">Fetching market data from Yahoo Finance...</p>
+                <p className="text-slate-400 mt-2">Running portfolio optimization algorithm</p>
               </div>
             </div>
           )}
@@ -289,38 +289,38 @@ export default function ManualBuilder() {
           {!optimizing && result && (
             <>
               <div className="card">
-                <h2 className="text-lg font-semibold text-slate-900 mb-4">Portfolio Metrics</h2>
+                <h2 className="text-lg font-semibold text-slate-100 mb-4">Portfolio Metrics</h2>
                 <div className="grid grid-cols-2 gap-4">
-                  <div className="bg-gradient-to-br from-emerald-50 to-emerald-100 p-4 rounded-xl">
-                    <p className="text-sm text-emerald-600">Expected Return</p>
-                    <p className="text-2xl font-bold text-emerald-700">
+                  <div className="bg-emerald-500/20 border border-emerald-500/30 p-4 rounded-xl backdrop-blur-sm transition-all duration-300 hover:bg-emerald-500/30">
+                    <p className="text-sm text-emerald-300">Expected Return</p>
+                    <p className="text-2xl font-bold text-emerald-400">
                       {(result.expected_return * 100).toFixed(2)}%
                     </p>
                   </div>
-                  <div className="bg-gradient-to-br from-sky-50 to-sky-100 p-4 rounded-xl">
-                    <p className="text-sm text-sky-600">Sharpe Ratio</p>
-                    <p className="text-2xl font-bold text-sky-700">{result.sharpe_ratio.toFixed(3)}</p>
+                  <div className="bg-sky-500/20 border border-sky-500/30 p-4 rounded-xl backdrop-blur-sm transition-all duration-300 hover:bg-sky-500/30">
+                    <p className="text-sm text-sky-300">Sharpe Ratio</p>
+                    <p className="text-2xl font-bold text-sky-400">{result.sharpe_ratio.toFixed(3)}</p>
                   </div>
-                  <div className="bg-gradient-to-br from-amber-50 to-amber-100 p-4 rounded-xl">
-                    <p className="text-sm text-amber-600">Volatility</p>
-                    <p className="text-2xl font-bold text-amber-700">{(result.volatility * 100).toFixed(2)}%</p>
+                  <div className="bg-amber-500/20 border border-amber-500/30 p-4 rounded-xl backdrop-blur-sm transition-all duration-300 hover:bg-amber-500/30">
+                    <p className="text-sm text-amber-300">Volatility</p>
+                    <p className="text-2xl font-bold text-amber-400">{(result.volatility * 100).toFixed(2)}%</p>
                   </div>
-                  <div className="bg-gradient-to-br from-red-50 to-red-100 p-4 rounded-xl">
-                    <p className="text-sm text-red-600">Max Drawdown</p>
-                    <p className="text-2xl font-bold text-red-700">{(result.max_drawdown * 100).toFixed(2)}%</p>
+                  <div className="bg-red-500/20 border border-red-500/30 p-4 rounded-xl backdrop-blur-sm transition-all duration-300 hover:bg-red-500/30">
+                    <p className="text-sm text-red-300">Max Drawdown</p>
+                    <p className="text-2xl font-bold text-red-400">{(result.max_drawdown * 100).toFixed(2)}%</p>
                   </div>
                 </div>
                 
-                <div className="mt-4 p-4 bg-slate-50 rounded-xl">
+                <div className="mt-4 p-4 bg-slate-800/50 border border-slate-600/50 rounded-xl backdrop-blur-sm">
                   <div className="flex justify-between items-center">
-                    <span className="text-slate-600">Dividend Yield</span>
-                    <span className="font-semibold text-purple-600">
+                    <span className="text-slate-400">Dividend Yield</span>
+                    <span className="font-semibold text-purple-400">
                       {(result.portfolio_dividend_yield * 100).toFixed(2)}%
                     </span>
                   </div>
                   <div className="flex justify-between items-center mt-2">
-                    <span className="text-slate-600">Value at Risk (95%)</span>
-                    <span className="font-semibold text-slate-700">
+                    <span className="text-slate-400">Value at Risk (95%)</span>
+                    <span className="font-semibold text-slate-300">
                       {(result.var_95 * 100).toFixed(2)}%
                     </span>
                   </div>
@@ -337,7 +337,7 @@ export default function ManualBuilder() {
               </div>
 
               <div className="card">
-                <h2 className="text-lg font-semibold text-slate-900 mb-4">Allocation</h2>
+                <h2 className="text-lg font-semibold text-slate-100 mb-4">Allocation</h2>
                 <ResponsiveContainer width="100%" height={250}>
                   <PieChart>
                     <Pie
@@ -348,20 +348,26 @@ export default function ManualBuilder() {
                       cy="50%"
                       outerRadius={80}
                       label={({ name, value }) => `${name}: ${value.toFixed(1)}%`}
+                      labelLine={{ stroke: '#94a3b8' }}
                     >
                       {chartData.map((_, index) => (
                         <Cell key={index} fill={COLORS[index % COLORS.length]} />
                       ))}
                     </Pie>
-                    <Tooltip formatter={(value: number) => `${value.toFixed(2)}%`} />
-                    <Legend />
+                    <Tooltip 
+                      formatter={(value: number) => `${value.toFixed(2)}%`}
+                      contentStyle={{ backgroundColor: 'rgba(15, 23, 42, 0.9)', border: '1px solid rgba(148, 163, 184, 0.2)', borderRadius: '8px' }}
+                      labelStyle={{ color: '#f1f5f9' }}
+                      itemStyle={{ color: '#94a3b8' }}
+                    />
+                    <Legend wrapperStyle={{ color: '#94a3b8' }} />
                   </PieChart>
                 </ResponsiveContainer>
               </div>
 
               {result.correlation_matrix && result.correlation_symbols && (
                 <div className="card">
-                  <h2 className="text-lg font-semibold text-slate-900 mb-4">Correlation Matrix</h2>
+                  <h2 className="text-lg font-semibold text-slate-100 mb-4">Correlation Matrix</h2>
                   <CorrelationMatrix 
                     matrix={result.correlation_matrix} 
                     symbols={result.correlation_symbols} 
@@ -370,13 +376,18 @@ export default function ManualBuilder() {
               )}
 
               <div className="card">
-                <h2 className="text-lg font-semibold text-slate-900 mb-4">Allocation Breakdown</h2>
+                <h2 className="text-lg font-semibold text-slate-100 mb-4">Allocation Breakdown</h2>
                 <ResponsiveContainer width="100%" height={200}>
                   <BarChart data={chartData} layout="vertical">
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis type="number" domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
-                    <YAxis type="category" dataKey="name" width={60} />
-                    <Tooltip formatter={(value: number) => `${value.toFixed(2)}%`} />
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(148, 163, 184, 0.2)" />
+                    <XAxis type="number" domain={[0, 100]} tickFormatter={(v) => `${v}%`} stroke="#94a3b8" />
+                    <YAxis type="category" dataKey="name" width={60} stroke="#94a3b8" />
+                    <Tooltip 
+                      formatter={(value: number) => `${value.toFixed(2)}%`}
+                      contentStyle={{ backgroundColor: 'rgba(15, 23, 42, 0.9)', border: '1px solid rgba(148, 163, 184, 0.2)', borderRadius: '8px' }}
+                      labelStyle={{ color: '#f1f5f9' }}
+                      itemStyle={{ color: '#94a3b8' }}
+                    />
                     <Bar dataKey="value" fill="#0ea5e9" radius={[0, 4, 4, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
@@ -387,10 +398,10 @@ export default function ManualBuilder() {
       </div>
 
       {showSaveModal && result && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-xl">
-            <h3 className="text-xl font-bold text-slate-900 mb-4">Save Portfolio</h3>
-            <p className="text-slate-600 mb-4">Enter a name for your optimized portfolio:</p>
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="rounded-2xl p-6 w-full max-w-md border transition-all duration-300" style={{ background: 'rgba(15, 23, 42, 0.9)', borderColor: 'rgba(148, 163, 184, 0.2)', boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5), 0 0 20px rgba(56, 189, 248, 0.1)' }}>
+            <h3 className="text-xl font-bold text-slate-100 mb-4">Save Portfolio</h3>
+            <p className="text-slate-400 mb-4">Enter a name for your optimized portfolio:</p>
             <input
               type="text"
               value={portfolioName}

@@ -153,7 +153,40 @@ PostgreSQL database with tables:
 - **scipy**: Portfolio optimization
 - **pandas/numpy**: Data processing
 
+## UI Design System
+
+The application uses a premium dark theme with luxury aesthetics:
+
+### Theme Colors
+- **Background**: Dark slate (slate-950) with purple gradient mesh
+- **Cards**: Glassmorphism effect with backdrop-blur and semi-transparent backgrounds
+- **Accents**: Sky-to-indigo gradients for primary actions
+- **Positive/Gains**: Emerald green with glow effects
+- **Negative/Losses**: Red with glow effects
+
+### Design Features
+- Glassmorphism cards with backdrop-blur-12px
+- Gradient buttons with colored shadows (glow on hover)
+- Smooth micro-animations (fade-in, transitions)
+- Custom scrollbars styled for dark theme
+- Animated gradient orbs on auth pages
+
+### CSS Classes (index.css)
+- `.card` / `.card-hover` - Glass cards with hover effects
+- `.stat-card` - Dashboard statistics cards
+- `.glass-panel` - Generic glass container
+- `.gradient-text` - Sky-to-indigo gradient text
+- `.badge-*` - Colored badges with dark variants
+- `.animate-fade-in` / `.animate-glow` - Animations
+
 ## Recent Changes (January 2025)
+
+**January 17, 2025**:
+- Implemented premium dark theme with glassmorphism effects
+- Added gradient accents and glowing shadows
+- Updated all pages with consistent dark styling
+- Added micro-animations and smooth transitions
+- Styled charts for dark mode visibility
 
 **January 7, 2025**:
 - Rewrote application from Streamlit to React + FastAPI architecture
