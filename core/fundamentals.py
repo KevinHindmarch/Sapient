@@ -22,11 +22,108 @@ class FundamentalsService:
     ]
     
     @staticmethod
+    def calculate_cagr(start_value: float, end_value: float, years: int) -> Optional[float]:
+        """
+        Calculate Compound Annual Growth Rate.
+        
+        CAGR = (End/Start)^(1/years) - 1
+        """
+        if start_value <= 0 or end_value <= 0 or years <= 0:
+            return None
+        try:
+            return (end_value / start_value) ** (1 / years) - 1
+        except:
+            return None
+    
+    @staticmethod
+    def get_historical_growth(ticker) -> Dict:
+        """
+        Fetch historical financial statements and calculate multi-year CAGR.
+        Uses 5 years of data when available for more reliable growth estimates.
+        """
+        growth_data = {
+            'earnings_cagr_5y': None,
+            'revenue_cagr_5y': None,
+            'earnings_cagr_3y': None,
+            'revenue_cagr_3y': None,
+            'years_of_data': 0,
+        }
+        
+        try:
+            # Get income statement (annual)
+            income_stmt = ticker.income_stmt
+            if income_stmt is None or income_stmt.empty:
+                return growth_data
+            
+            # Get Net Income and Total Revenue rows
+            net_income = None
+            total_revenue = None
+            
+            # Try different row names yfinance might use
+            for row_name in ['Net Income', 'Net Income Common Stockholders', 'NetIncome']:
+                if row_name in income_stmt.index:
+                    net_income = income_stmt.loc[row_name]
+                    break
+            
+            for row_name in ['Total Revenue', 'TotalRevenue', 'Revenue']:
+                if row_name in income_stmt.index:
+                    total_revenue = income_stmt.loc[row_name]
+                    break
+            
+            # Calculate years of data available
+            if net_income is not None:
+                valid_earnings = net_income.dropna()
+                years_available = len(valid_earnings)
+                growth_data['years_of_data'] = years_available
+                
+                if years_available >= 5:
+                    # 5-year CAGR (most recent vs 5 years ago)
+                    growth_data['earnings_cagr_5y'] = FundamentalsService.calculate_cagr(
+                        float(valid_earnings.iloc[-1]),  # Oldest
+                        float(valid_earnings.iloc[0]),   # Most recent
+                        years_available - 1
+                    )
+                
+                if years_available >= 3:
+                    # 3-year CAGR
+                    recent_3 = valid_earnings.iloc[:3]
+                    growth_data['earnings_cagr_3y'] = FundamentalsService.calculate_cagr(
+                        float(recent_3.iloc[-1]),
+                        float(recent_3.iloc[0]),
+                        2
+                    )
+            
+            if total_revenue is not None:
+                valid_revenue = total_revenue.dropna()
+                years_available = len(valid_revenue)
+                
+                if years_available >= 5:
+                    growth_data['revenue_cagr_5y'] = FundamentalsService.calculate_cagr(
+                        float(valid_revenue.iloc[-1]),
+                        float(valid_revenue.iloc[0]),
+                        years_available - 1
+                    )
+                
+                if years_available >= 3:
+                    recent_3 = valid_revenue.iloc[:3]
+                    growth_data['revenue_cagr_3y'] = FundamentalsService.calculate_cagr(
+                        float(recent_3.iloc[-1]),
+                        float(recent_3.iloc[0]),
+                        2
+                    )
+            
+        except Exception as e:
+            print(f"Error calculating historical growth: {e}")
+        
+        return growth_data
+    
+    @staticmethod
     def get_stock_fundamentals(symbol: str) -> Optional[Dict]:
         """
         Fetch fundamental data for a single stock.
         
         Returns dict with valuation, quality, and growth metrics.
+        Uses multi-year CAGR for more reliable growth estimates.
         """
         try:
             ticker = yf.Ticker(symbol)
@@ -34,6 +131,21 @@ class FundamentalsService:
             
             if not info or 'currentPrice' not in info:
                 return None
+            
+            # Get historical growth data (5-year CAGR)
+            historical_growth = FundamentalsService.get_historical_growth(ticker)
+            
+            # Use 5-year CAGR if available, else 3-year, else yfinance snapshot
+            best_earnings_growth = (
+                historical_growth.get('earnings_cagr_5y') or 
+                historical_growth.get('earnings_cagr_3y') or 
+                info.get('earningsGrowth')
+            )
+            best_revenue_growth = (
+                historical_growth.get('revenue_cagr_5y') or 
+                historical_growth.get('revenue_cagr_3y') or 
+                info.get('revenueGrowth')
+            )
             
             fundamentals = {
                 'symbol': symbol,
@@ -55,9 +167,14 @@ class FundamentalsService:
                 'operating_margin': info.get('operatingMargins'),
                 'debt_to_equity': info.get('debtToEquity'),
                 
-                # Growth metrics
-                'earnings_growth': info.get('earningsGrowth'),
-                'revenue_growth': info.get('revenueGrowth'),
+                # Growth metrics - now using multi-year CAGR
+                'earnings_growth': best_earnings_growth,
+                'revenue_growth': best_revenue_growth,
+                'earnings_cagr_5y': historical_growth.get('earnings_cagr_5y'),
+                'revenue_cagr_5y': historical_growth.get('revenue_cagr_5y'),
+                'earnings_cagr_3y': historical_growth.get('earnings_cagr_3y'),
+                'revenue_cagr_3y': historical_growth.get('revenue_cagr_3y'),
+                'years_of_data': historical_growth.get('years_of_data', 0),
                 
                 # Income metrics
                 'dividend_yield': info.get('dividendYield'),
