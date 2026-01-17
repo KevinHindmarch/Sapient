@@ -192,6 +192,10 @@ The application uses a premium theme with luxury aesthetics, supporting both lig
 ## Recent Changes (January 2025)
 
 **January 17, 2025**:
+- Switched to geometric returns for more realistic expected return projections
+  - Uses log-return method: exp(mean(log(1+r)) * annualization) - 1
+  - Properly accounts for volatility drag (variance drain)
+  - More conservative and realistic than arithmetic mean
 - Added theme switching system (light/dark modes)
 - Created Settings page at /settings for theme toggle
 - Implemented ThemeProvider with localStorage persistence
