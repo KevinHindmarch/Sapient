@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { portfolioApi, stocksApi } from '../lib/api'
 import { Portfolio, Position } from '../types'
 import { useAuth } from '../lib/auth'
+import { useTheme } from '../lib/theme'
 import { Briefcase, TrendingUp, TrendingDown, Wand2, Wrench, ArrowRight, Loader2, Sparkles } from 'lucide-react'
 
 interface PortfolioWithPositions {
@@ -12,6 +13,8 @@ interface PortfolioWithPositions {
 
 export default function Dashboard() {
   const { user } = useAuth()
+  const { theme } = useTheme()
+  const isDark = theme === 'dark'
   const [portfolios, setPortfolios] = useState<Portfolio[]>([])
   const [loading, setLoading] = useState(true)
   const [totalReturn, setTotalReturn] = useState<number | null>(null)
@@ -103,8 +106,8 @@ export default function Dashboard() {
               <Briefcase className="w-7 h-7 text-white" />
             </div>
             <div>
-              <p className="text-sm font-medium text-slate-400">Total Invested</p>
-              <p className="text-3xl font-bold text-slate-100">
+              <p className={`text-sm font-medium ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Total Invested</p>
+              <p className={`text-3xl font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
                 ${totalInvestment.toLocaleString()}
               </p>
             </div>
@@ -124,18 +127,18 @@ export default function Dashboard() {
               }
             </div>
             <div>
-              <p className="text-sm font-medium text-slate-400">Total Gain</p>
+              <p className={`text-sm font-medium ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Total Gain</p>
               {loadingReturns ? (
                 <div className="flex items-center gap-2">
-                  <Loader2 className="w-5 h-5 animate-spin text-slate-500" />
-                  <span className="text-sm text-slate-500">Calculating...</span>
+                  <Loader2 className={`w-5 h-5 animate-spin ${isDark ? 'text-slate-500' : 'text-slate-500'}`} />
+                  <span className={`text-sm ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>Calculating...</span>
                 </div>
               ) : totalReturn !== null ? (
                 <p className={`text-3xl font-bold ${totalReturn >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ textShadow: totalReturn >= 0 ? '0 0 10px rgba(52, 211, 153, 0.3)' : '0 0 10px rgba(248, 113, 113, 0.3)' }}>
                   {totalReturn >= 0 ? '+' : ''}${Math.abs(Math.round(totalReturn)).toLocaleString()}
                 </p>
               ) : (
-                <p className="text-3xl font-bold text-slate-500">$0</p>
+                <p className={`text-3xl font-bold ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>$0</p>
               )}
             </div>
           </div>
@@ -154,18 +157,18 @@ export default function Dashboard() {
               }
             </div>
             <div>
-              <p className="text-sm font-medium text-slate-400">Current Return</p>
+              <p className={`text-sm font-medium ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Current Return</p>
               {loadingReturns ? (
                 <div className="flex items-center gap-2">
-                  <Loader2 className="w-5 h-5 animate-spin text-slate-500" />
-                  <span className="text-sm text-slate-500">Fetching prices...</span>
+                  <Loader2 className={`w-5 h-5 animate-spin ${isDark ? 'text-slate-500' : 'text-slate-500'}`} />
+                  <span className={`text-sm ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>Fetching prices...</span>
                 </div>
               ) : totalReturn !== null ? (
                 <p className={`text-3xl font-bold ${totalReturn >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ textShadow: totalReturn >= 0 ? '0 0 10px rgba(52, 211, 153, 0.3)' : '0 0 10px rgba(248, 113, 113, 0.3)' }}>
                   {totalReturn >= 0 ? '+' : ''}{returnPct.toFixed(2)}%
                 </p>
               ) : (
-                <p className="text-3xl font-bold text-slate-500">--</p>
+                <p className={`text-3xl font-bold ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>--</p>
               )}
             </div>
           </div>
@@ -179,14 +182,14 @@ export default function Dashboard() {
               <Wand2 className="w-6 h-6 text-purple-400" />
             </div>
             <div className="flex-1">
-              <h3 className="text-lg font-semibold text-slate-100 group-hover:text-purple-300 transition-colors">
+              <h3 className={`text-lg font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'} group-hover:text-purple-300 transition-colors`}>
                 Auto Portfolio Builder
               </h3>
-              <p className="text-slate-400 mt-1">
+              <p className={`${isDark ? 'text-slate-400' : 'text-slate-600'} mt-1`}>
                 Let Sapient automatically select the best stocks from ASX200 for maximum Sharpe ratio.
               </p>
             </div>
-            <ArrowRight className="w-5 h-5 text-slate-500 group-hover:text-purple-400 group-hover:translate-x-1 transition-all" />
+            <ArrowRight className={`w-5 h-5 ${isDark ? 'text-slate-500' : 'text-slate-500'} group-hover:text-purple-400 group-hover:translate-x-1 transition-all`} />
           </div>
         </Link>
 
@@ -196,21 +199,21 @@ export default function Dashboard() {
               <Wrench className="w-6 h-6 text-sky-400" />
             </div>
             <div className="flex-1">
-              <h3 className="text-lg font-semibold text-slate-100 group-hover:text-sky-300 transition-colors">
+              <h3 className={`text-lg font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'} group-hover:text-sky-300 transition-colors`}>
                 Manual Portfolio Builder
               </h3>
-              <p className="text-slate-400 mt-1">
+              <p className={`${isDark ? 'text-slate-400' : 'text-slate-600'} mt-1`}>
                 Select specific ASX stocks and optimize your portfolio with custom risk settings.
               </p>
             </div>
-            <ArrowRight className="w-5 h-5 text-slate-500 group-hover:text-sky-400 group-hover:translate-x-1 transition-all" />
+            <ArrowRight className={`w-5 h-5 ${isDark ? 'text-slate-500' : 'text-slate-500'} group-hover:text-sky-400 group-hover:translate-x-1 transition-all`} />
           </div>
         </Link>
       </div>
 
       <div className="card">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xl font-semibold text-slate-100">Active Portfolios</h2>
+          <h2 className={`text-xl font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Active Portfolios</h2>
           <Link to="/portfolios" className="text-sky-400 hover:text-sky-300 text-sm font-medium transition-colors">
             View all
           </Link>
@@ -222,11 +225,11 @@ export default function Dashboard() {
           </div>
         ) : portfolios.length === 0 ? (
           <div className="text-center py-8">
-            <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-slate-800/50 flex items-center justify-center">
+            <div className={`w-16 h-16 mx-auto mb-4 rounded-2xl ${isDark ? 'bg-slate-800/50' : 'bg-slate-100'} flex items-center justify-center`}>
               <Briefcase className="w-8 h-8 text-slate-600" />
             </div>
-            <p className="text-slate-400">No portfolios yet</p>
-            <p className="text-sm text-slate-500 mt-1">
+            <p className={`${isDark ? 'text-slate-400' : 'text-slate-600'}`}>No portfolios yet</p>
+            <p className={`text-sm ${isDark ? 'text-slate-500' : 'text-slate-500'} mt-1`}>
               Create your first portfolio using the builders above
             </p>
           </div>
@@ -236,20 +239,20 @@ export default function Dashboard() {
               <Link
                 key={portfolio.id}
                 to={`/portfolios/${portfolio.id}`}
-                className="block p-4 rounded-xl transition-all duration-300 border border-slate-700/50 hover:border-sky-500/30"
+                className={`block p-4 rounded-xl transition-all duration-300 border ${isDark ? 'border-slate-700/50' : 'border-slate-200'} hover:border-sky-500/30`}
                 style={{
-                  background: 'rgba(30, 41, 59, 0.5)',
+                  background: isDark ? 'rgba(30, 41, 59, 0.5)' : 'rgba(241, 245, 249, 0.8)',
                 }}
               >
                 <div className="flex items-center justify-between">
                   <div>
-                    <h3 className="font-medium text-slate-100">{portfolio.name}</h3>
-                    <p className="text-sm text-slate-500">
+                    <h3 className={`font-medium ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{portfolio.name}</h3>
+                    <p className={`text-sm ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
                       {portfolio.position_count} positions • {portfolio.risk_tolerance}
                     </p>
                   </div>
                   <div className="text-right">
-                    <p className="font-medium text-slate-100">
+                    <p className={`font-medium ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
                       ${Number(portfolio.initial_investment).toLocaleString()}
                     </p>
                     {portfolio.expected_return && (

@@ -7,6 +7,7 @@ import { ArrowLeft, TrendingUp, TrendingDown, DollarSign, Pencil, Trash2, Plus, 
 import { format } from 'date-fns'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, LineChart, Line, XAxis, YAxis, CartesianGrid } from 'recharts'
 import { differenceInDays } from 'date-fns'
+import { useTheme } from '../lib/theme'
 
 const COLORS = ['#0ea5e9', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#6366f1', '#14b8a6']
 
@@ -27,6 +28,8 @@ export default function PortfolioDetail() {
   const [data, setData] = useState<PortfolioData | null>(null)
   const [loading, setLoading] = useState(true)
   const [currentPrices, setCurrentPrices] = useState<Record<string, number>>({})
+  const { theme } = useTheme()
+  const isDark = theme === 'dark'
 
   const [showEditModal, setShowEditModal] = useState(false)
   const [editingPosition, setEditingPosition] = useState<Position | null>(null)
@@ -202,6 +205,22 @@ export default function PortfolioDetail() {
     }
   }
 
+  const tooltipStyle = {
+    backgroundColor: isDark ? 'rgba(15, 23, 42, 0.9)' : 'rgba(255, 255, 255, 0.95)',
+    border: `1px solid ${isDark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.3)'}`,
+    borderRadius: '12px',
+    boxShadow: isDark ? '0 8px 32px rgba(0, 0, 0, 0.4)' : '0 8px 32px rgba(0, 0, 0, 0.1)',
+    backdropFilter: 'blur(12px)',
+    color: isDark ? '#f1f5f9' : '#0f172a'
+  }
+
+  const modalStyle = {
+    background: isDark ? 'rgba(15, 23, 42, 0.9)' : 'rgba(255, 255, 255, 0.95)',
+    borderColor: isDark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.3)',
+    backdropFilter: 'blur(12px)',
+    boxShadow: isDark ? '0 8px 32px rgba(0, 0, 0, 0.5)' : '0 8px 32px rgba(0, 0, 0, 0.15)'
+  }
+
   if (loading) {
     return (
       <div className="flex justify-center py-12">
@@ -213,7 +232,7 @@ export default function PortfolioDetail() {
   if (!data) {
     return (
       <div className="text-center py-12">
-        <p className="text-slate-400">Portfolio not found</p>
+        <p className={isDark ? 'text-slate-400' : 'text-slate-600'}>Portfolio not found</p>
         <Link to="/portfolios" className="text-sky-400 hover:text-sky-300 mt-2 inline-block">
           Back to portfolios
         </Link>
@@ -309,15 +328,20 @@ export default function PortfolioDetail() {
     return [Math.floor((min - padding) / 1000) * 1000, Math.ceil((max + padding) / 1000) * 1000]
   })()
 
+  const gridStroke = isDark ? '#334155' : '#e2e8f0'
+  const axisStroke = isDark ? '#475569' : '#94a3b8'
+  const tickFill = isDark ? '#94a3b8' : '#64748b'
+  const legendColor = isDark ? '#94a3b8' : '#64748b'
+
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Link to="/portfolios" className="p-2 hover:bg-slate-800/50 rounded-lg transition-colors border border-transparent hover:border-slate-700/50">
-            <ArrowLeft className="w-5 h-5 text-slate-400" />
+          <Link to="/portfolios" className={`p-2 ${isDark ? 'hover:bg-slate-800/50' : 'hover:bg-slate-100'} rounded-lg transition-colors border border-transparent ${isDark ? 'hover:border-slate-700/50' : 'hover:border-slate-200'}`}>
+            <ArrowLeft className={`w-5 h-5 ${isDark ? 'text-slate-400' : 'text-slate-600'}`} />
           </Link>
           <div>
-            <h1 className="text-3xl font-bold text-slate-100">{portfolio.name}</h1>
+            <h1 className={`text-3xl font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{portfolio.name}</h1>
             <div className="flex items-center gap-2 mt-1">
               <span className={`text-xs px-2 py-0.5 rounded-full border backdrop-blur-sm ${
                 portfolio.mode === 'auto' 
@@ -352,19 +376,19 @@ export default function PortfolioDetail() {
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="card">
-          <p className="text-sm text-slate-400">Initial Investment</p>
-          <p className="text-2xl font-bold text-slate-100">
+          <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Initial Investment</p>
+          <p className={`text-2xl font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
             ${Number(portfolio.initial_investment).toLocaleString()}
           </p>
         </div>
         <div className="card">
-          <p className="text-sm text-slate-400">Current Value</p>
-          <p className="text-2xl font-bold text-slate-100">
+          <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Current Value</p>
+          <p className={`text-2xl font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
             ${totalValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
           </p>
         </div>
         <div className="card">
-          <p className="text-sm text-slate-400">Total Return</p>
+          <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Total Return</p>
           <p className={`text-2xl font-bold flex items-center gap-1 ${
             totalReturn >= 0 ? 'text-emerald-400' : 'text-red-400'
           }`} style={{ textShadow: totalReturn >= 0 ? '0 0 15px rgba(52, 211, 153, 0.4)' : '0 0 15px rgba(248, 113, 113, 0.4)' }}>
@@ -373,7 +397,7 @@ export default function PortfolioDetail() {
           </p>
         </div>
         <div className="card">
-          <p className="text-sm text-slate-400">Expected Sharpe</p>
+          <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Expected Sharpe</p>
           <p className="text-2xl font-bold text-sky-400">
             {Number(portfolio.expected_sharpe || 0).toFixed(2)}
           </p>
@@ -381,21 +405,21 @@ export default function PortfolioDetail() {
       </div>
 
       <div className="card">
-        <h2 className="text-lg font-semibold text-slate-100 mb-4">Portfolio Growth</h2>
+        <h2 className={`text-lg font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'} mb-4`}>Portfolio Growth</h2>
         <ResponsiveContainer width="100%" height={300}>
           <LineChart data={growthChartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+            <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} />
             <XAxis 
               dataKey="date" 
-              tick={{ fontSize: 12, fill: '#94a3b8' }}
-              tickLine={{ stroke: '#475569' }}
-              axisLine={{ stroke: '#475569' }}
+              tick={{ fontSize: 12, fill: tickFill }}
+              tickLine={{ stroke: axisStroke }}
+              axisLine={{ stroke: axisStroke }}
             />
             <YAxis 
-              tick={{ fontSize: 12, fill: '#94a3b8' }}
+              tick={{ fontSize: 12, fill: tickFill }}
               tickFormatter={(value) => `$${(value / 1000).toFixed(0)}k`}
-              tickLine={{ stroke: '#475569' }}
-              axisLine={{ stroke: '#475569' }}
+              tickLine={{ stroke: axisStroke }}
+              axisLine={{ stroke: axisStroke }}
               domain={chartYDomain}
             />
             <Tooltip 
@@ -403,18 +427,11 @@ export default function PortfolioDetail() {
                 `$${value.toLocaleString()}`,
                 name === 'expected' ? 'Expected' : 'Actual'
               ]}
-              contentStyle={{ 
-                backgroundColor: 'rgba(15, 23, 42, 0.9)', 
-                border: '1px solid rgba(148, 163, 184, 0.2)',
-                borderRadius: '12px',
-                boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
-                backdropFilter: 'blur(12px)',
-                color: '#f1f5f9'
-              }}
-              labelStyle={{ color: '#94a3b8' }}
+              contentStyle={tooltipStyle}
+              labelStyle={{ color: legendColor }}
             />
             <Legend 
-              formatter={(value) => <span style={{ color: '#94a3b8' }}>{value === 'expected' ? 'Expected Growth' : 'Actual Growth'}</span>}
+              formatter={(value) => <span style={{ color: legendColor }}>{value === 'expected' ? 'Expected Growth' : 'Actual Growth'}</span>}
             />
             <Line 
               type="monotone" 
@@ -439,22 +456,22 @@ export default function PortfolioDetail() {
         <div className="flex justify-center gap-6 mt-4 text-sm">
           <div className="flex items-center gap-2">
             <div className="w-8 h-0.5 bg-slate-500" style={{ backgroundImage: 'repeating-linear-gradient(90deg, #64748b 0, #64748b 5px, transparent 5px, transparent 10px)' }}></div>
-            <span className="text-slate-400">Expected ({((portfolio.expected_return || 0.10) * 100).toFixed(1)}% p.a.)</span>
+            <span className={isDark ? 'text-slate-400' : 'text-slate-600'}>Expected ({((portfolio.expected_return || 0.10) * 100).toFixed(1)}% p.a.)</span>
           </div>
           <div className="flex items-center gap-2">
             <div className="w-8 h-0.5 bg-emerald-500"></div>
-            <span className="text-slate-400">Actual ({totalReturnPct >= 0 ? '+' : ''}{totalReturnPct.toFixed(1)}%)</span>
+            <span className={isDark ? 'text-slate-400' : 'text-slate-600'}>Actual ({totalReturnPct >= 0 ? '+' : ''}{totalReturnPct.toFixed(1)}%)</span>
           </div>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 card">
-          <h2 className="text-lg font-semibold text-slate-100 mb-4">Positions</h2>
+          <h2 className={`text-lg font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'} mb-4`}>Positions</h2>
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
-                <tr className="text-left text-sm text-slate-400 border-b border-slate-700/50">
+                <tr className={`text-left text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'} border-b ${isDark ? 'border-slate-700/50' : 'border-slate-200'}`}>
                   <th className="pb-3 font-medium">Symbol</th>
                   <th className="pb-3 font-medium">Quantity</th>
                   <th className="pb-3 font-medium">Avg Cost</th>
@@ -473,12 +490,12 @@ export default function PortfolioDetail() {
                   const plPct = costBasis > 0 ? (pl / costBasis) * 100 : 0
 
                   return (
-                    <tr key={position.id} className="border-b border-slate-700/50 last:border-b-0 bg-slate-800/30 hover:bg-slate-700/30 transition-colors">
-                      <td className="py-3 font-medium text-slate-100">{position.symbol.replace('.AX', '')}</td>
-                      <td className="py-3 text-slate-300">{Number(position.quantity).toFixed(2)}</td>
-                      <td className="py-3 text-slate-300">${Number(position.avg_cost).toFixed(2)}</td>
-                      <td className="py-3 text-slate-300">${currentPrice.toFixed(2)}</td>
-                      <td className="py-3 text-slate-300">${marketValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+                    <tr key={position.id} className={`border-b ${isDark ? 'border-slate-700/50' : 'border-slate-200'} last:border-b-0 ${isDark ? 'bg-slate-800/30 hover:bg-slate-700/30' : 'bg-slate-50 hover:bg-slate-100'} transition-colors`}>
+                      <td className={`py-3 font-medium ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{position.symbol.replace('.AX', '')}</td>
+                      <td className={`py-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{Number(position.quantity).toFixed(2)}</td>
+                      <td className={`py-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>${Number(position.avg_cost).toFixed(2)}</td>
+                      <td className={`py-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>${currentPrice.toFixed(2)}</td>
+                      <td className={`py-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>${marketValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
                       <td className={`py-3 font-medium ${pl >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ textShadow: pl >= 0 ? '0 0 10px rgba(52, 211, 153, 0.3)' : '0 0 10px rgba(248, 113, 113, 0.3)' }}>
                         {pl >= 0 ? '+' : ''}{plPct.toFixed(1)}%
                       </td>
@@ -486,14 +503,14 @@ export default function PortfolioDetail() {
                         <div className="flex items-center justify-end gap-1">
                           <button
                             onClick={() => openEditModal(position)}
-                            className="p-1.5 text-slate-400 hover:text-sky-400 hover:bg-sky-500/20 rounded transition-colors"
+                            className={`p-1.5 ${isDark ? 'text-slate-400' : 'text-slate-600'} hover:text-sky-400 hover:bg-sky-500/20 rounded transition-colors`}
                             title="Edit position"
                           >
                             <Pencil className="w-4 h-4" />
                           </button>
                           <button
                             onClick={() => openDeleteModal(position)}
-                            className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-500/20 rounded transition-colors"
+                            className={`p-1.5 ${isDark ? 'text-slate-400' : 'text-slate-600'} hover:text-red-400 hover:bg-red-500/20 rounded transition-colors`}
                             title="Remove position"
                           >
                             <Trash2 className="w-4 h-4" />
@@ -509,7 +526,7 @@ export default function PortfolioDetail() {
         </div>
 
         <div className="card">
-          <h2 className="text-lg font-semibold text-slate-100 mb-4">Allocation</h2>
+          <h2 className={`text-lg font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'} mb-4`}>Allocation</h2>
           {chartData.length > 0 && (
             <ResponsiveContainer width="100%" height={250}>
               <PieChart>
@@ -527,17 +544,10 @@ export default function PortfolioDetail() {
                 </Pie>
                 <Tooltip 
                   formatter={(value: number) => `$${value.toLocaleString()}`}
-                  contentStyle={{ 
-                    backgroundColor: 'rgba(15, 23, 42, 0.9)', 
-                    border: '1px solid rgba(148, 163, 184, 0.2)',
-                    borderRadius: '12px',
-                    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
-                    backdropFilter: 'blur(12px)',
-                    color: '#f1f5f9'
-                  }}
+                  contentStyle={tooltipStyle}
                 />
                 <Legend 
-                  formatter={(value) => <span style={{ color: '#94a3b8' }}>{value}</span>}
+                  formatter={(value) => <span style={{ color: legendColor }}>{value}</span>}
                 />
               </PieChart>
             </ResponsiveContainer>
@@ -546,13 +556,13 @@ export default function PortfolioDetail() {
       </div>
 
       <div className="card">
-        <h2 className="text-lg font-semibold text-slate-100 mb-4">Recent Transactions</h2>
+        <h2 className={`text-lg font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'} mb-4`}>Recent Transactions</h2>
         {transactions.length === 0 ? (
           <p className="text-slate-500 text-center py-4">No transactions yet</p>
         ) : (
           <div className="space-y-3">
             {transactions.slice(0, 10).map((txn) => (
-              <div key={txn.id} className="flex items-center justify-between p-3 bg-slate-800/30 rounded-lg border border-slate-700/50 hover:bg-slate-700/30 transition-colors">
+              <div key={txn.id} className={`flex items-center justify-between p-3 ${isDark ? 'bg-slate-800/30' : 'bg-slate-50'} rounded-lg border ${isDark ? 'border-slate-700/50' : 'border-slate-200'} ${isDark ? 'hover:bg-slate-700/30' : 'hover:bg-slate-100'} transition-colors`}>
                 <div className="flex items-center gap-3">
                   <div className={`p-2 rounded border ${
                     txn.txn_type === 'buy' ? 'bg-emerald-500/20 border-emerald-500/30' : 'bg-red-500/20 border-red-500/30'
@@ -562,7 +572,7 @@ export default function PortfolioDetail() {
                     }`} />
                   </div>
                   <div>
-                    <p className="font-medium text-slate-100">
+                    <p className={`font-medium ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
                       {txn.txn_type.toUpperCase()} {txn.symbol.replace('.AX', '')}
                     </p>
                     <p className="text-sm text-slate-500">
@@ -571,7 +581,7 @@ export default function PortfolioDetail() {
                   </div>
                 </div>
                 <div className="text-right">
-                  <p className="font-medium text-slate-100">${Number(txn.total_amount).toLocaleString()}</p>
+                  <p className={`font-medium ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>${Number(txn.total_amount).toLocaleString()}</p>
                   <p className="text-sm text-slate-500">
                     {format(new Date(txn.txn_time), 'MMM d, h:mm a')}
                   </p>
@@ -584,12 +594,12 @@ export default function PortfolioDetail() {
 
       {showEditModal && editingPosition && (
         <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: 'rgba(0, 0, 0, 0.7)', backdropFilter: 'blur(4px)' }}>
-          <div className="rounded-xl p-6 w-full max-w-md mx-4 border" style={{ background: 'rgba(15, 23, 42, 0.9)', borderColor: 'rgba(148, 163, 184, 0.2)', backdropFilter: 'blur(12px)', boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)' }}>
+          <div className="rounded-xl p-6 w-full max-w-md mx-4 border" style={modalStyle}>
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-slate-100">
+              <h3 className={`text-lg font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
                 Edit {editingPosition.symbol.replace('.AX', '')}
               </h3>
-              <button onClick={() => setShowEditModal(false)} className="text-slate-400 hover:text-slate-200 transition-colors">
+              <button onClick={() => setShowEditModal(false)} className={`${isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-600 hover:text-slate-900'} transition-colors`}>
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -640,16 +650,16 @@ export default function PortfolioDetail() {
 
       {showDeleteModal && deletingPosition && (
         <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: 'rgba(0, 0, 0, 0.7)', backdropFilter: 'blur(4px)' }}>
-          <div className="rounded-xl p-6 w-full max-w-md mx-4 border" style={{ background: 'rgba(15, 23, 42, 0.9)', borderColor: 'rgba(148, 163, 184, 0.2)', backdropFilter: 'blur(12px)', boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)' }}>
+          <div className="rounded-xl p-6 w-full max-w-md mx-4 border" style={modalStyle}>
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold text-red-400">Remove Position</h3>
-              <button onClick={() => setShowDeleteModal(false)} className="text-slate-400 hover:text-slate-200 transition-colors">
+              <button onClick={() => setShowDeleteModal(false)} className={`${isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-600 hover:text-slate-900'} transition-colors`}>
                 <X className="w-5 h-5" />
               </button>
             </div>
             
-            <p className="text-slate-400 mb-6">
-              Are you sure you want to remove <span className="font-semibold text-slate-100">{deletingPosition.symbol.replace('.AX', '')}</span> from this portfolio? This action cannot be undone.
+            <p className={isDark ? 'text-slate-400' : 'text-slate-600'} style={{ marginBottom: '1.5rem' }}>
+              Are you sure you want to remove <span className={`font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{deletingPosition.symbol.replace('.AX', '')}</span> from this portfolio? This action cannot be undone.
             </p>
             
             <div className="flex gap-3">
@@ -673,9 +683,9 @@ export default function PortfolioDetail() {
 
       {showAddModal && (
         <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: 'rgba(0, 0, 0, 0.7)', backdropFilter: 'blur(4px)' }}>
-          <div className="rounded-xl p-6 w-full max-w-md mx-4 border" style={{ background: 'rgba(15, 23, 42, 0.9)', borderColor: 'rgba(148, 163, 184, 0.2)', backdropFilter: 'blur(12px)', boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)' }}>
+          <div className="rounded-xl p-6 w-full max-w-md mx-4 border" style={modalStyle}>
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-slate-100">Add Stock to Portfolio</h3>
+              <h3 className={`text-lg font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Add Stock to Portfolio</h3>
               <button 
                 onClick={() => {
                   setShowAddModal(false)
@@ -684,7 +694,7 @@ export default function PortfolioDetail() {
                   setAddQuantity('')
                   setAddAvgCost('')
                 }} 
-                className="text-slate-400 hover:text-slate-200 transition-colors"
+                className={`${isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-600 hover:text-slate-900'} transition-colors`}
               >
                 <X className="w-5 h-5" />
               </button>
@@ -694,7 +704,7 @@ export default function PortfolioDetail() {
               <div className="relative">
                 <label className="label">Search Stock</label>
                 <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                  <Search className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${isDark ? 'text-slate-400' : 'text-slate-600'}`} />
                   <input
                     type="text"
                     value={searchQuery}
@@ -704,15 +714,15 @@ export default function PortfolioDetail() {
                   />
                 </div>
                 {searchResults.length > 0 && (
-                  <div className="absolute z-10 mt-1 w-full rounded-lg shadow-lg max-h-48 overflow-y-auto border" style={{ background: 'rgba(15, 23, 42, 0.95)', borderColor: 'rgba(148, 163, 184, 0.2)', backdropFilter: 'blur(12px)' }}>
+                  <div className="absolute z-10 mt-1 w-full rounded-lg shadow-lg max-h-48 overflow-y-auto border" style={{ background: isDark ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)', borderColor: isDark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.3)', backdropFilter: 'blur(12px)' }}>
                     {searchResults.map((stock) => (
                       <button
                         key={stock.symbol}
                         onClick={() => selectStockToAdd(stock)}
-                        className="w-full text-left px-4 py-2 hover:bg-slate-700/50 flex justify-between text-slate-100 transition-colors"
+                        className={`w-full text-left px-4 py-2 ${isDark ? 'hover:bg-slate-700/50' : 'hover:bg-slate-100'} flex justify-between ${isDark ? 'text-slate-100' : 'text-slate-900'} transition-colors`}
                       >
                         <span className="font-medium">{stock.symbol.replace('.AX', '')}</span>
-                        <span className="text-sm text-slate-400 truncate ml-2">{stock.name}</span>
+                        <span className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'} truncate ml-2`}>{stock.name}</span>
                       </button>
                     ))}
                   </div>

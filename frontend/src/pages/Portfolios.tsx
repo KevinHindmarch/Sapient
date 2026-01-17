@@ -4,10 +4,13 @@ import { portfolioApi } from '../lib/api'
 import { Portfolio } from '../types'
 import { Briefcase, ArrowRight, Calendar, TrendingUp, Shield } from 'lucide-react'
 import { format } from 'date-fns'
+import { useTheme } from '../lib/theme'
 
 export default function Portfolios() {
   const [portfolios, setPortfolios] = useState<Portfolio[]>([])
   const [loading, setLoading] = useState(true)
+  const { theme } = useTheme()
+  const isDark = theme === 'dark'
 
   useEffect(() => {
     loadPortfolios()
@@ -36,8 +39,8 @@ export default function Portfolios() {
     <div className="space-y-6 animate-fade-in">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-slate-100">My Portfolios</h1>
-          <p className="text-slate-400 mt-1">Track and manage your optimized portfolios</p>
+          <h1 className={`text-3xl font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>My Portfolios</h1>
+          <p className={`${isDark ? 'text-slate-400' : 'text-slate-600'} mt-1`}>Track and manage your optimized portfolios</p>
         </div>
         <Link to="/auto-builder" className="btn-primary flex items-center gap-2">
           <TrendingUp className="w-5 h-5" />
@@ -48,8 +51,8 @@ export default function Portfolios() {
       {portfolios.length === 0 ? (
         <div className="card text-center py-12">
           <Briefcase className="w-16 h-16 text-slate-600 mx-auto mb-4" />
-          <h2 className="text-xl font-semibold text-slate-100">No portfolios yet</h2>
-          <p className="text-slate-400 mt-2 max-w-md mx-auto">
+          <h2 className={`text-xl font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>No portfolios yet</h2>
+          <p className={`${isDark ? 'text-slate-400' : 'text-slate-600'} mt-2 max-w-md mx-auto`}>
             Create your first portfolio using the Manual or Auto Portfolio Builder to start tracking your investments.
           </p>
           <div className="flex gap-4 justify-center mt-6">
@@ -71,7 +74,7 @@ export default function Portfolios() {
             >
               <div className="flex items-start justify-between mb-4">
                 <div>
-                  <h3 className="text-lg font-semibold text-slate-100 group-hover:text-sky-400 transition-colors">
+                  <h3 className={`text-lg font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'} group-hover:text-sky-400 transition-colors`}>
                     {portfolio.name}
                   </h3>
                   <div className="flex items-center gap-2 mt-1">
@@ -98,12 +101,12 @@ export default function Portfolios() {
 
               <div className="space-y-3">
                 <div className="flex items-center gap-3 text-sm">
-                  <div className="p-2 bg-slate-800/50 rounded border border-slate-700/50">
-                    <Briefcase className="w-4 h-4 text-slate-400" />
+                  <div className={`p-2 ${isDark ? 'bg-slate-800/50' : 'bg-slate-100'} rounded border ${isDark ? 'border-slate-700/50' : 'border-slate-200'}`}>
+                    <Briefcase className={`w-4 h-4 ${isDark ? 'text-slate-400' : 'text-slate-600'}`} />
                   </div>
                   <div>
                     <p className="text-slate-500">Investment</p>
-                    <p className="font-medium text-slate-100">
+                    <p className={`font-medium ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
                       ${Number(portfolio.initial_investment).toLocaleString()}
                     </p>
                   </div>
@@ -138,19 +141,19 @@ export default function Portfolios() {
                 )}
 
                 <div className="flex items-center gap-3 text-sm">
-                  <div className="p-2 bg-slate-800/50 rounded border border-slate-700/50">
-                    <Calendar className="w-4 h-4 text-slate-400" />
+                  <div className={`p-2 ${isDark ? 'bg-slate-800/50' : 'bg-slate-100'} rounded border ${isDark ? 'border-slate-700/50' : 'border-slate-200'}`}>
+                    <Calendar className={`w-4 h-4 ${isDark ? 'text-slate-400' : 'text-slate-600'}`} />
                   </div>
                   <div>
                     <p className="text-slate-500">Created</p>
-                    <p className="font-medium text-slate-100">
+                    <p className={`font-medium ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
                       {format(new Date(portfolio.created_at), 'MMM d, yyyy')}
                     </p>
                   </div>
                 </div>
               </div>
 
-              <div className="mt-4 pt-4 border-t border-slate-700/50 text-sm text-slate-500">
+              <div className={`mt-4 pt-4 border-t ${isDark ? 'border-slate-700/50' : 'border-slate-200'} text-sm text-slate-500`}>
                 {portfolio.position_count} positions
               </div>
             </Link>

@@ -4,6 +4,7 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useAuth } from '../lib/auth'
+import { useTheme } from '../lib/theme'
 import { toast } from 'sonner'
 import { Eye, EyeOff } from 'lucide-react'
 
@@ -17,6 +18,8 @@ type LoginForm = z.infer<typeof loginSchema>
 export default function Login() {
   const { login } = useAuth()
   const navigate = useNavigate()
+  const { theme } = useTheme()
+  const isDark = theme === 'dark'
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
 
@@ -44,8 +47,15 @@ export default function Login() {
 
   return (
     <div className="min-h-screen flex items-center justify-center px-4 relative overflow-hidden">
-      <div className="absolute inset-0 bg-gradient-to-br from-slate-950 via-indigo-950/50 to-slate-950" />
-      <div className="absolute inset-0 opacity-30">
+      <div 
+        className="absolute inset-0" 
+        style={{ 
+          background: isDark 
+            ? 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%)' 
+            : 'linear-gradient(135deg, #f8fafc 0%, #e2e8f0 50%, #f8fafc 100%)' 
+        }} 
+      />
+      <div className="absolute inset-0" style={{ opacity: isDark ? 0.3 : 0.15 }}>
         <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-sky-500/20 rounded-full blur-3xl animate-pulse" />
         <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-indigo-500/20 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }} />
         <div className="absolute top-1/2 left-1/2 w-64 h-64 bg-purple-500/10 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '2s' }} />
@@ -65,21 +75,21 @@ export default function Login() {
             />
           </div>
           <h1 className="text-4xl font-bold gradient-text mt-4">Welcome Back</h1>
-          <p className="text-slate-400 mt-2 text-sm tracking-wide">Smart Portfolios, Smarter Returns</p>
+          <p className={`mt-2 text-sm tracking-wide ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Smart Portfolios, Smarter Returns</p>
         </div>
 
         <div 
           className="rounded-2xl p-8 border animate-fade-in"
           style={{ 
-            background: 'rgba(15, 23, 42, 0.8)',
-            borderColor: 'rgba(148, 163, 184, 0.1)',
+            background: isDark ? 'rgba(15, 23, 42, 0.8)' : 'rgba(255, 255, 255, 0.9)',
+            borderColor: isDark ? 'rgba(148, 163, 184, 0.1)' : 'rgba(148, 163, 184, 0.3)',
             backdropFilter: 'blur(24px)',
             WebkitBackdropFilter: 'blur(24px)',
-            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+            boxShadow: isDark ? '0 8px 32px rgba(0, 0, 0, 0.4)' : '0 8px 32px rgba(0, 0, 0, 0.1)',
             animationDelay: '0.2s'
           }}
         >
-          <h2 className="text-2xl font-bold text-slate-100 mb-6 text-center">Sign In</h2>
+          <h2 className={`text-2xl font-bold mb-6 text-center ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Sign In</h2>
 
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
             <div>
@@ -90,7 +100,7 @@ export default function Login() {
                 className="input"
                 placeholder="you@example.com"
               />
-              {errors.email && <p className="text-red-400 text-sm mt-1">{errors.email.message}</p>}
+              {errors.email && <p className={`text-sm mt-1 ${isDark ? 'text-red-400' : 'text-red-500'}`}>{errors.email.message}</p>}
             </div>
 
             <div>
@@ -105,12 +115,16 @@ export default function Login() {
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 transition-colors"
+                  className={`absolute right-3 top-1/2 -translate-y-1/2 transition-colors ${
+                    isDark 
+                      ? 'text-slate-400 hover:text-slate-200' 
+                      : 'text-slate-500 hover:text-slate-700'
+                  }`}
                 >
                   {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                 </button>
               </div>
-              {errors.password && <p className="text-red-400 text-sm mt-1">{errors.password.message}</p>}
+              {errors.password && <p className={`text-sm mt-1 ${isDark ? 'text-red-400' : 'text-red-500'}`}>{errors.password.message}</p>}
             </div>
 
             <button
@@ -130,7 +144,7 @@ export default function Login() {
             </button>
           </form>
 
-          <p className="text-center text-slate-400 mt-6">
+          <p className={`text-center mt-6 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
             Don't have an account?{' '}
             <Link to="/register" className="text-sky-400 hover:text-sky-300 font-medium transition-colors">
               Create one

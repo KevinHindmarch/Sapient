@@ -9,6 +9,7 @@ import AutoBuilder from './pages/AutoBuilder'
 import Portfolios from './pages/Portfolios'
 import PortfolioDetail from './pages/PortfolioDetail'
 import StockAnalysis from './pages/StockAnalysis'
+import Settings from './pages/Settings'
 import Layout from './components/Layout'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -48,6 +49,7 @@ function App() {
         <Route path="portfolios" element={<Portfolios />} />
         <Route path="portfolios/:id" element={<PortfolioDetail />} />
         <Route path="analysis" element={<StockAnalysis />} />
+        <Route path="settings" element={<Settings />} />
       </Route>
     </Routes>
   )

@@ -4,8 +4,11 @@ import { TechnicalAnalysis } from '../types'
 import { toast } from 'sonner'
 import { Search, TrendingUp, TrendingDown, Activity, AlertCircle } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, CartesianGrid } from 'recharts'
+import { useTheme } from '../lib/theme'
 
 export default function StockAnalysis() {
+  const { theme } = useTheme()
+  const isDark = theme === 'dark'
   const [symbol, setSymbol] = useState('')
   const [loading, setLoading] = useState(false)
   const [analysis, setAnalysis] = useState<TechnicalAnalysis | null>(null)
@@ -56,32 +59,32 @@ export default function StockAnalysis() {
   }
 
   const tooltipStyle = {
-    background: 'rgba(15, 23, 42, 0.9)',
+    background: isDark ? 'rgba(15, 23, 42, 0.9)' : 'rgba(255, 255, 255, 0.95)',
     border: '1px solid rgba(148, 163, 184, 0.2)',
     borderRadius: '8px',
-    color: '#e2e8f0'
+    color: isDark ? '#e2e8f0' : '#1e293b'
   }
 
   return (
     <div className="space-y-6 animate-fade-in">
       <div>
-        <h1 className="text-3xl font-bold text-slate-100">Stock Analysis</h1>
-        <p className="text-slate-400 mt-1">
+        <h1 className={`text-3xl font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Stock Analysis</h1>
+        <p className={`${isDark ? 'text-slate-400' : 'text-slate-600'} mt-1`}>
           Technical indicator analysis with RSI, MACD, and Bollinger Bands
         </p>
       </div>
 
-      <div className="card backdrop-blur-xl bg-slate-900/60 border border-slate-700/50">
+      <div className={`card backdrop-blur-xl ${isDark ? 'bg-slate-900/60 border-slate-700/50' : 'bg-white border-slate-300'}`}>
         <div className="flex gap-4">
           <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+            <Search className={`absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 ${isDark ? 'text-slate-400' : 'text-slate-600'}`} />
             <input
               type="text"
               value={symbol}
               onChange={(e) => setSymbol(e.target.value.toUpperCase())}
               onKeyDown={(e) => e.key === 'Enter' && analyzeStock()}
               placeholder="Enter ASX stock symbol (e.g., BHP, CBA, CSL)"
-              className="input pl-10 bg-slate-800/70 border-slate-600/50 text-slate-100 placeholder-slate-500"
+              className={`input pl-10 ${isDark ? 'bg-slate-800/70 border-slate-600/50 text-slate-100' : 'bg-white border-slate-300 text-slate-900'} placeholder-slate-500`}
             />
           </div>
           <button
@@ -98,19 +101,19 @@ export default function StockAnalysis() {
       {analysis && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-6">
-            <div className="card backdrop-blur-xl bg-slate-900/60 border border-slate-700/50">
-              <h2 className="text-lg font-semibold text-slate-100 mb-4">Price Chart</h2>
+            <div className={`card backdrop-blur-xl ${isDark ? 'bg-slate-900/60 border-slate-700/50' : 'bg-white border-slate-300'}`}>
+              <h2 className={`text-lg font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'} mb-4`}>Price Chart</h2>
               {chartData && (
                 <ResponsiveContainer width="100%" height={300}>
                   <LineChart data={chartData}>
-                    <CartesianGrid stroke="#334155" strokeDasharray="3 3" opacity={0.3} />
+                    <CartesianGrid stroke={isDark ? '#334155' : '#e2e8f0'} strokeDasharray="3 3" opacity={0.3} />
                     <XAxis 
                       dataKey="date" 
-                      tick={{ fontSize: 12, fill: '#94a3b8' }}
-                      stroke="#64748b"
+                      tick={{ fontSize: 12, fill: isDark ? '#94a3b8' : '#64748b' }}
+                      stroke={isDark ? '#64748b' : '#94a3b8'}
                       tickFormatter={(value) => new Date(value).toLocaleDateString('en-AU', { month: 'short' })}
                     />
-                    <YAxis domain={['auto', 'auto']} tick={{ fontSize: 12, fill: '#94a3b8' }} stroke="#64748b" />
+                    <YAxis domain={['auto', 'auto']} tick={{ fontSize: 12, fill: isDark ? '#94a3b8' : '#64748b' }} stroke={isDark ? '#64748b' : '#94a3b8'} />
                     <Tooltip 
                       contentStyle={tooltipStyle}
                       labelFormatter={(value) => new Date(value).toLocaleDateString()}
@@ -124,7 +127,7 @@ export default function StockAnalysis() {
                   </LineChart>
                 </ResponsiveContainer>
               )}
-              <div className="flex gap-4 mt-4 text-sm text-slate-400">
+              <div className={`flex gap-4 mt-4 text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
                 <span className="flex items-center gap-1">
                   <span className="w-3 h-0.5 bg-sky-400"></span> Price
                 </span>
@@ -140,19 +143,19 @@ export default function StockAnalysis() {
               </div>
             </div>
 
-            <div className="card backdrop-blur-xl bg-slate-900/60 border border-slate-700/50">
-              <h2 className="text-lg font-semibold text-slate-100 mb-4">RSI (Relative Strength Index)</h2>
+            <div className={`card backdrop-blur-xl ${isDark ? 'bg-slate-900/60 border-slate-700/50' : 'bg-white border-slate-300'}`}>
+              <h2 className={`text-lg font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'} mb-4`}>RSI (Relative Strength Index)</h2>
               {chartData && (
                 <ResponsiveContainer width="100%" height={150}>
                   <LineChart data={chartData}>
-                    <CartesianGrid stroke="#334155" strokeDasharray="3 3" opacity={0.3} />
+                    <CartesianGrid stroke={isDark ? '#334155' : '#e2e8f0'} strokeDasharray="3 3" opacity={0.3} />
                     <XAxis 
                       dataKey="date" 
-                      tick={{ fontSize: 12, fill: '#94a3b8' }}
-                      stroke="#64748b"
+                      tick={{ fontSize: 12, fill: isDark ? '#94a3b8' : '#64748b' }}
+                      stroke={isDark ? '#64748b' : '#94a3b8'}
                       tickFormatter={(value) => new Date(value).toLocaleDateString('en-AU', { month: 'short' })}
                     />
-                    <YAxis domain={[0, 100]} tick={{ fontSize: 12, fill: '#94a3b8' }} stroke="#64748b" />
+                    <YAxis domain={[0, 100]} tick={{ fontSize: 12, fill: isDark ? '#94a3b8' : '#64748b' }} stroke={isDark ? '#64748b' : '#94a3b8'} />
                     <Tooltip 
                       contentStyle={tooltipStyle}
                       labelFormatter={(value) => new Date(value).toLocaleDateString()}
@@ -164,7 +167,7 @@ export default function StockAnalysis() {
                   </LineChart>
                 </ResponsiveContainer>
               )}
-              <div className="flex gap-4 mt-2 text-sm text-slate-400">
+              <div className={`flex gap-4 mt-2 text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
                 <span>Above 70: Overbought (Sell signal)</span>
                 <span>Below 30: Oversold (Buy signal)</span>
               </div>
@@ -172,9 +175,9 @@ export default function StockAnalysis() {
           </div>
 
           <div className="space-y-6">
-            <div className="card backdrop-blur-xl bg-slate-900/60 border border-slate-700/50">
+            <div className={`card backdrop-blur-xl ${isDark ? 'bg-slate-900/60 border-slate-700/50' : 'bg-white border-slate-300'}`}>
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-semibold text-slate-100">
+                <h2 className={`text-lg font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
                   {analysis.symbol.replace('.AX', '')}
                 </h2>
                 <span className={`px-3 py-1 rounded-full text-sm font-medium ${
@@ -194,7 +197,7 @@ export default function StockAnalysis() {
                 </span>
               </div>
               
-              <p className="text-3xl font-bold text-slate-100 mb-4">
+              <p className={`text-3xl font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'} mb-4`}>
                 ${analysis.current_price.toFixed(2)}
               </p>
 
@@ -205,78 +208,78 @@ export default function StockAnalysis() {
               </div>
             </div>
 
-            <div className="card backdrop-blur-xl bg-slate-900/60 border border-slate-700/50">
-              <h2 className="text-lg font-semibold text-slate-100 mb-4">Indicators</h2>
+            <div className={`card backdrop-blur-xl ${isDark ? 'bg-slate-900/60 border-slate-700/50' : 'bg-white border-slate-300'}`}>
+              <h2 className={`text-lg font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'} mb-4`}>Indicators</h2>
               
               <div className="space-y-4">
-                <div className="p-3 bg-slate-800/50 rounded-lg border border-slate-700/30 backdrop-blur-sm">
+                <div className={`p-3 ${isDark ? 'bg-slate-800/50 border-slate-700/30' : 'bg-slate-100 border-slate-200'} rounded-lg border backdrop-blur-sm`}>
                   <div className="flex items-center justify-between mb-1">
-                    <span className="font-medium text-slate-200">RSI</span>
+                    <span className={`font-medium ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>RSI</span>
                     <span className={`px-2 py-0.5 rounded text-xs font-medium ${
                       getSignalColor(analysis.indicators.rsi.signal.signal)
                     }`}>
                       {analysis.indicators.rsi.signal.signal.toUpperCase()}
                     </span>
                   </div>
-                  <p className="text-2xl font-bold text-slate-100">{analysis.indicators.rsi.value.toFixed(1)}</p>
-                  <p className="text-sm text-slate-400 mt-1">
+                  <p className={`text-2xl font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{analysis.indicators.rsi.value.toFixed(1)}</p>
+                  <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'} mt-1`}>
                     {analysis.indicators.rsi.signal.explanation}
                   </p>
                 </div>
 
-                <div className="p-3 bg-slate-800/50 rounded-lg border border-slate-700/30 backdrop-blur-sm">
+                <div className={`p-3 ${isDark ? 'bg-slate-800/50 border-slate-700/30' : 'bg-slate-100 border-slate-200'} rounded-lg border backdrop-blur-sm`}>
                   <div className="flex items-center justify-between mb-1">
-                    <span className="font-medium text-slate-200">MACD</span>
+                    <span className={`font-medium ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>MACD</span>
                     <span className={`px-2 py-0.5 rounded text-xs font-medium ${
                       getSignalColor(analysis.indicators.macd.signal.signal)
                     }`}>
                       {analysis.indicators.macd.signal.signal.toUpperCase()}
                     </span>
                   </div>
-                  <p className="text-sm text-slate-300">
+                  <p className={`text-sm ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
                     MACD: {analysis.indicators.macd.macd_line.toFixed(4)}
                   </p>
-                  <p className="text-sm text-slate-300">
+                  <p className={`text-sm ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
                     Signal: {analysis.indicators.macd.signal_line.toFixed(4)}
                   </p>
-                  <p className="text-sm text-slate-400 mt-1">
+                  <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'} mt-1`}>
                     {analysis.indicators.macd.signal.explanation}
                   </p>
                 </div>
 
-                <div className="p-3 bg-slate-800/50 rounded-lg border border-slate-700/30 backdrop-blur-sm">
-                  <span className="font-medium text-slate-200">Moving Averages</span>
+                <div className={`p-3 ${isDark ? 'bg-slate-800/50 border-slate-700/30' : 'bg-slate-100 border-slate-200'} rounded-lg border backdrop-blur-sm`}>
+                  <span className={`font-medium ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>Moving Averages</span>
                   <div className="mt-2 space-y-1 text-sm">
                     <div className="flex justify-between">
-                      <span className="text-slate-400">SMA 20</span>
-                      <span className="font-medium text-slate-200">${analysis.indicators.moving_averages.sma_20.toFixed(2)}</span>
+                      <span className={isDark ? 'text-slate-400' : 'text-slate-600'}>SMA 20</span>
+                      <span className={`font-medium ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>${analysis.indicators.moving_averages.sma_20.toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-slate-400">SMA 50</span>
-                      <span className="font-medium text-slate-200">${analysis.indicators.moving_averages.sma_50.toFixed(2)}</span>
+                      <span className={isDark ? 'text-slate-400' : 'text-slate-600'}>SMA 50</span>
+                      <span className={`font-medium ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>${analysis.indicators.moving_averages.sma_50.toFixed(2)}</span>
                     </div>
-                    <p className="text-slate-400 mt-1">
+                    <p className={`${isDark ? 'text-slate-400' : 'text-slate-600'} mt-1`}>
                       Price is {analysis.indicators.moving_averages.price_vs_sma50} SMA 50
                     </p>
                   </div>
                 </div>
 
-                <div className="p-3 bg-slate-800/50 rounded-lg border border-slate-700/30 backdrop-blur-sm">
-                  <span className="font-medium text-slate-200">Bollinger Bands</span>
+                <div className={`p-3 ${isDark ? 'bg-slate-800/50 border-slate-700/30' : 'bg-slate-100 border-slate-200'} rounded-lg border backdrop-blur-sm`}>
+                  <span className={`font-medium ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>Bollinger Bands</span>
                   <div className="mt-2 space-y-1 text-sm">
                     <div className="flex justify-between">
-                      <span className="text-slate-400">Upper</span>
-                      <span className="font-medium text-slate-200">${analysis.indicators.bollinger.upper.toFixed(2)}</span>
+                      <span className={isDark ? 'text-slate-400' : 'text-slate-600'}>Upper</span>
+                      <span className={`font-medium ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>${analysis.indicators.bollinger.upper.toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-slate-400">Middle</span>
-                      <span className="font-medium text-slate-200">${analysis.indicators.bollinger.middle.toFixed(2)}</span>
+                      <span className={isDark ? 'text-slate-400' : 'text-slate-600'}>Middle</span>
+                      <span className={`font-medium ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>${analysis.indicators.bollinger.middle.toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-slate-400">Lower</span>
-                      <span className="font-medium text-slate-200">${analysis.indicators.bollinger.lower.toFixed(2)}</span>
+                      <span className={isDark ? 'text-slate-400' : 'text-slate-600'}>Lower</span>
+                      <span className={`font-medium ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>${analysis.indicators.bollinger.lower.toFixed(2)}</span>
                     </div>
-                    <p className="text-slate-400 mt-1">
+                    <p className={`${isDark ? 'text-slate-400' : 'text-slate-600'} mt-1`}>
                       Position: {analysis.indicators.bollinger.position.replace('_', ' ')}
                     </p>
                   </div>
