@@ -89,8 +89,8 @@ export default function Layout() {
             >
               {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
             </button>
-            <img src="/logo.png" alt="Sapient" className="w-9 h-9 rounded" />
-            <h1 className="text-xl font-bold text-sky-500 -ml-1">Sapient</h1>
+            <img src="/logo.png" alt="Sapient" className="w-16 h-16 rounded-lg" />
+            <h1 className="text-xl font-bold text-sky-500 -ml-2">Sapient</h1>
           </div>
         </header>
 
