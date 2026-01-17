@@ -46,6 +46,7 @@ The application has been rewritten from Streamlit to a modern **React + FastAPI*
   - `core/stocks.py` - Stock data fetching (StockDataService)
   - `core/optimizer.py` - Portfolio optimization (PortfolioOptimizerService)
   - `core/indicators.py` - Technical indicators (TechnicalIndicatorService)
+  - `core/fundamentals.py` - Fundamental analysis (FundamentalsService - earnings yield, ROE, growth metrics)
 
 ### Running the Application
 
@@ -77,10 +78,12 @@ The original Streamlit app (`app.py`) is still available. The current Server wor
 1. **Login/Register** (`/login`, `/register`) - User authentication with JWT
 2. **Dashboard** (`/`) - Overview of portfolios and quick actions
 3. **Manual Portfolio Builder** (`/manual-builder`) - Select specific stocks and optimize
-4. **Auto Portfolio Builder** (`/auto-builder`) - Automatic ASX200 optimization
-5. **My Portfolios** (`/portfolios`) - List of saved portfolios
-6. **Portfolio Detail** (`/portfolios/:id`) - P/L tracking, positions, transactions
-7. **Stock Analysis** (`/analysis`) - Technical indicators with interactive charts
+4. **Auto Portfolio Builder** (`/auto-builder`) - Automatic ASX200 optimization using historical returns
+5. **Fundamentals Builder** (`/fundamentals-builder`) - Build portfolios using fundamental analysis (earnings yield, quality, growth metrics)
+6. **My Portfolios** (`/portfolios`) - List of saved portfolios
+7. **Portfolio Detail** (`/portfolios/:id`) - P/L tracking, positions, transactions
+8. **Stock Analysis** (`/analysis`) - Technical indicators with interactive charts
+9. **Settings** (`/settings`) - Theme toggle (light/dark mode)
 
 ## API Endpoints
 
