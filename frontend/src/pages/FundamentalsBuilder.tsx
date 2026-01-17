@@ -167,12 +167,14 @@ export default function FundamentalsBuilder() {
           <div>
             <h3 className={`font-semibold text-lg ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>How it works</h3>
             <p className={`mt-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-              Unlike historical returns, this builder uses <strong>fundamental data</strong> to estimate expected returns:
+              Uses <strong>Fama-French multi-factor model</strong> backed by Nobel Prize-winning research:
             </p>
             <ul className={`mt-2 space-y-1 text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-              <li><strong>Expected Return</strong> = Earnings Yield + Expected Growth</li>
-              <li><strong>Quality Score</strong> = ROE, Profit Margins, Debt Levels</li>
-              <li><strong>Value Score</strong> = P/E, Price-to-Book ratios</li>
+              <li><strong>Value</strong> = Earnings Yield, Price-to-Book (high = undervalued)</li>
+              <li><strong>Quality</strong> = ROE, Profit Margins, Low Debt (profitability factor)</li>
+              <li><strong>Size</strong> = Small-cap premium (smaller companies outperform)</li>
+              <li><strong>Momentum</strong> = 12-month price trend (strongest 2024 factor)</li>
+              <li><strong>Growth</strong> = Sustainable Growth Rate (ROE × Retention + Historical CAGR)</li>
             </ul>
           </div>
         </div>
@@ -246,6 +248,8 @@ export default function FundamentalsBuilder() {
                       <th className="text-right p-2">Value</th>
                       <th className="text-right p-2">Quality</th>
                       <th className="text-right p-2">Growth</th>
+                      <th className="text-right p-2">Size</th>
+                      <th className="text-right p-2">Momentum</th>
                       <th className="text-right p-2">Market Cap</th>
                     </tr>
                   </thead>
@@ -292,6 +296,12 @@ export default function FundamentalsBuilder() {
                         </td>
                         <td className={`p-2 text-right ${getScoreColor(stock.growth_score)}`}>
                           {stock.growth_score.toFixed(0)}
+                        </td>
+                        <td className={`p-2 text-right ${getScoreColor(stock.size_score || 50)}`}>
+                          {(stock.size_score || 50).toFixed(0)}
+                        </td>
+                        <td className={`p-2 text-right ${getScoreColor(stock.momentum_score || 50)}`}>
+                          {(stock.momentum_score || 50).toFixed(0)}
                         </td>
                         <td className={`p-2 text-right ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
                           {formatMarketCap(stock.market_cap)}
@@ -369,7 +379,7 @@ export default function FundamentalsBuilder() {
 
                   <div className={`mt-4 p-3 rounded-lg border ${isDark ? 'bg-indigo-500/10 border-indigo-500/30' : 'bg-indigo-50 border-indigo-200'}`}>
                     <p className={`text-xs ${isDark ? 'text-indigo-300' : 'text-indigo-700'}`}>
-                      Returns based on fundamentals (Earnings Yield + Growth), not historical performance
+                      Using Fama-French multi-factor model: Value, Quality, Size, Momentum + Sustainable Growth Rate
                     </p>
                   </div>
 
