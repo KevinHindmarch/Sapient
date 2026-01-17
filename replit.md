@@ -155,10 +155,18 @@ PostgreSQL database with tables:
 
 ## UI Design System
 
-The application uses a premium dark theme with luxury aesthetics:
+The application uses a premium theme with luxury aesthetics, supporting both light and dark modes:
+
+### Theme System
+- **Default**: Light mode with clean, bright aesthetics
+- **Dark Mode**: Rich slate-950 background with purple gradient mesh
+- **Toggle**: Settings page (/settings) or sidebar button
+- **Persistence**: Saved to localStorage as 'sapient-theme'
+- **Provider**: ThemeProvider in `frontend/src/lib/theme.tsx`
 
 ### Theme Colors
-- **Background**: Dark slate (slate-950) with purple gradient mesh
+- **Light Background**: Clean white/slate-50 gradients
+- **Dark Background**: Slate-950 with purple gradient mesh
 - **Cards**: Glassmorphism effect with backdrop-blur and semi-transparent backgrounds
 - **Accents**: Sky-to-indigo gradients for primary actions
 - **Positive/Gains**: Emerald green with glow effects
@@ -168,25 +176,29 @@ The application uses a premium dark theme with luxury aesthetics:
 - Glassmorphism cards with backdrop-blur-12px
 - Gradient buttons with colored shadows (glow on hover)
 - Smooth micro-animations (fade-in, transitions)
-- Custom scrollbars styled for dark theme
+- Custom scrollbars styled for both themes
 - Animated gradient orbs on auth pages
+- Theme-aware charts with Recharts
 
 ### CSS Classes (index.css)
 - `.card` / `.card-hover` - Glass cards with hover effects
 - `.stat-card` - Dashboard statistics cards
 - `.glass-panel` - Generic glass container
 - `.gradient-text` - Sky-to-indigo gradient text
-- `.badge-*` - Colored badges with dark variants
+- `.badge-*` - Colored badges (theme-aware)
 - `.animate-fade-in` / `.animate-glow` - Animations
+- `.theme-text` / `.theme-bg` - Theme-aware utilities
 
 ## Recent Changes (January 2025)
 
 **January 17, 2025**:
-- Implemented premium dark theme with glassmorphism effects
+- Added theme switching system (light/dark modes)
+- Created Settings page at /settings for theme toggle
+- Implemented ThemeProvider with localStorage persistence
+- Premium styling with glassmorphism effects for both themes
 - Added gradient accents and glowing shadows
-- Updated all pages with consistent dark styling
-- Added micro-animations and smooth transitions
-- Styled charts for dark mode visibility
+- Smooth micro-animations and transitions throughout
+- Theme-aware charts styled for both modes
 
 **January 7, 2025**:
 - Rewrote application from Streamlit to React + FastAPI architecture
