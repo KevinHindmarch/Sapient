@@ -23,6 +23,7 @@ from backend.schemas.portfolio import (
 from core.stocks import StockDataService
 from core.optimizer import PortfolioOptimizerService
 from core.database import PortfolioService
+from core.fundamentals import FundamentalsService
 from backend.auth_utils import get_current_user
 
 router = APIRouter()
@@ -267,3 +268,116 @@ async def add_stock(
         raise HTTPException(status_code=400, detail=result['error'])
     
     return result
+
+
+@router.get("/fundamentals/scan")
+async def scan_fundamentals(top_n: int = 20):
+    """
+    Scan ASX200 stocks and return top N by fundamental score.
+    
+    Analyzes valuation, quality, and growth metrics for each stock.
+    """
+    asx200_list = StockDataService.get_asx200_stocks()
+    asx200_symbols = [s['symbol'] for s in asx200_list]
+    
+    if not asx200_symbols:
+        raise HTTPException(status_code=500, detail="Could not fetch ASX200 list")
+    
+    results = FundamentalsService.get_top_stocks(asx200_symbols, top_n=top_n)
+    
+    if not results:
+        raise HTTPException(status_code=500, detail="Failed to scan stocks")
+    
+    return {
+        'stocks': results,
+        'total_scanned': len(asx200_symbols),
+        'returned': len(results)
+    }
+
+
+@router.post("/fundamentals/optimize")
+async def optimize_fundamentals_portfolio(request: OptimizeRequest):
+    """
+    Optimize portfolio using fundamentals-based expected returns.
+    
+    Instead of historical returns, uses earnings yield + growth for expected returns.
+    """
+    fundamentals_data = {}
+    expected_returns = {}
+    
+    for symbol in request.symbols:
+        fund = FundamentalsService.get_stock_fundamentals(symbol)
+        if fund:
+            fundamentals_data[symbol] = fund
+            expected_returns[symbol] = FundamentalsService.calculate_fundamental_expected_return(fund)
+    
+    if len(expected_returns) < 2:
+        raise HTTPException(status_code=400, detail="Could not fetch fundamentals for enough stocks")
+    
+    price_data = StockDataService.get_stock_data(list(expected_returns.keys()), request.period)
+    
+    if price_data is None or price_data.empty:
+        raise HTTPException(status_code=400, detail="Could not fetch price data for volatility calculation")
+    
+    dividend_yields: dict[str, float] = {s: float(f.get('dividend_yield') or 0) for s, f in fundamentals_data.items()}
+    
+    result = PortfolioOptimizerService.optimize_portfolio_with_expected_returns(
+        price_data=price_data,
+        expected_returns=expected_returns,
+        investment_amount=request.investment_amount,
+        risk_tolerance=request.risk_tolerance,
+        dividend_yields=dividend_yields
+    )
+    
+    if result is None:
+        raise HTTPException(status_code=400, detail="Optimization failed")
+    
+    if 'error' in result:
+        raise HTTPException(status_code=400, detail=result['error'])
+    
+    correlation_matrix = None
+    correlation_symbols = None
+    try:
+        returns = price_data.pct_change().dropna()
+        if len(returns) > 1:
+            corr = returns.corr()
+            correlation_matrix = corr.values.tolist()
+            correlation_symbols = [s.replace('.AX', '') for s in corr.columns.tolist()]
+    except Exception:
+        pass
+    
+    stock_fundamentals = []
+    for symbol, weight in result['weights'].items():
+        if symbol in fundamentals_data:
+            fund = fundamentals_data[symbol]
+            scores = FundamentalsService.calculate_composite_score(fund)
+            stock_fundamentals.append({
+                'symbol': symbol,
+                'name': fund.get('name', symbol),
+                'weight': weight,
+                'expected_return': expected_returns.get(symbol, 0),
+                'earnings_yield': fund.get('earnings_yield'),
+                'earnings_growth': fund.get('earnings_growth'),
+                'roe': fund.get('roe'),
+                'value_score': scores['value_score'],
+                'quality_score': scores['quality_score'],
+                'growth_score': scores['growth_score'],
+                'composite_score': scores['composite_score']
+            })
+    
+    return {
+        'weights': result['weights'],
+        'expected_return': result['expected_return'],
+        'volatility': result['volatility'],
+        'sharpe_ratio': result['sharpe_ratio'],
+        'var_95': result['var_95'],
+        'max_drawdown': result['max_drawdown'],
+        'beta': result.get('beta', 1.0),
+        'portfolio_dividend_yield': result['portfolio_dividend_yield'],
+        'risk_tolerance': result['risk_tolerance'],
+        'optimization_success': result['optimization_success'],
+        'correlation_matrix': correlation_matrix,
+        'correlation_symbols': correlation_symbols,
+        'stock_fundamentals': stock_fundamentals,
+        'method': 'fundamentals'
+    }

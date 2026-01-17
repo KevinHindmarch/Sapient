@@ -338,3 +338,117 @@ class PortfolioOptimizerService:
                 })
         
         return strategies
+    
+    @staticmethod
+    def optimize_portfolio_with_expected_returns(
+        price_data: pd.DataFrame,
+        expected_returns: Dict[str, float],
+        investment_amount: float,
+        risk_tolerance: str = 'moderate',
+        dividend_yields: Optional[Dict[str, float]] = None
+    ) -> Optional[Dict]:
+        """
+        Optimize portfolio using externally provided expected returns.
+        
+        This version accepts pre-calculated expected returns (e.g., from fundamentals)
+        rather than deriving them from historical price data.
+        
+        Args:
+            price_data: Historical price data (used for covariance/volatility only)
+            expected_returns: Dictionary mapping symbols to expected annual returns
+            investment_amount: Total investment amount
+            risk_tolerance: 'conservative', 'moderate', or 'aggressive'
+            dividend_yields: Optional dictionary of dividend yields per stock
+            
+        Returns:
+            Optimization results dictionary or None if failed
+        """
+        try:
+            params = RISK_PARAMS.get(risk_tolerance, RISK_PARAMS['moderate'])
+            
+            price_data_filled = price_data.ffill().bfill()
+            returns = price_data_filled.pct_change().dropna()
+            
+            if returns.empty:
+                return None
+            
+            annualization_factor = PortfolioOptimizerService.infer_annualization_factor(returns)
+            
+            # Use provided expected returns instead of calculating from history
+            mean_returns = pd.Series(index=returns.columns, dtype=float)
+            for col in returns.columns:
+                mean_returns[col] = expected_returns.get(col, 0.05)  # Default 5% if missing
+            
+            # Still use historical covariance for risk estimation
+            cov_matrix = returns.cov() * annualization_factor
+            num_assets = len(returns.columns)
+            
+            if num_assets < params['min_stocks']:
+                return {'error': f"Minimum {params['min_stocks']} stocks required for {risk_tolerance} risk profile"}
+            
+            def objective(weights):
+                portfolio_return = np.sum(mean_returns * weights)
+                portfolio_volatility = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
+                
+                if portfolio_volatility == 0:
+                    return -np.inf
+                
+                adjusted_volatility = portfolio_volatility * params['volatility_penalty']
+                sharpe_ratio = (portfolio_return - RISK_FREE_RATE) / adjusted_volatility
+                return -sharpe_ratio
+            
+            constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
+            min_weight = max(0.02, 0.5 / num_assets)
+            bounds = tuple((min_weight, params['max_weight']) for _ in range(num_assets))
+            initial_guess = np.array([1/num_assets] * num_assets)
+            
+            result = minimize(
+                objective,
+                initial_guess,
+                method='SLSQP',
+                bounds=bounds,
+                constraints=constraints,
+                options={'maxiter': 1000}
+            )
+            
+            optimal_weights = result.x
+            
+            portfolio_return = np.sum(mean_returns * optimal_weights)
+            portfolio_volatility = np.sqrt(np.dot(optimal_weights.T, np.dot(cov_matrix, optimal_weights)))
+            sharpe_ratio = (portfolio_return - RISK_FREE_RATE) / portfolio_volatility
+            
+            portfolio_returns = returns.dot(optimal_weights)
+            var_95 = float(np.percentile(portfolio_returns, 5))
+            max_drawdown = float(PortfolioOptimizerService.calculate_max_drawdown(portfolio_returns))
+            beta = PortfolioOptimizerService.calculate_beta(portfolio_returns)
+            
+            weights_dict = dict(zip(returns.columns, optimal_weights))
+            weights_dict = {k: float(v) for k, v in weights_dict.items() if v >= 0.001}
+            
+            total_weight = sum(weights_dict.values())
+            weights_dict = {k: v/total_weight for k, v in weights_dict.items()}
+            
+            portfolio_dividend_yield = 0
+            if dividend_yields:
+                for stock, weight in weights_dict.items():
+                    if stock in dividend_yields:
+                        portfolio_dividend_yield += weight * dividend_yields[stock]
+            
+            return {
+                'weights': weights_dict,
+                'expected_return': float(portfolio_return),
+                'volatility': float(portfolio_volatility),
+                'sharpe_ratio': float(sharpe_ratio),
+                'var_95': var_95,
+                'max_drawdown': max_drawdown,
+                'beta': beta,
+                'historical_data': price_data,
+                'optimization_success': result.success,
+                'risk_tolerance': risk_tolerance,
+                'max_single_weight': params['max_weight'],
+                'dividend_yields': dividend_yields,
+                'portfolio_dividend_yield': float(portfolio_dividend_yield)
+            }
+            
+        except Exception:
+            return None
