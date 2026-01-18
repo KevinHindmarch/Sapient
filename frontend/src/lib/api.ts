@@ -74,6 +74,8 @@ export const portfolioApi = {
     api.get(`/portfolio/capm/analyze?symbols=${symbols.join(',')}&period=${period}`),
   optimizeCAPM: (symbols: string[], investment_amount: number, risk_tolerance: string, period: string = '2y') =>
     api.post('/portfolio/capm/optimize', { symbols, investment_amount, risk_tolerance, period }),
+  scanCAPM: (top_n: number = 30) =>
+    api.get(`/portfolio/capm/scan?top_n=${top_n}`),
 }
 
 export const indicatorsApi = {

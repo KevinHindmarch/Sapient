@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { portfolioApi, stocksApi } from '../lib/api'
 import { toast } from 'sonner'
-import { Search, TrendingUp, Save, Loader2, Activity, Target, Shield, Zap, X, Plus } from 'lucide-react'
+import { Search, TrendingUp, Save, Loader2, Activity, Target, Shield, Zap, X, Plus, Radar, Check } from 'lucide-react'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts'
 import { useTheme } from '../lib/theme'
 
@@ -9,12 +9,25 @@ const COLORS = ['#0ea5e9', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#ec4899'
 
 interface StockCAPMData {
   symbol: string
+  name?: string
   beta: number
   expected_return: number
   volatility: number
   alpha: number
   risk_category: string
   current_price: number | null
+}
+
+interface ScanResult {
+  market_premium: number
+  risk_free_rate: number
+  expected_market_return: number
+  stocks_analyzed: number
+  undervalued_count: number
+  fair_value_count: number
+  overvalued_count: number
+  stocks: StockCAPMData[]
+  recommendations: StockCAPMData[]
 }
 
 interface OptimizationResult {
@@ -55,6 +68,32 @@ export default function CAPMBuilder() {
   const [portfolioName, setPortfolioName] = useState('')
   const [investmentAmount, setInvestmentAmount] = useState(50000)
   const [riskTolerance, setRiskTolerance] = useState<'conservative' | 'moderate' | 'aggressive'>('moderate')
+  const [scanning, setScanning] = useState(false)
+  const [scanResult, setScanResult] = useState<ScanResult | null>(null)
+  const [mode, setMode] = useState<'scan' | 'manual'>('scan')
+
+  const scanASX200 = async () => {
+    setScanning(true)
+    setScanResult(null)
+    setResult(null)
+    try {
+      const response = await portfolioApi.scanCAPM(30)
+      setScanResult(response.data)
+      const undervalued = response.data.recommendations.map((s: StockCAPMData) => s.symbol)
+      setSelectedStocks(undervalued.slice(0, 10))
+      const data: Record<string, StockCAPMData> = {}
+      for (const stock of response.data.stocks) {
+        data[stock.symbol] = stock
+      }
+      setStockData(data)
+      toast.success(`Found ${response.data.undervalued_count} undervalued stocks`)
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { detail?: string } } }
+      toast.error(err.response?.data?.detail || 'Failed to scan stocks')
+    } finally {
+      setScanning(false)
+    }
+  }
 
   const searchStocks = async (query: string) => {
     if (query.length < 1) {
@@ -70,6 +109,15 @@ export default function CAPMBuilder() {
     } finally {
       setSearching(false)
     }
+  }
+
+  const toggleStock = (symbol: string) => {
+    if (selectedStocks.includes(symbol)) {
+      setSelectedStocks(selectedStocks.filter(s => s !== symbol))
+    } else {
+      setSelectedStocks([...selectedStocks, symbol])
+    }
+    setResult(null)
   }
 
   const addStock = (symbol: string) => {
@@ -227,11 +275,65 @@ export default function CAPMBuilder() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-1 space-y-4">
-            <div className="card">
-              <h2 className={`text-lg font-semibold mb-4 ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Add Stocks</h2>
+        <div className="card mb-6">
+          <div className="flex items-center gap-4 mb-4">
+            <button
+              onClick={() => setMode('scan')}
+              className={`px-4 py-2 rounded-lg font-medium transition-all ${
+                mode === 'scan'
+                  ? 'bg-emerald-500 text-white'
+                  : isDark ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
+              }`}
+            >
+              <Radar className="w-4 h-4 inline mr-2" />
+              Auto Scan
+            </button>
+            <button
+              onClick={() => setMode('manual')}
+              className={`px-4 py-2 rounded-lg font-medium transition-all ${
+                mode === 'manual'
+                  ? 'bg-sky-500 text-white'
+                  : isDark ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
+              }`}
+            >
+              <Search className="w-4 h-4 inline mr-2" />
+              Manual Select
+            </button>
+          </div>
+
+          {mode === 'scan' ? (
+            <div>
+              <p className={`mb-4 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                Automatically scan the top ASX200 stocks and find undervalued opportunities based on CAPM analysis.
+              </p>
+              <button
+                onClick={scanASX200}
+                disabled={scanning}
+                className="btn-success w-full flex items-center justify-center gap-2 py-3 text-lg"
+              >
+                {scanning ? <Loader2 className="w-5 h-5 animate-spin" /> : <Radar className="w-5 h-5" />}
+                {scanning ? 'Scanning ASX200...' : 'Scan for Undervalued Stocks'}
+              </button>
               
+              {scanResult && (
+                <div className="grid grid-cols-3 gap-3 mt-4">
+                  <div className={`p-3 rounded-lg text-center ${isDark ? 'bg-emerald-500/20 border border-emerald-500/30' : 'bg-emerald-50 border border-emerald-200'}`}>
+                    <p className="text-2xl font-bold text-emerald-500">{scanResult.undervalued_count}</p>
+                    <p className={`text-xs ${isDark ? 'text-emerald-300' : 'text-emerald-700'}`}>Undervalued</p>
+                  </div>
+                  <div className={`p-3 rounded-lg text-center ${isDark ? 'bg-slate-500/20 border border-slate-500/30' : 'bg-slate-100 border border-slate-200'}`}>
+                    <p className={`text-2xl font-bold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{scanResult.fair_value_count}</p>
+                    <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Fair Value</p>
+                  </div>
+                  <div className={`p-3 rounded-lg text-center ${isDark ? 'bg-red-500/20 border border-red-500/30' : 'bg-red-50 border border-red-200'}`}>
+                    <p className="text-2xl font-bold text-red-500">{scanResult.overvalued_count}</p>
+                    <p className={`text-xs ${isDark ? 'text-red-300' : 'text-red-700'}`}>Overvalued</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div>
               <div className="relative mb-4">
                 <Search className={`absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`} />
                 <input
@@ -284,6 +386,79 @@ export default function CAPMBuilder() {
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+        </div>
+
+        {scanResult && scanResult.stocks.length > 0 && (
+          <div className="card mb-6">
+            <h2 className={`text-lg font-semibold mb-4 ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+              Scanned Stocks - Select for Portfolio
+            </h2>
+            <p className={`text-sm mb-4 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+              Click to select/deselect stocks for optimization. Top undervalued stocks are pre-selected.
+            </p>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className={isDark ? 'text-slate-400' : 'text-slate-600'}>
+                    <th className="text-left p-2">Select</th>
+                    <th className="text-left p-2">Stock</th>
+                    <th className="text-right p-2">Beta</th>
+                    <th className="text-right p-2">Expected</th>
+                    <th className="text-right p-2">Alpha</th>
+                    <th className="text-center p-2">Valuation</th>
+                    <th className="text-center p-2">Risk</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {scanResult.stocks.map((stock) => (
+                    <tr 
+                      key={stock.symbol} 
+                      className={`border-t cursor-pointer transition-colors ${isDark ? 'border-slate-700/50' : 'border-slate-200'} ${
+                        selectedStocks.includes(stock.symbol) 
+                          ? isDark ? 'bg-sky-500/10' : 'bg-sky-50' 
+                          : 'hover:bg-sky-500/5'
+                      }`}
+                      onClick={() => toggleStock(stock.symbol)}
+                    >
+                      <td className="p-2">
+                        <div className={`w-5 h-5 rounded border flex items-center justify-center ${
+                          selectedStocks.includes(stock.symbol)
+                            ? 'bg-sky-500 border-sky-500'
+                            : isDark ? 'border-slate-600' : 'border-slate-300'
+                        }`}>
+                          {selectedStocks.includes(stock.symbol) && <Check className="w-3 h-3 text-white" />}
+                        </div>
+                      </td>
+                      <td className={`p-2 font-medium ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+                        <span>{stock.symbol}</span>
+                        {stock.name && <span className={`text-xs ml-2 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{stock.name}</span>}
+                      </td>
+                      <td className="p-2 text-right font-mono">{stock.beta.toFixed(2)}</td>
+                      <td className="p-2 text-right text-emerald-400">{(stock.expected_return * 100).toFixed(1)}%</td>
+                      <td className={`p-2 text-right font-medium ${stock.alpha >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                        {stock.alpha >= 0 ? '+' : ''}{(stock.alpha * 100).toFixed(2)}%
+                      </td>
+                      <td className="p-2 text-center">{getValuationBadge(stock.alpha)}</td>
+                      <td className="p-2 text-center">{getRiskBadge(stock.risk_category)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className={`text-sm mt-4 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+              Selected: {selectedStocks.length} stocks
+            </p>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-1 space-y-4">
+            <div className="card">
+              <h2 className={`text-lg font-semibold mb-4 ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+                {selectedStocks.length > 0 ? `${selectedStocks.length} Stocks Selected` : 'No Stocks Selected'}
+              </h2>
 
               {selectedStocks.length > 0 && (
                 <button

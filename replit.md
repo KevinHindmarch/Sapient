@@ -112,6 +112,7 @@ The original Streamlit app (`app.py`) is still available. The current Server wor
 - `POST /api/portfolio/{id}/trade` - Execute buy/sell trade
 - `GET /api/portfolio/capm/analyze` - Analyze stocks using CAPM (beta, expected returns)
 - `POST /api/portfolio/capm/optimize` - Optimize portfolio using CAPM-based expected returns
+- `GET /api/portfolio/capm/scan` - Auto-scan ASX200 for undervalued stocks
 
 ### Technical Indicators
 - `GET /api/indicators/analyze/{symbol}` - Full technical analysis

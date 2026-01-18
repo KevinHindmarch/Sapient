@@ -497,3 +497,61 @@ async def optimize_capm_portfolio(request: OptimizeRequest):
         'risk_free_rate': capm_analysis['risk_free_rate'],
         'method': 'capm'
     }
+
+
+@router.get("/capm/scan")
+async def scan_capm_opportunities(top_n: int = 30, period: str = "2y"):
+    """
+    Scan ASX200 stocks and find undervalued opportunities using CAPM.
+    
+    Returns stocks sorted by alpha (most undervalued first).
+    
+    Args:
+        top_n: Number of stocks to analyze (default 30, max 50 for performance)
+        period: Historical data period (default 2y)
+    """
+    top_n = min(top_n, 50)
+    
+    asx200 = StockDataService.get_asx200_list()
+    if not asx200:
+        raise HTTPException(status_code=500, detail="Could not fetch ASX200 list")
+    
+    symbols_to_analyze = [StockDataService.format_symbol(s['symbol']) for s in asx200[:top_n]]
+    
+    result = CAPMService.analyze_stocks(symbols_to_analyze, period)
+    
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    
+    stocks_with_data = []
+    for symbol, data in result.get("stocks", {}).items():
+        if "error" not in data and "expected_return" in data:
+            stock_info = next((s for s in asx200 if StockDataService.format_symbol(s['symbol']) == symbol), None)
+            stocks_with_data.append({
+                "symbol": symbol.replace('.AX', ''),
+                "name": stock_info['name'] if stock_info else symbol.replace('.AX', ''),
+                "beta": data.get("beta", 1.0),
+                "expected_return": data.get("expected_return", 0),
+                "volatility": data.get("volatility", 0),
+                "alpha": data.get("alpha", 0),
+                "risk_category": data.get("risk_category", "Neutral"),
+                "current_price": data.get("current_price")
+            })
+    
+    stocks_with_data.sort(key=lambda x: x["alpha"], reverse=True)
+    
+    undervalued = [s for s in stocks_with_data if s["alpha"] > 0.02]
+    fair_value = [s for s in stocks_with_data if -0.02 <= s["alpha"] <= 0.02]
+    overvalued = [s for s in stocks_with_data if s["alpha"] < -0.02]
+    
+    return {
+        "market_premium": result.get("market_premium", 0.06),
+        "risk_free_rate": result.get("risk_free_rate", 0.0435),
+        "expected_market_return": result.get("expected_market_return", 0.1035),
+        "stocks_analyzed": len(stocks_with_data),
+        "undervalued_count": len(undervalued),
+        "fair_value_count": len(fair_value),
+        "overvalued_count": len(overvalued),
+        "stocks": stocks_with_data,
+        "recommendations": undervalued[:10]
+    }
