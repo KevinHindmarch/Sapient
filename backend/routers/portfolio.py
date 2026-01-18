@@ -512,7 +512,7 @@ async def scan_capm_opportunities(top_n: int = 30, period: str = "2y"):
     """
     top_n = min(top_n, 50)
     
-    asx200 = StockDataService.get_asx200_list()
+    asx200 = StockDataService.get_asx200_stocks()
     if not asx200:
         raise HTTPException(status_code=500, detail="Could not fetch ASX200 list")
     
