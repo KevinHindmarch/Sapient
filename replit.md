@@ -47,6 +47,7 @@ The application has been rewritten from Streamlit to a modern **React + FastAPI*
   - `core/optimizer.py` - Portfolio optimization (PortfolioOptimizerService)
   - `core/indicators.py` - Technical indicators (TechnicalIndicatorService)
   - `core/fundamentals.py` - Fundamental analysis (FundamentalsService - earnings yield, ROE, growth metrics)
+  - `core/capm.py` - CAPM analysis (CAPMService - beta calculation, expected returns)
 
 ### Running the Application
 
@@ -80,10 +81,11 @@ The original Streamlit app (`app.py`) is still available. The current Server wor
 3. **Manual Portfolio Builder** (`/manual-builder`) - Select specific stocks and optimize
 4. **Auto Portfolio Builder** (`/auto-builder`) - Automatic ASX200 optimization using historical returns
 5. **Fundamentals Builder** (`/fundamentals-builder`) - Build portfolios using fundamental analysis (earnings yield, quality, growth metrics)
-6. **My Portfolios** (`/portfolios`) - List of saved portfolios
-7. **Portfolio Detail** (`/portfolios/:id`) - P/L tracking, positions, transactions
-8. **Stock Analysis** (`/analysis`) - Technical indicators with interactive charts
-9. **Settings** (`/settings`) - Theme toggle (light/dark mode)
+6. **CAPM Builder** (`/capm-builder`) - Build portfolios using Capital Asset Pricing Model (beta-based expected returns)
+7. **My Portfolios** (`/portfolios`) - List of saved portfolios
+8. **Portfolio Detail** (`/portfolios/:id`) - P/L tracking, positions, transactions
+9. **Stock Analysis** (`/analysis`) - Technical indicators with interactive charts
+10. **Settings** (`/settings`) - Theme toggle (light/dark mode)
 
 ## API Endpoints
 
@@ -108,6 +110,8 @@ The original Streamlit app (`app.py`) is still available. The current Server wor
 - `GET /api/portfolio/list` - Get user's portfolios
 - `GET /api/portfolio/{id}` - Get portfolio details
 - `POST /api/portfolio/{id}/trade` - Execute buy/sell trade
+- `GET /api/portfolio/capm/analyze` - Analyze stocks using CAPM (beta, expected returns)
+- `POST /api/portfolio/capm/optimize` - Optimize portfolio using CAPM-based expected returns
 
 ### Technical Indicators
 - `GET /api/indicators/analyze/{symbol}` - Full technical analysis
