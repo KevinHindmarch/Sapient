@@ -24,6 +24,7 @@ from core.stocks import StockDataService
 from core.optimizer import PortfolioOptimizerService
 from core.database import PortfolioService
 from core.fundamentals import FundamentalsService
+from core.capm import CAPMService
 from backend.auth_utils import get_current_user
 
 router = APIRouter()
@@ -380,4 +381,119 @@ async def optimize_fundamentals_portfolio(request: OptimizeRequest):
         'correlation_symbols': correlation_symbols,
         'stock_fundamentals': stock_fundamentals,
         'method': 'fundamentals'
+    }
+
+
+@router.get("/capm/analyze")
+async def analyze_capm(symbols: str, period: str = "2y"):
+    """
+    Analyze stocks using CAPM to calculate beta and expected returns.
+    
+    Args:
+        symbols: Comma-separated list of stock symbols
+        period: Historical data period (default 2y)
+    """
+    symbol_list = [StockDataService.format_symbol(s.strip()) for s in symbols.split(',')]
+    
+    if not symbol_list:
+        raise HTTPException(status_code=400, detail="No symbols provided")
+    
+    result = CAPMService.analyze_stocks(symbol_list, period)
+    
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    
+    return result
+
+
+@router.post("/capm/optimize")
+async def optimize_capm_portfolio(request: OptimizeRequest):
+    """
+    Optimize portfolio using CAPM-based expected returns.
+    
+    Uses beta and market premium to calculate expected returns for each stock,
+    then optimizes using Sharpe ratio maximization.
+    """
+    symbols = [StockDataService.format_symbol(s) for s in request.symbols]
+    
+    capm_analysis = CAPMService.analyze_stocks(symbols, request.period)
+    
+    if "error" in capm_analysis:
+        raise HTTPException(status_code=400, detail=capm_analysis["error"])
+    
+    expected_returns = {}
+    stock_data = {}
+    for symbol in symbols:
+        if symbol in capm_analysis["stocks"]:
+            data = capm_analysis["stocks"][symbol]
+            if "expected_return" in data:
+                expected_returns[symbol] = data["expected_return"]
+                stock_data[symbol] = data
+    
+    if len(expected_returns) < 2:
+        raise HTTPException(status_code=400, detail="Need at least 2 stocks with valid CAPM data")
+    
+    price_data = StockDataService.get_stock_data(list(expected_returns.keys()), request.period)
+    
+    if price_data is None or price_data.empty:
+        raise HTTPException(status_code=400, detail="Could not fetch price data")
+    
+    dividend_yields = StockDataService.get_dividend_yields(list(expected_returns.keys()))
+    
+    result = PortfolioOptimizerService.optimize_portfolio_with_expected_returns(
+        price_data=price_data,
+        expected_returns=expected_returns,
+        investment_amount=request.investment_amount,
+        risk_tolerance=request.risk_tolerance,
+        dividend_yields=dividend_yields
+    )
+    
+    if result is None:
+        raise HTTPException(status_code=400, detail="Optimization failed")
+    
+    if 'error' in result:
+        raise HTTPException(status_code=400, detail=result['error'])
+    
+    correlation_matrix = None
+    correlation_symbols = None
+    try:
+        returns = price_data.pct_change().dropna()
+        if len(returns) > 1:
+            corr = returns.corr()
+            correlation_matrix = corr.values.tolist()
+            correlation_symbols = [s.replace('.AX', '') for s in corr.columns.tolist()]
+    except Exception:
+        pass
+    
+    stock_capm_data = []
+    for symbol, weight in result['weights'].items():
+        if symbol in stock_data:
+            data = stock_data[symbol]
+            stock_capm_data.append({
+                'symbol': symbol,
+                'weight': weight,
+                'beta': data.get('beta', 1.0),
+                'expected_return': data.get('expected_return', 0),
+                'volatility': data.get('volatility', 0),
+                'alpha': data.get('alpha', 0),
+                'risk_category': data.get('risk_category', 'Neutral')
+            })
+    
+    return {
+        'weights': result['weights'],
+        'expected_return': result['expected_return'],
+        'volatility': result['volatility'],
+        'sharpe_ratio': result['sharpe_ratio'],
+        'var_95': result['var_95'],
+        'max_drawdown': result['max_drawdown'],
+        'beta': result.get('beta', 1.0),
+        'portfolio_dividend_yield': result['portfolio_dividend_yield'],
+        'risk_tolerance': result['risk_tolerance'],
+        'optimization_success': result['optimization_success'],
+        'correlation_matrix': correlation_matrix,
+        'correlation_symbols': correlation_symbols,
+        'stock_capm_data': stock_capm_data,
+        'market_premium': capm_analysis['market_premium'],
+        'risk_free_rate': capm_analysis['risk_free_rate'],
+        'method': 'capm'
     }
