@@ -104,24 +104,8 @@ class PortfolioOptimizerService:
             
             annualization_factor = PortfolioOptimizerService.infer_annualization_factor(returns)
             
-            # Use geometric mean for more realistic expected returns
-            # Log-return method: exp(mean(log(1+r)) * annualization) - 1
-            # This is mathematically stable and accounts for volatility drag
-            geometric_returns = pd.Series(index=returns.columns, dtype=float)
-            for col in returns.columns:
-                stock_returns = returns[col].dropna()
-                if len(stock_returns) > 0:
-                    # Use log returns for numerical stability
-                    # Clip returns to avoid log(0) or log(negative)
-                    clipped_returns = stock_returns.clip(lower=-0.99)
-                    log_returns = np.log1p(clipped_returns)
-                    mean_log_return = log_returns.mean()
-                    # Annualize and convert back: exp(mean_log * factor) - 1
-                    geometric_returns[col] = np.exp(mean_log_return * annualization_factor) - 1
-                else:
-                    geometric_returns[col] = 0.0
-            
-            mean_returns = geometric_returns
+            # Use arithmetic mean for expected returns (simple average)
+            mean_returns = returns.mean() * annualization_factor
             
             if dividend_yields:
                 for col in returns.columns:
