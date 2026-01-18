@@ -6,6 +6,7 @@ import {
   Wrench, 
   Wand2, 
   Target,
+  Activity,
   Briefcase, 
   LineChart, 
   LogOut,
@@ -22,6 +23,7 @@ const navItems = [
   { path: '/manual-builder', label: 'Manual Builder', icon: Wrench },
   { path: '/auto-builder', label: 'Auto Builder', icon: Wand2 },
   { path: '/fundamentals-builder', label: 'Fundamentals Builder', icon: Target },
+  { path: '/capm-builder', label: 'CAPM Builder', icon: Activity },
   { path: '/portfolios', label: 'My Portfolios', icon: Briefcase },
   { path: '/analysis', label: 'Stock Analysis', icon: LineChart },
 ]
