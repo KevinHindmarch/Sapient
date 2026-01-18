@@ -176,6 +176,16 @@ export default function CAPMBuilder() {
     }
   }
 
+  const getValuationBadge = (alpha: number) => {
+    if (alpha > 0.02) {
+      return <span className="px-2 py-0.5 text-xs rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">Undervalued</span>
+    } else if (alpha < -0.02) {
+      return <span className="px-2 py-0.5 text-xs rounded-full bg-red-500/20 text-red-400 border border-red-500/30">Overvalued</span>
+    } else {
+      return <span className="px-2 py-0.5 text-xs rounded-full bg-slate-500/20 text-slate-400 border border-slate-500/30">Fair Value</span>
+    }
+  }
+
   return (
     <div className={`min-h-screen p-6 ${isDark ? '' : 'bg-slate-50'}`}>
       <div className="max-w-7xl mx-auto">
@@ -189,16 +199,32 @@ export default function CAPMBuilder() {
         <div className={`card mb-6 p-4 rounded-xl border ${isDark ? 'bg-indigo-500/10 border-indigo-500/30' : 'bg-indigo-50 border-indigo-200'}`}>
           <h3 className={`font-semibold mb-2 ${isDark ? 'text-indigo-300' : 'text-indigo-700'}`}>
             <Activity className="w-5 h-5 inline mr-2" />
-            CAPM Formula
+            CAPM Formula & Valuation
           </h3>
           <p className={`text-sm ${isDark ? 'text-indigo-200' : 'text-indigo-800'}`}>
             <strong>Expected Return = Risk-Free Rate + Beta × (Market Return - Risk-Free Rate)</strong>
           </p>
-          <ul className={`text-xs mt-2 space-y-1 ${isDark ? 'text-indigo-300' : 'text-indigo-600'}`}>
-            <li><strong>Beta &lt; 1:</strong> Less volatile than market (Defensive)</li>
-            <li><strong>Beta = 1:</strong> Moves with market (Neutral)</li>
-            <li><strong>Beta &gt; 1:</strong> More volatile than market (Aggressive)</li>
-          </ul>
+          <p className={`text-sm mt-1 ${isDark ? 'text-indigo-200' : 'text-indigo-800'}`}>
+            <strong>Alpha = Actual Return - Expected Return</strong> (measures over/underperformance)
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
+            <div>
+              <p className={`text-xs font-medium ${isDark ? 'text-indigo-300' : 'text-indigo-700'}`}>Risk Categories (Beta):</p>
+              <ul className={`text-xs mt-1 space-y-0.5 ${isDark ? 'text-indigo-300' : 'text-indigo-600'}`}>
+                <li><strong>β &lt; 0.8:</strong> Defensive (less volatile)</li>
+                <li><strong>β ≈ 1:</strong> Neutral (moves with market)</li>
+                <li><strong>β &gt; 1.2:</strong> Aggressive (more volatile)</li>
+              </ul>
+            </div>
+            <div>
+              <p className={`text-xs font-medium ${isDark ? 'text-indigo-300' : 'text-indigo-700'}`}>Valuation (Alpha):</p>
+              <ul className={`text-xs mt-1 space-y-0.5 ${isDark ? 'text-indigo-300' : 'text-indigo-600'}`}>
+                <li><span className="text-emerald-400">●</span> <strong>α &gt; 2%:</strong> Undervalued (outperformed)</li>
+                <li><span className="text-slate-400">●</span> <strong>α ≈ 0:</strong> Fair Value</li>
+                <li><span className="text-red-400">●</span> <strong>α &lt; -2%:</strong> Overvalued (underperformed)</li>
+              </ul>
+            </div>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -328,6 +354,7 @@ export default function CAPMBuilder() {
                         <th className="text-right p-2">Expected Return</th>
                         <th className="text-right p-2">Volatility</th>
                         <th className="text-right p-2">Alpha</th>
+                        <th className="text-center p-2">Valuation</th>
                         <th className="text-center p-2">Risk</th>
                       </tr>
                     </thead>
@@ -341,6 +368,7 @@ export default function CAPMBuilder() {
                           <td className={`p-2 text-right ${data.alpha >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                             {(data.alpha * 100).toFixed(2)}%
                           </td>
+                          <td className="p-2 text-center">{getValuationBadge(data.alpha)}</td>
                           <td className="p-2 text-center">{getRiskBadge(data.risk_category)}</td>
                         </tr>
                       ))}
