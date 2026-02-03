@@ -253,6 +253,9 @@ class PortfolioService:
                 
                 weights = optimization_results.get('weights', {})
                 
+                actual_invested = 0.0
+                failed_symbols = []
+                
                 for symbol, weight in weights.items():
                     weight_float = float(weight)
                     if weight_float < 0.001:
@@ -267,7 +270,12 @@ class PortfolioService:
                     except:
                         current_price = 0.0
                     
-                    quantity = allocation_amount / current_price if current_price > 0 else 0.0
+                    if current_price <= 0:
+                        failed_symbols.append(symbol)
+                        continue
+                    
+                    quantity = allocation_amount / current_price
+                    actual_invested += allocation_amount
                     
                     cur.execute("""
                         INSERT INTO portfolio_positions (
@@ -280,8 +288,18 @@ class PortfolioService:
                         float(weight_float), float(allocation_amount)
                     ))
                 
+                if actual_invested < float(investment_amount) * 0.99:
+                    cur.execute("""
+                        UPDATE portfolios SET initial_investment = %s WHERE id = %s
+                    """, (actual_invested, portfolio_id))
+                
                 conn.commit()
-                return {'success': True, 'portfolio_id': portfolio_id}
+                
+                result = {'success': True, 'portfolio_id': portfolio_id}
+                if failed_symbols:
+                    result['warning'] = f"Could not fetch prices for: {', '.join(failed_symbols)}"
+                    result['actual_invested'] = actual_invested
+                return result
             except Exception as e:
                 return {'success': False, 'error': str(e)}
     
