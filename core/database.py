@@ -224,7 +224,7 @@ class PortfolioService:
     @staticmethod
     def save_portfolio(user_id: int, name: str, optimization_results: dict, 
                        investment_amount: float, mode: str = 'auto',
-                       risk_tolerance: str = 'moderate') -> dict:
+                       risk_tolerance: str = 'moderate', market: str = 'ASX') -> dict:
         """Save a generated portfolio to the database."""
         import yfinance as yf
         
@@ -239,14 +239,14 @@ class PortfolioService:
                     INSERT INTO portfolios (
                         user_id, name, mode, initial_investment, 
                         expected_return, expected_volatility, expected_sharpe,
-                        expected_dividend_yield, risk_tolerance
+                        expected_dividend_yield, risk_tolerance, market
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING id
                 """, (
                     user_id, name, mode, float(investment_amount),
                     expected_return, volatility, sharpe_ratio, dividend_yield,
-                    risk_tolerance
+                    risk_tolerance, market
                 ))
                 
                 portfolio_id = cur.fetchone()['id']

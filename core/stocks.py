@@ -261,30 +261,201 @@ ASX200_STOCKS = {
     'BAL.AX': ('Bellamy', 'Consumer Staples'),
 }
 
+SP500_STOCKS = {
+    # Top 30 - Mega Caps
+    'AAPL': ('Apple Inc', 'Information Technology'),
+    'MSFT': ('Microsoft Corporation', 'Information Technology'),
+    'GOOGL': ('Alphabet Inc Class A', 'Communication Services'),
+    'AMZN': ('Amazon.com Inc', 'Consumer Discretionary'),
+    'NVDA': ('NVIDIA Corporation', 'Information Technology'),
+    'META': ('Meta Platforms Inc', 'Communication Services'),
+    'TSLA': ('Tesla Inc', 'Consumer Discretionary'),
+    'BRK-B': ('Berkshire Hathaway Inc', 'Financials'),
+    'UNH': ('UnitedHealth Group Inc', 'Healthcare'),
+    'JNJ': ('Johnson & Johnson', 'Healthcare'),
+    'V': ('Visa Inc', 'Financials'),
+    'XOM': ('Exxon Mobil Corporation', 'Energy'),
+    'JPM': ('JPMorgan Chase & Co', 'Financials'),
+    'PG': ('Procter & Gamble Co', 'Consumer Staples'),
+    'MA': ('Mastercard Inc', 'Financials'),
+    'HD': ('Home Depot Inc', 'Consumer Discretionary'),
+    'CVX': ('Chevron Corporation', 'Energy'),
+    'MRK': ('Merck & Co Inc', 'Healthcare'),
+    'ABBV': ('AbbVie Inc', 'Healthcare'),
+    'LLY': ('Eli Lilly and Co', 'Healthcare'),
+    'PFE': ('Pfizer Inc', 'Healthcare'),
+    'AVGO': ('Broadcom Inc', 'Information Technology'),
+    'KO': ('Coca-Cola Co', 'Consumer Staples'),
+    'PEP': ('PepsiCo Inc', 'Consumer Staples'),
+    'COST': ('Costco Wholesale Corp', 'Consumer Staples'),
+    'TMO': ('Thermo Fisher Scientific', 'Healthcare'),
+    'MCD': ('McDonalds Corp', 'Consumer Discretionary'),
+    'WMT': ('Walmart Inc', 'Consumer Staples'),
+    'CSCO': ('Cisco Systems Inc', 'Information Technology'),
+    'ABT': ('Abbott Laboratories', 'Healthcare'),
+    # 31-60 - Large Caps
+    'DIS': ('Walt Disney Co', 'Communication Services'),
+    'VZ': ('Verizon Communications', 'Communication Services'),
+    'ADBE': ('Adobe Inc', 'Information Technology'),
+    'CRM': ('Salesforce Inc', 'Information Technology'),
+    'NKE': ('Nike Inc', 'Consumer Discretionary'),
+    'NFLX': ('Netflix Inc', 'Communication Services'),
+    'ORCL': ('Oracle Corporation', 'Information Technology'),
+    'INTC': ('Intel Corporation', 'Information Technology'),
+    'AMD': ('Advanced Micro Devices', 'Information Technology'),
+    'QCOM': ('Qualcomm Inc', 'Information Technology'),
+    'TXN': ('Texas Instruments Inc', 'Information Technology'),
+    'UPS': ('United Parcel Service', 'Industrials'),
+    'HON': ('Honeywell International', 'Industrials'),
+    'LOW': ('Lowes Companies Inc', 'Consumer Discretionary'),
+    'UNP': ('Union Pacific Corp', 'Industrials'),
+    'CAT': ('Caterpillar Inc', 'Industrials'),
+    'BA': ('Boeing Co', 'Industrials'),
+    'GE': ('General Electric Co', 'Industrials'),
+    'RTX': ('RTX Corporation', 'Industrials'),
+    'LMT': ('Lockheed Martin Corp', 'Industrials'),
+    'SPGI': ('S&P Global Inc', 'Financials'),
+    'BLK': ('BlackRock Inc', 'Financials'),
+    'AXP': ('American Express Co', 'Financials'),
+    'GS': ('Goldman Sachs Group', 'Financials'),
+    'MS': ('Morgan Stanley', 'Financials'),
+    'C': ('Citigroup Inc', 'Financials'),
+    'BAC': ('Bank of America Corp', 'Financials'),
+    'WFC': ('Wells Fargo & Co', 'Financials'),
+    'SCHW': ('Charles Schwab Corp', 'Financials'),
+    'USB': ('US Bancorp', 'Financials'),
+    # 61-90 - Mid-Large Caps
+    'IBM': ('International Business Machines', 'Information Technology'),
+    'NOW': ('ServiceNow Inc', 'Information Technology'),
+    'INTU': ('Intuit Inc', 'Information Technology'),
+    'AMAT': ('Applied Materials Inc', 'Information Technology'),
+    'MU': ('Micron Technology Inc', 'Information Technology'),
+    'LRCX': ('Lam Research Corp', 'Information Technology'),
+    'ADI': ('Analog Devices Inc', 'Information Technology'),
+    'KLAC': ('KLA Corporation', 'Information Technology'),
+    'SNPS': ('Synopsys Inc', 'Information Technology'),
+    'CDNS': ('Cadence Design Systems', 'Information Technology'),
+    'PANW': ('Palo Alto Networks', 'Information Technology'),
+    'FTNT': ('Fortinet Inc', 'Information Technology'),
+    'CRWD': ('CrowdStrike Holdings', 'Information Technology'),
+    'ZS': ('Zscaler Inc', 'Information Technology'),
+    'SNOW': ('Snowflake Inc', 'Information Technology'),
+    'DDOG': ('Datadog Inc', 'Information Technology'),
+    'WDAY': ('Workday Inc', 'Information Technology'),
+    'TEAM': ('Atlassian Corp', 'Information Technology'),
+    'SQ': ('Block Inc', 'Financials'),
+    'PYPL': ('PayPal Holdings Inc', 'Financials'),
+    'ADP': ('Automatic Data Processing', 'Industrials'),
+    'FIS': ('Fidelity National Info', 'Financials'),
+    'FISV': ('Fiserv Inc', 'Financials'),
+    'ICE': ('Intercontinental Exchange', 'Financials'),
+    'CME': ('CME Group Inc', 'Financials'),
+    'MCO': ('Moodys Corporation', 'Financials'),
+    'MSCI': ('MSCI Inc', 'Financials'),
+    'TRV': ('Travelers Companies', 'Financials'),
+    'AIG': ('American Intl Group', 'Financials'),
+    'MET': ('MetLife Inc', 'Financials'),
+    # 91-120 - Healthcare & Consumer
+    'AMGN': ('Amgen Inc', 'Healthcare'),
+    'GILD': ('Gilead Sciences Inc', 'Healthcare'),
+    'VRTX': ('Vertex Pharmaceuticals', 'Healthcare'),
+    'REGN': ('Regeneron Pharmaceuticals', 'Healthcare'),
+    'BIIB': ('Biogen Inc', 'Healthcare'),
+    'MRNA': ('Moderna Inc', 'Healthcare'),
+    'ISRG': ('Intuitive Surgical Inc', 'Healthcare'),
+    'DXCM': ('DexCom Inc', 'Healthcare'),
+    'EW': ('Edwards Lifesciences', 'Healthcare'),
+    'SYK': ('Stryker Corporation', 'Healthcare'),
+    'ZBH': ('Zimmer Biomet Holdings', 'Healthcare'),
+    'BSX': ('Boston Scientific Corp', 'Healthcare'),
+    'MDT': ('Medtronic PLC', 'Healthcare'),
+    'BDX': ('Becton Dickinson & Co', 'Healthcare'),
+    'CI': ('Cigna Group', 'Healthcare'),
+    'ELV': ('Elevance Health Inc', 'Healthcare'),
+    'HUM': ('Humana Inc', 'Healthcare'),
+    'CNC': ('Centene Corporation', 'Healthcare'),
+    'CVS': ('CVS Health Corp', 'Healthcare'),
+    'WBA': ('Walgreens Boots Alliance', 'Consumer Staples'),
+    'SBUX': ('Starbucks Corporation', 'Consumer Discretionary'),
+    'CMG': ('Chipotle Mexican Grill', 'Consumer Discretionary'),
+    'YUM': ('Yum Brands Inc', 'Consumer Discretionary'),
+    'DPZ': ('Dominos Pizza Inc', 'Consumer Discretionary'),
+    'MAR': ('Marriott International', 'Consumer Discretionary'),
+    'HLT': ('Hilton Worldwide', 'Consumer Discretionary'),
+    'LVS': ('Las Vegas Sands Corp', 'Consumer Discretionary'),
+    'WYNN': ('Wynn Resorts Ltd', 'Consumer Discretionary'),
+    'RCL': ('Royal Caribbean Cruises', 'Consumer Discretionary'),
+    'CCL': ('Carnival Corporation', 'Consumer Discretionary'),
+    # 121-150 - Industrials & Energy
+    'DE': ('Deere & Company', 'Industrials'),
+    'EMR': ('Emerson Electric Co', 'Industrials'),
+    'ETN': ('Eaton Corporation', 'Industrials'),
+    'ITW': ('Illinois Tool Works', 'Industrials'),
+    'ROK': ('Rockwell Automation', 'Industrials'),
+    'PH': ('Parker Hannifin Corp', 'Industrials'),
+    'CMI': ('Cummins Inc', 'Industrials'),
+    'PCAR': ('Paccar Inc', 'Industrials'),
+    'NSC': ('Norfolk Southern Corp', 'Industrials'),
+    'CSX': ('CSX Corporation', 'Industrials'),
+    'FDX': ('FedEx Corporation', 'Industrials'),
+    'DAL': ('Delta Air Lines Inc', 'Industrials'),
+    'UAL': ('United Airlines Holdings', 'Industrials'),
+    'LUV': ('Southwest Airlines Co', 'Industrials'),
+    'AAL': ('American Airlines Group', 'Industrials'),
+    'COP': ('ConocoPhillips', 'Energy'),
+    'EOG': ('EOG Resources Inc', 'Energy'),
+    'SLB': ('Schlumberger NV', 'Energy'),
+    'PXD': ('Pioneer Natural Resources', 'Energy'),
+    'OXY': ('Occidental Petroleum', 'Energy'),
+    'DVN': ('Devon Energy Corp', 'Energy'),
+    'HAL': ('Halliburton Company', 'Energy'),
+    'VLO': ('Valero Energy Corp', 'Energy'),
+    'MPC': ('Marathon Petroleum Corp', 'Energy'),
+    'PSX': ('Phillips 66', 'Energy'),
+    'KMI': ('Kinder Morgan Inc', 'Energy'),
+    'WMB': ('Williams Companies Inc', 'Energy'),
+    'OKE': ('Oneok Inc', 'Energy'),
+    'EPD': ('Enterprise Products', 'Energy'),
+    'ET': ('Energy Transfer LP', 'Energy'),
+}
+
 
 class StockDataService:
-    """Manages fetching and processing of ASX stock data."""
+    """Manages fetching and processing of stock data for ASX and US markets."""
     
     @staticmethod
-    def format_symbol(symbol: str) -> str:
-        """Ensure symbol has .AX suffix."""
-        if not symbol.endswith('.AX'):
-            return symbol + '.AX'
-        return symbol
+    def format_symbol(symbol: str, market: str = "ASX") -> str:
+        """
+        Format symbol for the specified market.
+        
+        Args:
+            symbol: Stock symbol
+            market: Market identifier - "ASX" or "US"
+            
+        Returns:
+            Formatted symbol (with .AX for ASX, raw for US)
+        """
+        if market.upper() == "US":
+            return symbol.replace('.AX', '')
+        else:
+            if not symbol.endswith('.AX'):
+                return symbol + '.AX'
+            return symbol
     
     @staticmethod
-    def get_stock_data(stock_symbols: List[str], period: str = "2y") -> Optional[pd.DataFrame]:
+    def get_stock_data(stock_symbols: List[str], period: str = "2y", market: str = "ASX") -> Optional[pd.DataFrame]:
         """
         Fetch historical stock data for given symbols.
         
         Args:
-            stock_symbols: List of stock symbols (with or without .AX suffix)
+            stock_symbols: List of stock symbols
             period: Period for historical data (1y, 2y, 3y, 5y)
+            market: Market identifier - "ASX" or "US"
             
         Returns:
             DataFrame with stock prices or None if failed
         """
-        symbols = [StockDataService.format_symbol(s) for s in stock_symbols]
+        symbols = [StockDataService.format_symbol(s, market) for s in stock_symbols]
         
         try:
             data = yf.download(symbols, period=period, auto_adjust=True, progress=False)
@@ -414,9 +585,31 @@ class StockDataService:
         ]
     
     @staticmethod
-    def get_risk_free_rate() -> float:
-        """Get Australian risk-free rate (approximation)."""
-        return 0.035
+    def get_sp500_stocks() -> List[Dict]:
+        """Get list of S&P 500 stocks with sectors."""
+        return [
+            {"symbol": symbol, "name": data[0], "sector": data[1]}
+            for symbol, data in SP500_STOCKS.items()
+        ]
+    
+    @staticmethod
+    def get_stocks_by_market(market: str = "ASX") -> List[Dict]:
+        """Get stock list for the specified market."""
+        if market.upper() == "US":
+            return StockDataService.get_sp500_stocks()
+        return StockDataService.get_asx200_stocks()
+    
+    @staticmethod
+    def get_risk_free_rate(market: str = "ASX") -> float:
+        """
+        Get risk-free rate for the specified market.
+        
+        ASX: Australian 10-year government bond (~4.35%)
+        US: US 10-year Treasury (~4.5%)
+        """
+        if market.upper() == "US":
+            return 0.045
+        return 0.0435
     
     @staticmethod
     def rank_stocks_by_sharpe(symbols: List[str], period: str = "2y") -> List[Dict]:

@@ -8,6 +8,7 @@ class OptimizeRequest(BaseModel):
     investment_amount: float
     risk_tolerance: str = "moderate"
     period: str = "2y"
+    market: str = "ASX"
 
 
 class OptimizeResponse(BaseModel):
@@ -63,6 +64,7 @@ class PortfolioCreate(BaseModel):
     investment_amount: float
     mode: str = "auto"
     risk_tolerance: str = "moderate"
+    market: str = "ASX"
 
 
 class PositionResponse(BaseModel):

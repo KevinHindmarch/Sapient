@@ -595,7 +595,8 @@ class FundamentalsService:
     
     @staticmethod
     def get_top_stocks(symbols: List[str], top_n: int = 20, 
-                       min_market_cap: float = 500_000_000) -> List[Dict]:
+                       min_market_cap: float = 500_000_000,
+                       market: str = "ASX") -> List[Dict]:
         """
         Scan stocks and return top N by composite score.
         
@@ -603,6 +604,7 @@ class FundamentalsService:
             symbols: List of stock symbols to scan
             top_n: Number of top stocks to return
             min_market_cap: Minimum market cap filter (default $500M)
+            market: Market identifier for currency context
         """
         all_stocks = FundamentalsService.scan_stocks(symbols)
         
@@ -611,5 +613,10 @@ class FundamentalsService:
             s for s in all_stocks 
             if s.get('market_cap', 0) >= min_market_cap
         ]
+        
+        # Add market context to each stock
+        for stock in filtered:
+            stock['market'] = market
+            stock['currency'] = 'USD' if market.upper() == 'US' else 'AUD'
         
         return filtered[:top_n]

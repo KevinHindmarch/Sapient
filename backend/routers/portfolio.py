@@ -144,7 +144,8 @@ async def save_portfolio(
         optimization_results=portfolio_data.optimization_results,
         investment_amount=portfolio_data.investment_amount,
         mode=portfolio_data.mode,
-        risk_tolerance=portfolio_data.risk_tolerance
+        risk_tolerance=portfolio_data.risk_tolerance,
+        market=portfolio_data.market
     )
     
     if not result['success']:
@@ -272,27 +273,33 @@ async def add_stock(
 
 
 @router.get("/fundamentals/scan")
-async def scan_fundamentals(top_n: int = 20):
+async def scan_fundamentals(top_n: int = 20, market: str = "ASX"):
     """
-    Scan ASX200 stocks and return top N by fundamental score.
+    Scan stocks and return top N by fundamental score.
     
     Analyzes valuation, quality, and growth metrics for each stock.
+    
+    Args:
+        top_n: Number of top stocks to return
+        market: Market to scan - "ASX" for ASX200, "US" for S&P 500
     """
-    asx200_list = StockDataService.get_asx200_stocks()
-    asx200_symbols = [s['symbol'] for s in asx200_list]
+    stock_list = StockDataService.get_stocks_by_market(market)
+    symbols = [s['symbol'] for s in stock_list]
     
-    if not asx200_symbols:
-        raise HTTPException(status_code=500, detail="Could not fetch ASX200 list")
+    if not symbols:
+        raise HTTPException(status_code=500, detail=f"Could not fetch stock list for {market}")
     
-    results = FundamentalsService.get_top_stocks(asx200_symbols, top_n=top_n)
+    results = FundamentalsService.get_top_stocks(symbols, top_n=top_n, market=market)
     
     if not results:
         raise HTTPException(status_code=500, detail="Failed to scan stocks")
     
     return {
         'stocks': results,
-        'total_scanned': len(asx200_symbols),
-        'returned': len(results)
+        'total_scanned': len(symbols),
+        'returned': len(results),
+        'market': market,
+        'currency': 'USD' if market.upper() == 'US' else 'AUD'
     }
 
 
@@ -302,11 +309,15 @@ async def optimize_fundamentals_portfolio(request: OptimizeRequest):
     Optimize portfolio using fundamentals-based expected returns.
     
     Instead of historical returns, uses earnings yield + growth for expected returns.
+    Supports both ASX and US markets.
     """
+    market = request.market.upper()
     fundamentals_data = {}
     expected_returns = {}
     
-    for symbol in request.symbols:
+    formatted_symbols = [StockDataService.format_symbol(s, market) for s in request.symbols]
+    
+    for symbol in formatted_symbols:
         fund = FundamentalsService.get_stock_fundamentals(symbol)
         if fund:
             fundamentals_data[symbol] = fund
@@ -315,7 +326,7 @@ async def optimize_fundamentals_portfolio(request: OptimizeRequest):
     if len(expected_returns) < 2:
         raise HTTPException(status_code=400, detail="Could not fetch fundamentals for enough stocks")
     
-    price_data = StockDataService.get_stock_data(list(expected_returns.keys()), request.period)
+    price_data = StockDataService.get_stock_data(list(expected_returns.keys()), request.period, market)
     
     if price_data is None or price_data.empty:
         raise HTTPException(status_code=400, detail="Could not fetch price data for volatility calculation")
@@ -352,8 +363,9 @@ async def optimize_fundamentals_portfolio(request: OptimizeRequest):
         if symbol in fundamentals_data:
             fund = fundamentals_data[symbol]
             scores = FundamentalsService.calculate_composite_score(fund)
+            display_symbol = symbol.replace('.AX', '') if market == 'ASX' else symbol
             stock_fundamentals.append({
-                'symbol': symbol,
+                'symbol': display_symbol,
                 'name': fund.get('name', symbol),
                 'weight': weight,
                 'expected_return': expected_returns.get(symbol, 0),
@@ -380,7 +392,9 @@ async def optimize_fundamentals_portfolio(request: OptimizeRequest):
         'correlation_matrix': correlation_matrix,
         'correlation_symbols': correlation_symbols,
         'stock_fundamentals': stock_fundamentals,
-        'method': 'fundamentals'
+        'method': 'fundamentals',
+        'market': market,
+        'currency': 'USD' if market == 'US' else 'AUD'
     }
 
 

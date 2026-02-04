@@ -1,11 +1,13 @@
 import { useState } from 'react'
 import { portfolioApi } from '../lib/api'
 import { toast } from 'sonner'
-import { Search, TrendingUp, Save, Loader2, Star, BarChart3, Target, Zap } from 'lucide-react'
+import { Search, TrendingUp, Save, Loader2, Star, BarChart3, Target, Zap, Globe } from 'lucide-react'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts'
 import { useTheme } from '../lib/theme'
 
 const COLORS = ['#0ea5e9', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#6366f1', '#14b8a6']
+
+type Market = 'ASX' | 'US'
 
 interface StockFundamentals {
   symbol: string
@@ -47,6 +49,7 @@ export default function FundamentalsBuilder() {
   const { theme } = useTheme()
   const isDark = theme === 'dark'
   
+  const [market, setMarket] = useState<Market>('ASX')
   const [scanning, setScanning] = useState(false)
   const [stocks, setStocks] = useState<StockFundamentals[]>([])
   const [selectedStocks, setSelectedStocks] = useState<string[]>([])
@@ -58,6 +61,16 @@ export default function FundamentalsBuilder() {
   const [investmentAmount, setInvestmentAmount] = useState(50000)
   const [riskTolerance, setRiskTolerance] = useState<'conservative' | 'moderate' | 'aggressive'>('moderate')
 
+  const currency = market === 'US' ? 'USD' : 'AUD'
+  const currencySymbol = market === 'US' ? '$' : 'A$'
+
+  const handleMarketChange = (newMarket: Market) => {
+    setMarket(newMarket)
+    setStocks([])
+    setSelectedStocks([])
+    setResult(null)
+  }
+
   const scanStocks = async () => {
     setScanning(true)
     setStocks([])
@@ -65,10 +78,10 @@ export default function FundamentalsBuilder() {
     setResult(null)
     
     try {
-      const response = await portfolioApi.scanFundamentals(30)
+      const response = await portfolioApi.scanFundamentals(30, market)
       setStocks(response.data.stocks)
       setSelectedStocks(response.data.stocks.slice(0, 15).map((s: StockFundamentals) => s.symbol))
-      toast.success(`Scanned ${response.data.total_scanned} stocks, found ${response.data.returned} opportunities`)
+      toast.success(`Scanned ${response.data.total_scanned} ${market === 'US' ? 'S&P 500' : 'ASX200'} stocks, found ${response.data.returned} opportunities`)
     } catch (error: unknown) {
       const err = error as { response?: { data?: { detail?: string } } }
       toast.error(err.response?.data?.detail || 'Failed to scan stocks')
@@ -97,10 +110,12 @@ export default function FundamentalsBuilder() {
       const response = await portfolioApi.optimizeFundamentals(
         selectedStocks,
         investmentAmount,
-        riskTolerance
+        riskTolerance,
+        '1y',
+        market
       )
       setResult(response.data)
-      toast.success('Portfolio optimized using fundamentals!')
+      toast.success(`Portfolio optimized using ${market === 'US' ? 'S&P 500' : 'ASX'} fundamentals!`)
     } catch (error: unknown) {
       const err = error as { response?: { data?: { detail?: string } } }
       toast.error(err.response?.data?.detail || 'Optimization failed')
@@ -114,7 +129,7 @@ export default function FundamentalsBuilder() {
 
     setSaving(true)
     try {
-      await portfolioApi.save(portfolioName.trim(), result, investmentAmount, 'fundamentals', riskTolerance)
+      await portfolioApi.save(portfolioName.trim(), result, investmentAmount, 'fundamentals', riskTolerance, market)
       toast.success('Portfolio saved successfully!')
       setShowSaveModal(false)
       setPortfolioName('')
@@ -182,7 +197,35 @@ export default function FundamentalsBuilder() {
 
       <div className="flex flex-wrap gap-4 items-end">
         <div>
-          <label className="label">Investment Amount (AUD)</label>
+          <label className="label flex items-center gap-2">
+            <Globe className="w-4 h-4" />
+            Market
+          </label>
+          <div className="flex rounded-lg overflow-hidden border border-slate-300 dark:border-slate-600">
+            <button
+              onClick={() => handleMarketChange('ASX')}
+              className={`px-4 py-2 text-sm font-medium transition-all ${
+                market === 'ASX'
+                  ? 'bg-sky-500 text-white'
+                  : isDark ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-white text-slate-700 hover:bg-slate-100'
+              }`}
+            >
+              🇦🇺 ASX
+            </button>
+            <button
+              onClick={() => handleMarketChange('US')}
+              className={`px-4 py-2 text-sm font-medium transition-all ${
+                market === 'US'
+                  ? 'bg-sky-500 text-white'
+                  : isDark ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-white text-slate-700 hover:bg-slate-100'
+              }`}
+            >
+              🇺🇸 S&P 500
+            </button>
+          </div>
+        </div>
+        <div>
+          <label className="label">Investment Amount ({currency})</label>
           <input
             type="number"
             value={investmentAmount}
@@ -209,7 +252,7 @@ export default function FundamentalsBuilder() {
           className="btn-primary flex items-center gap-2"
         >
           {scanning ? <Loader2 className="w-5 h-5 animate-spin" /> : <Search className="w-5 h-5" />}
-          {scanning ? 'Scanning ASX200...' : 'Scan for Opportunities'}
+          {scanning ? `Scanning ${market === 'US' ? 'S&P 500' : 'ASX200'}...` : 'Scan for Opportunities'}
         </button>
       </div>
 
@@ -217,7 +260,9 @@ export default function FundamentalsBuilder() {
         <div className="card">
           <div className="flex flex-col items-center justify-center py-16">
             <Loader2 className="w-16 h-16 animate-spin text-indigo-400 mb-4" />
-            <p className={`text-xl font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Analyzing ASX200 Fundamentals...</p>
+            <p className={`text-xl font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+              Analyzing {market === 'US' ? 'S&P 500' : 'ASX200'} Fundamentals...
+            </p>
             <p className={`mt-2 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Fetching earnings, valuations, and quality metrics</p>
             <p className={`mt-1 text-sm ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>This may take 30-60 seconds</p>
           </div>

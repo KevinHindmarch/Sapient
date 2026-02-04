@@ -69,6 +69,12 @@ async def get_asx200_stocks():
     return StockDataService.get_asx200_stocks()
 
 
+@router.get("/sp500")
+async def get_sp500_stocks():
+    """Get list of S&P 500 stocks with sectors."""
+    return StockDataService.get_sp500_stocks()
+
+
 @router.get("/validate/{symbol}")
 async def validate_stock(symbol: str):
     """Validate if a stock symbol exists and has data."""

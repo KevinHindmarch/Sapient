@@ -54,8 +54,8 @@ export const portfolioApi = {
     api.post('/portfolio/backtest', { symbols, weights, initial_investment, period }),
   compareStrategies: (symbols: string[], investment_amount: number, period: string = '2y') =>
     api.post('/portfolio/compare-strategies', { symbols, investment_amount, period }),
-  save: (name: string, optimization_results: Record<string, unknown>, investment_amount: number, mode: string, risk_tolerance: string) =>
-    api.post('/portfolio/save', { name, optimization_results, investment_amount, mode, risk_tolerance }),
+  save: (name: string, optimization_results: Record<string, unknown>, investment_amount: number, mode: string, risk_tolerance: string, market: string = 'ASX') =>
+    api.post('/portfolio/save', { name, optimization_results, investment_amount, mode, risk_tolerance, market }),
   list: () => api.get('/portfolio/list'),
   detail: (id: number) => api.get(`/portfolio/${id}`),
   trade: (portfolioId: number, symbol: string, txn_type: string, quantity: number, price: number, notes?: string) =>
@@ -66,10 +66,11 @@ export const portfolioApi = {
     api.delete(`/portfolio/${portfolioId}/positions/${positionId}`),
   addStock: (portfolioId: number, symbol: string, quantity: number, avg_cost: number) =>
     api.post(`/portfolio/${portfolioId}/stocks`, { symbol, quantity, avg_cost }),
-  scanFundamentals: (top_n: number = 20) =>
-    api.get(`/portfolio/fundamentals/scan?top_n=${top_n}`),
-  optimizeFundamentals: (symbols: string[], investment_amount: number, risk_tolerance: string, period: string = '1y') =>
-    api.post('/portfolio/fundamentals/optimize', { symbols, investment_amount, risk_tolerance, period }),
+  scanFundamentals: (top_n: number = 20, market: string = 'ASX') =>
+    api.get(`/portfolio/fundamentals/scan?top_n=${top_n}&market=${market}`),
+  optimizeFundamentals: (symbols: string[], investment_amount: number, risk_tolerance: string, period: string = '1y', market: string = 'ASX') =>
+    api.post('/portfolio/fundamentals/optimize', { symbols, investment_amount, risk_tolerance, period, market }),
+  sp500: () => api.get('/stocks/sp500'),
   analyzeCAPM: (symbols: string[], period: string = '2y') =>
     api.get(`/portfolio/capm/analyze?symbols=${symbols.join(',')}&period=${period}`),
   optimizeCAPM: (symbols: string[], investment_amount: number, risk_tolerance: string, period: string = '2y') =>
