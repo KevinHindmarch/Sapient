@@ -1,10 +1,10 @@
-# Australian Stock Portfolio Optimizer
+# Sapient - Australian Stock Portfolio Optimizer
 
 ## Overview
 
-The Australian Stock Portfolio Optimizer is a comprehensive Streamlit-based web application that helps users optimize their ASX (Australian Securities Exchange) portfolio using Modern Portfolio Theory. The application fetches real-time stock data from Yahoo Finance, calculates optimal portfolio allocations based on Sharpe ratio maximization, and provides interactive visualizations of portfolio performance and risk metrics.
+Sapient is a comprehensive portfolio optimization application for Australian Securities Exchange (ASX) stocks. It uses Modern Portfolio Theory to help users optimize their portfolio allocations based on Sharpe ratio maximization, with real-time stock data from Yahoo Finance.
 
-The system allows users to select ASX stocks, specify investment amounts, choose risk tolerance levels, and receive optimized portfolio recommendations with detailed analytics including expected returns, volatility, individual stock allocations, dividend yields, backtesting results, rebalancing recommendations, multi-strategy comparisons, and comprehensive PDF reports.
+**Brand**: Sapient - "Smart Portfolios, Smarter Returns"
 
 ## User Preferences
 
@@ -12,205 +12,221 @@ Preferred communication style: Simple, everyday language.
 
 ## System Architecture
 
-### Frontend Architecture
+### New Architecture (January 2025)
 
-**Technology Stack**: Streamlit framework
-- **Design Decision**: Streamlit chosen for rapid development of data-driven applications with minimal frontend code
-- **Rationale**: Provides built-in support for interactive widgets, real-time updates, and data visualization without requiring separate frontend/backend architecture
-- **Session State Management**: Uses Streamlit's session_state for maintaining user selections and optimization results across reruns
-  - Stores: selected_stocks, portfolio_optimized flag, optimization_results
-  - Enables persistent state without database requirements
+The application has been rewritten from Streamlit to a modern **React + FastAPI** architecture for improved scalability and user experience.
 
-**Visualization Layer**: Plotly (Express and Graph Objects)
-- **Design Decision**: Plotly for interactive charts and graphs
-- **Rationale**: Provides rich, interactive visualizations for financial data including subplots, multiple chart types, and responsive designs
-- **Use Cases**: Portfolio allocation pie charts, performance comparison graphs, risk-return scatter plots
+#### Frontend (React + TypeScript)
+- **Location**: `/frontend`
+- **Tech Stack**: React 19, TypeScript, Vite, Tailwind CSS
+- **Port**: 5000 (development)
+- **Key Libraries**:
+  - React Router DOM for navigation
+  - Axios for API requests (proxied to /api)
+  - Recharts for interactive charts
+  - React Hook Form + Zod for form validation
+  - Lucide React for icons
+  - Sonner for toast notifications
+  - date-fns for date formatting
+  - jsPDF for PDF exports
 
-### Backend Architecture
+#### Backend (FastAPI + Python)
+- **Location**: `/backend`
+- **Port**: 8000
+- **Endpoints**:
+  - `/api/auth/*` - Authentication (register, login, JWT tokens)
+  - `/api/stocks/*` - Stock data (search, info, historical, dividends, ASX200)
+  - `/api/portfolio/*` - Portfolio operations (optimize, backtest, save, trade)
+  - `/api/indicators/*` - Technical analysis (RSI, MACD, Bollinger Bands)
 
-**Modular Design Pattern**: Separation of concerns across specialized modules
+#### Shared Core Services
+- **Location**: `/core`
+- **Modules**:
+  - `core/database.py` - Database operations (UserService, PortfolioService)
+  - `core/stocks.py` - Stock data fetching (StockDataService)
+  - `core/optimizer.py` - Portfolio optimization (PortfolioOptimizerService)
+  - `core/indicators.py` - Technical indicators (TechnicalIndicatorService)
+  - `core/fundamentals.py` - Fundamental analysis (FundamentalsService - earnings yield, ROE, growth metrics)
+  - `core/capm.py` - CAPM analysis (CAPMService - beta calculation, expected returns)
 
-1. **StockDataManager** (stock_data.py)
-   - Responsibility: Data acquisition and processing from Yahoo Finance
-   - Caching Strategy: Uses Streamlit's @st.cache_data decorator with 1-hour TTL
-   - Rationale: Reduces API calls to Yahoo Finance, improves performance, prevents rate limiting
-   - Data Processing: Handles both single and multi-stock data with MultiIndex column management
+### Running the Application
 
-2. **PortfolioOptimizer** (portfolio_optimizer.py)
-   - Responsibility: Modern Portfolio Theory calculations and optimization
-   - Algorithm: Sharpe ratio maximization using scipy.optimize.minimize
-   - Risk Management: Implements three risk tolerance levels (conservative, moderate, aggressive)
-     - Conservative: Max 25% per stock, min 4 stocks, higher volatility penalty
-     - Moderate: Max 40% per stock, min 3 stocks, standard optimization
-     - Aggressive: Max 60% per stock, min 2 stocks, lower volatility penalty
-   - Rationale: Provides flexible optimization based on investor risk preferences
+**Production Mode** (FastAPI serves built React frontend):
+```bash
+python server.py
+```
+This runs on port 5000 and serves both API and frontend.
 
-3. **Utility Functions** (utils.py)
-   - Responsibility: Helper functions for formatting, validation, and stock search
-   - Functions: Currency formatting, investment amount validation, ASX stock suggestions
-   - Validation Rules: $1,000 minimum, $10,000,000 maximum investment
+**Development Mode** (separate servers for hot reload):
+```bash
+# Terminal 1: Backend on port 8000
+uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
 
-**Risk-Free Rate**: Set at 3.5% (Australian government bond approximation)
-- Used in Sharpe ratio calculations
-- Represents baseline return for risk-adjusted performance metrics
+# Terminal 2: Frontend on port 5000 (proxies /api to backend)
+cd frontend && npm run dev
+```
 
-### Data Processing Pipeline
+**Build Frontend**:
+```bash
+cd frontend && npm run build
+```
 
-1. User selects stocks and investment parameters
-2. StockDataManager fetches historical price data (default 2-year period)
-3. Data normalized and cleaned (handles missing values, MultiIndex columns)
-4. PortfolioOptimizer calculates returns and covariance matrix
-5. Scipy optimization engine finds optimal weights
-6. Results formatted and visualized through Streamlit UI
+### Legacy Streamlit Application
+The original Streamlit app (`app.py`) is still available. The current Server workflow runs Streamlit. To use the React+FastAPI version, change the workflow command to `python server.py`.
 
-### Configuration and State Management
+## Frontend Pages
 
-**Page Configuration**:
-- Wide layout for better data visualization
-- Expanded sidebar by default for easy stock selection
-- Custom page title and icon
+1. **Login/Register** (`/login`, `/register`) - User authentication with JWT
+2. **Dashboard** (`/`) - Overview of portfolios and quick actions
+3. **Manual Portfolio Builder** (`/manual-builder`) - Select specific stocks and optimize
+4. **Auto Portfolio Builder** (`/auto-builder`) - Automatic ASX200 optimization using historical returns
+5. **Fundamentals Builder** (`/fundamentals-builder`) - Build portfolios using fundamental analysis (earnings yield, quality, growth metrics)
+6. **CAPM Builder** (`/capm-builder`) - Build portfolios using Capital Asset Pricing Model (beta-based expected returns)
+7. **My Portfolios** (`/portfolios`) - List of saved portfolios
+8. **Portfolio Detail** (`/portfolios/:id`) - P/L tracking, positions, transactions
+9. **Stock Analysis** (`/analysis`) - Technical indicators with interactive charts
+10. **Settings** (`/settings`) - Theme toggle (light/dark mode)
 
-**Session State Variables**:
-- selected_stocks: List of user-selected stock symbols
-- portfolio_optimized: Boolean flag indicating optimization status
-- optimization_results: Dictionary containing optimization output (single strategy) or nested dictionaries (multi-strategy comparison)
-- compare_mode: Boolean flag for multi-strategy comparison mode
+## API Endpoints
+
+### Authentication
+- `POST /api/auth/register` - Create new account
+- `POST /api/auth/login` - Get JWT token
+- `GET /api/auth/me` - Get current user
+
+### Stocks
+- `GET /api/stocks/search?q=` - Search ASX stocks
+- `GET /api/stocks/info/{symbol}` - Get stock details
+- `POST /api/stocks/historical` - Get historical price data
+- `GET /api/stocks/dividends?symbols=` - Get dividend yields
+- `GET /api/stocks/asx200` - Get ASX200 stock list
+- `GET /api/stocks/validate/{symbol}` - Validate stock exists
+
+### Portfolio
+- `POST /api/portfolio/optimize` - Optimize portfolio allocation
+- `POST /api/portfolio/backtest` - Backtest with historical data
+- `POST /api/portfolio/compare-strategies` - Compare risk strategies
+- `POST /api/portfolio/save` - Save optimized portfolio
+- `GET /api/portfolio/list` - Get user's portfolios
+- `GET /api/portfolio/{id}` - Get portfolio details
+- `POST /api/portfolio/{id}/trade` - Execute buy/sell trade
+- `GET /api/portfolio/capm/analyze` - Analyze stocks using CAPM (beta, expected returns)
+- `POST /api/portfolio/capm/optimize` - Optimize portfolio using CAPM-based expected returns
+- `GET /api/portfolio/capm/scan` - Auto-scan ASX200 for undervalued stocks
+
+### Technical Indicators
+- `GET /api/indicators/analyze/{symbol}` - Full technical analysis
+- `GET /api/indicators/chart-data/{symbol}` - Chart-ready indicator data
+
+## Database Schema
+
+PostgreSQL database with tables:
+- `users` - User accounts with bcrypt password hashing
+- `portfolios` - Saved portfolio configurations
+- `positions` - Stock positions within portfolios
+- `portfolio_snapshots` - Historical portfolio values
+- `transactions` - Buy/sell transaction history
+- `trading_signals` - Technical indicator signals
+
+## Key Features
+
+### Portfolio Optimization
+- **Risk Tolerance Levels**: Conservative (max 25% per stock), Moderate (max 40%), Aggressive (max 60%)
+- **Sharpe Ratio Maximization**: Uses scipy.optimize for optimal weights
+- **Dividend Yield Integration**: Considers dividend income in returns
+- **Multi-Strategy Comparison**: Compare all strategies side-by-side
+
+### Portfolio Tracking
+- Real-time P/L calculation
+- Current vs target allocation comparison
+- Transaction history
+- Performance snapshots
+
+### Technical Analysis
+- RSI (Relative Strength Index) with buy/sell signals
+- MACD with signal line crossovers
+- Bollinger Bands for volatility analysis
+- Moving averages (SMA 20, SMA 50)
+
+### Export Features
+- PDF reports with portfolio summary
+- CSV for spreadsheet import
+- JSON for data integration
 
 ## External Dependencies
 
-### Financial Data API
-- **Yahoo Finance (yfinance library)**: Primary data source for ASX stock prices
-  - Historical price data retrieval
-  - Supports multiple timeframes (1y, 2y, 3y, 5y)
-  - Auto-adjusts for stock splits and dividends
-  - ASX stocks accessed with .AX suffix
+- **Yahoo Finance (yfinance)**: Stock data source
+- **bcrypt/passlib**: Password hashing
+- **python-jose**: JWT token handling
+- **scipy**: Portfolio optimization
+- **pandas/numpy**: Data processing
 
-### Python Libraries
+## UI Design System
 
-**Data Processing & Analysis**:
-- pandas: DataFrame operations and time series data manipulation
-- numpy: Numerical computations and array operations
+The application uses a premium theme with luxury aesthetics, supporting both light and dark modes:
 
-**Optimization & Scientific Computing**:
-- scipy: Portfolio optimization using minimize function from scipy.optimize
-  - Handles constraint-based optimization
-  - Finds optimal portfolio weights
+### Theme System
+- **Default**: Light mode with clean, bright aesthetics
+- **Dark Mode**: Rich slate-950 background with purple gradient mesh
+- **Toggle**: Settings page (/settings) or sidebar button
+- **Persistence**: Saved to localStorage as 'sapient-theme'
+- **Provider**: ThemeProvider in `frontend/src/lib/theme.tsx`
 
-**Visualization**:
-- plotly.express: High-level visualization interface
-- plotly.graph_objects: Low-level chart customization
-- plotly.subplots: Multi-panel chart layouts
+### Theme Colors
+- **Light Background**: Clean white/slate-50 gradients
+- **Dark Background**: Slate-950 with purple gradient mesh
+- **Cards**: Glassmorphism effect with backdrop-blur and semi-transparent backgrounds
+- **Accents**: Sky-to-indigo gradients for primary actions
+- **Positive/Gains**: Emerald green with glow effects
+- **Negative/Losses**: Red with glow effects
 
-**Web Framework**:
-- streamlit: Core application framework
-  - UI rendering and interactivity
-  - Caching mechanisms
-  - Session state management
+### Design Features
+- Glassmorphism cards with backdrop-blur-12px
+- Gradient buttons with colored shadows (glow on hover)
+- Smooth micro-animations (fade-in, transitions)
+- Custom scrollbars styled for both themes
+- Animated gradient orbs on auth pages
+- Theme-aware charts with Recharts
 
-**Report Generation**:
-- reportlab: PDF generation library for creating professional portfolio reports
-  - SimpleDocTemplate for document structure
-  - Table and TableStyle for formatted data tables
-  - Paragraph and custom styles for text formatting
+### CSS Classes (index.css)
+- `.card` / `.card-hover` - Glass cards with hover effects
+- `.stat-card` - Dashboard statistics cards
+- `.glass-panel` - Generic glass container
+- `.gradient-text` - Sky-to-indigo gradient text
+- `.badge-*` - Colored badges (theme-aware)
+- `.animate-fade-in` / `.animate-glow` - Animations
+- `.theme-text` / `.theme-bg` - Theme-aware utilities
 
-**Date/Time Operations**:
-- datetime: Time series operations and date calculations
-- timedelta: Date range calculations for historical data
+## Recent Changes
 
-### Caching Strategy
-- **Streamlit Cache**: TTL-based caching (3600 seconds) for stock data
-- **Purpose**: Minimize redundant API calls, improve application performance
-- **Trade-off**: Balance between data freshness and API rate limits
+**February 4, 2026**:
+- Added S&P 500 (US market) support to Fundamentals Builder
+  - Market selector toggle: ASX (🇦🇺) and S&P 500 (🇺🇸)
+  - 150 top US companies across all sectors
+  - Currency display: AUD for ASX, USD for US
+  - Separate portfolios per market (no currency mixing)
+  - US symbols without .AX suffix, ASX symbols with .AX
+- Added `market` column to portfolios database table
+- New API endpoint: GET /api/stocks/sp500
+- Updated fundamentals scan/optimize to accept market parameter
 
-## Key Features (Updated December 2024)
+**January 17, 2025**:
+- Switched to geometric returns for more realistic expected return projections
+  - Uses log-return method: exp(mean(log(1+r)) * annualization) - 1
+  - Properly accounts for volatility drag (variance drain)
+  - More conservative and realistic than arithmetic mean
+- Added theme switching system (light/dark modes)
+- Created Settings page at /settings for theme toggle
+- Implemented ThemeProvider with localStorage persistence
+- Premium styling with glassmorphism effects for both themes
+- Added gradient accents and glowing shadows
+- Smooth micro-animations and transitions throughout
+- Theme-aware charts styled for both modes
 
-### 1. Risk Tolerance Settings
-- **Conservative Strategy**: Maximum 25% per stock, minimum 4 stocks, higher volatility penalty
-- **Moderate Strategy**: Maximum 40% per stock, minimum 3 stocks, standard optimization
-- **Aggressive Strategy**: Maximum 60% per stock, minimum 2 stocks, lower volatility penalty
-- Automated minimum stock enforcement with user-friendly validation messages
-
-### 2. Portfolio Backtesting
-- Historical performance simulation using actual stock data
-- Metrics calculated: Total return, annualized return, win rate, best/worst days
-- Maximum drawdown analysis for risk assessment
-- Interactive performance visualization over selected time period
-
-### 3. Dividend Yield Integration
-- Fetches trailing dividend yield for each stock from Yahoo Finance
-- Calculates weighted portfolio dividend yield based on allocations
-- Displays individual stock yields in allocation table
-- Considers dividend income in total return expectations
-
-### 4. Portfolio Rebalancing Recommendations
-- Compares current holdings with optimized allocation
-- Generates specific buy/sell trade recommendations
-- Calculates exact investment amounts for each trade
-- Displays total buy and sell values for portfolio rebalancing
-
-### 5. Multi-Strategy Comparison
-- Side-by-side comparison of all applicable risk strategies
-- Comparison metrics table showing return, volatility, Sharpe ratio for each strategy
-- Risk-return scatter plot visualizing strategy trade-offs
-- Sharpe ratio bar chart for performance comparison
-- Individual allocation pie charts for each strategy with top holdings
-
-### 6. Export Capabilities
-- **JSON Report**: Interactive summary of portfolio metrics and allocations
-- **CSV Export**: Downloadable spreadsheet with stock weights and investment amounts
-- **PDF Report**: Comprehensive professional report including:
-  - Portfolio summary with all key metrics
-  - Detailed allocation table with dividend yields
-  - Risk analysis section
-  - Professional formatting with tables and styling
-  - Legal disclaimer for compliance
-
-### 7. Auto Portfolio Builder (NEW)
-- **Automatic stock selection** from comprehensive ASX200 universe (~200 top ASX stocks)
-- **Sector diversification** across 11 GICS sectors (Financials, Materials, Healthcare, Consumer Discretionary, Consumer Staples, Industrials, Information Technology, Energy, Real Estate, Utilities, Communication Services)
-- **Simple interface**: Just enter investment amount and portfolio size
-- **Optimization algorithm**: Tests 100 stock combinations to find highest Sharpe ratio
-- **Portfolio sizes**: Small (5-8 stocks), Medium (8-12 stocks), Large (12-20 stocks)
-- **Full results display**: Metrics, allocation charts, sector breakdown, correlation matrix, and export options
-- **Progress tracking**: Visual progress bars for data fetching and optimization
-
-## Application Structure
-
-### Tab-Based Interface
-1. **Manual Portfolio Builder**: Original functionality for selecting specific ASX stocks
-2. **Auto Portfolio Builder**: Automatic portfolio generation for maximum Sharpe ratio
-
-## Recent Changes (January 2025)
-
-**January 2, 2025**:
-- **User Authentication System**: Added secure login/register with bcrypt password hashing
-- **PostgreSQL Database**: 7 tables (users, portfolios, positions, snapshots, transactions, signals) for persistent storage
-- **My Portfolios Tab**: View saved portfolios with predicted vs actual performance comparison
-- **Individual Stock P/L Tracking**: Real-time profit/loss analysis for each position
-- **Trading Functionality**: Buy/sell stocks within portfolios with transaction history
-- **Stock Analysis Tab**: Technical indicators (RSI, MACD, Bollinger Bands) for trading signals
-- **Portfolio Saving**: Save optimized portfolios from Auto Builder to track performance over time
-
-## Recent Changes (December 2024)
-
-**December 9, 2024**:
-- Added Auto Portfolio Builder tab for automatic Sharpe-optimized portfolio generation
-- Expanded stock universe to full ASX200 (~200 stocks across 11 GICS sectors)
-- Added stock correlation matrix heatmap with diversification interpretation
-- Added multi-strategy comparison feature for analyzing different risk profiles simultaneously
-- Implemented comprehensive PDF export with reportlab for professional portfolio reports
-- Enhanced export section with three export formats: JSON, CSV, and PDF
-- Fixed dividend yield handling (yfinance returns percentages, now properly converted to decimals)
-- Improved annualization factor detection using time-based frequency analysis
-- Added progress bars for data fetching and optimization (handles 200+ stocks)
-- Increased optimization iterations to 100 for better coverage of larger universe
-
-**December 8, 2024**:
-- Integrated dividend yield data into optimization and display
-- Added portfolio rebalancing recommendations with trade calculations
-- Implemented backtesting feature with historical performance metrics
-
-**December 7, 2024**:
-- Implemented risk tolerance settings with three distinct strategies
-- Added automated validation for minimum stock requirements per strategy
-- Enhanced portfolio optimizer with strategy-specific constraints
+**January 7, 2025**:
+- Rewrote application from Streamlit to React + FastAPI architecture
+- Created shared core services layer for code reuse
+- Built complete REST API with JWT authentication
+- Implemented modern React frontend with TypeScript
+- Added interactive Recharts visualizations
+- Created responsive Tailwind CSS design with Sapient branding
