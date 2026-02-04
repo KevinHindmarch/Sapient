@@ -197,7 +197,18 @@ The application uses a premium theme with luxury aesthetics, supporting both lig
 - `.animate-fade-in` / `.animate-glow` - Animations
 - `.theme-text` / `.theme-bg` - Theme-aware utilities
 
-## Recent Changes (January 2025)
+## Recent Changes
+
+**February 4, 2026**:
+- Added S&P 500 (US market) support to Fundamentals Builder
+  - Market selector toggle: ASX (🇦🇺) and S&P 500 (🇺🇸)
+  - 150 top US companies across all sectors
+  - Currency display: AUD for ASX, USD for US
+  - Separate portfolios per market (no currency mixing)
+  - US symbols without .AX suffix, ASX symbols with .AX
+- Added `market` column to portfolios database table
+- New API endpoint: GET /api/stocks/sp500
+- Updated fundamentals scan/optimize to accept market parameter
 
 **January 17, 2025**:
 - Switched to geometric returns for more realistic expected return projections

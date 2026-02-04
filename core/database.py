@@ -66,7 +66,8 @@ def init_database():
             expected_volatility DECIMAL(8, 4),
             expected_sharpe DECIMAL(8, 4),
             expected_dividend_yield DECIMAL(8, 4),
-            risk_tolerance VARCHAR(20) DEFAULT 'moderate'
+            risk_tolerance VARCHAR(20) DEFAULT 'moderate',
+            market VARCHAR(10) DEFAULT 'ASX'
         );
         
         CREATE TABLE IF NOT EXISTS portfolio_positions (
