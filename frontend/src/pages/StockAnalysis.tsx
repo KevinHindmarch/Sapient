@@ -6,13 +6,18 @@ import { Search, TrendingUp, TrendingDown, Activity, AlertCircle } from 'lucide-
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, CartesianGrid } from 'recharts'
 import { useTheme } from '../lib/theme'
 
+type Market = 'asx' | 'us'
+
 export default function StockAnalysis() {
   const { theme } = useTheme()
   const isDark = theme === 'dark'
   const [symbol, setSymbol] = useState('')
+  const [market, setMarket] = useState<Market>('asx')
   const [loading, setLoading] = useState(false)
   const [analysis, setAnalysis] = useState<TechnicalAnalysis | null>(null)
   const [chartData, setChartData] = useState<Record<string, unknown>[] | null>(null)
+  
+  const currencySymbol = market === 'asx' ? 'A$' : '$'
 
   const analyzeStock = async () => {
     if (!symbol) {
@@ -23,8 +28,8 @@ export default function StockAnalysis() {
     setLoading(true)
     try {
       const [analysisRes, chartRes] = await Promise.all([
-        indicatorsApi.analyze(symbol),
-        indicatorsApi.chartData(symbol),
+        indicatorsApi.analyze(symbol, '1y', market),
+        indicatorsApi.chartData(symbol, 'all', '1y', market),
       ])
       
       setAnalysis(analysisRes.data)
@@ -67,11 +72,39 @@ export default function StockAnalysis() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div>
-        <h1 className={`text-3xl font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Stock Analysis</h1>
-        <p className={`${isDark ? 'text-slate-400' : 'text-slate-600'} mt-1`}>
-          Technical indicator analysis with RSI, MACD, and Bollinger Bands
-        </p>
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <div>
+          <h1 className={`text-3xl font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Stock Analysis</h1>
+          <p className={`${isDark ? 'text-slate-400' : 'text-slate-600'} mt-1`}>
+            Technical indicator analysis with RSI, MACD, and Bollinger Bands
+          </p>
+        </div>
+        
+        <div className="flex items-center gap-2">
+          <span className={`text-sm font-medium ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Market:</span>
+          <div className={`inline-flex rounded-lg p-1 ${isDark ? 'bg-slate-800/50' : 'bg-slate-100'}`}>
+            <button
+              onClick={() => { setMarket('asx'); setAnalysis(null); setChartData(null); setSymbol(''); }}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
+                market === 'asx'
+                  ? 'bg-gradient-to-r from-sky-500 to-indigo-500 text-white shadow-lg'
+                  : isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              🇦🇺 ASX
+            </button>
+            <button
+              onClick={() => { setMarket('us'); setAnalysis(null); setChartData(null); setSymbol(''); }}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
+                market === 'us'
+                  ? 'bg-gradient-to-r from-sky-500 to-indigo-500 text-white shadow-lg'
+                  : isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              🇺🇸 S&P 500
+            </button>
+          </div>
+        </div>
       </div>
 
       <div className={`card backdrop-blur-xl ${isDark ? 'bg-slate-900/60 border-slate-700/50' : 'bg-white border-slate-300'}`}>
@@ -83,7 +116,9 @@ export default function StockAnalysis() {
               value={symbol}
               onChange={(e) => setSymbol(e.target.value.toUpperCase())}
               onKeyDown={(e) => e.key === 'Enter' && analyzeStock()}
-              placeholder="Enter ASX stock symbol (e.g., BHP, CBA, CSL)"
+              placeholder={market === 'asx' 
+                ? "Enter ASX stock symbol (e.g., BHP, CBA, CSL)" 
+                : "Enter US stock symbol (e.g., AAPL, MSFT, GOOGL)"}
               className={`input pl-10 ${isDark ? 'bg-slate-800/70 border-slate-600/50 text-slate-100' : 'bg-white border-slate-300 text-slate-900'} placeholder-slate-500`}
             />
           </div>
@@ -117,7 +152,7 @@ export default function StockAnalysis() {
                     <Tooltip 
                       contentStyle={tooltipStyle}
                       labelFormatter={(value) => new Date(value).toLocaleDateString()}
-                      formatter={(value: number) => [`$${value?.toFixed(2) || 'N/A'}`, '']}
+                      formatter={(value: number) => [`${currencySymbol}${value?.toFixed(2) || 'N/A'}`, '']}
                     />
                     <Line type="monotone" dataKey="price" stroke="#38bdf8" strokeWidth={2} dot={false} />
                     <Line type="monotone" dataKey="sma20" stroke="#a78bfa" strokeWidth={1} dot={false} opacity={0.8} />
@@ -178,7 +213,7 @@ export default function StockAnalysis() {
             <div className={`card backdrop-blur-xl ${isDark ? 'bg-slate-900/60 border-slate-700/50' : 'bg-white border-slate-300'}`}>
               <div className="flex items-center justify-between mb-4">
                 <h2 className={`text-lg font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
-                  {analysis.symbol.replace('.AX', '')}
+                  {market === 'asx' ? analysis.symbol.replace('.AX', '') : analysis.symbol}
                 </h2>
                 <span className={`px-3 py-1 rounded-full text-sm font-medium ${
                   analysis.trend === 'uptrend' 
@@ -198,7 +233,7 @@ export default function StockAnalysis() {
               </div>
               
               <p className={`text-3xl font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'} mb-4`}>
-                ${analysis.current_price.toFixed(2)}
+                {currencySymbol}{analysis.current_price.toFixed(2)}
               </p>
 
               <div className={`p-4 rounded-lg ${getSignalColor(analysis.overall_signal)}`}>
@@ -252,11 +287,11 @@ export default function StockAnalysis() {
                   <div className="mt-2 space-y-1 text-sm">
                     <div className="flex justify-between">
                       <span className={isDark ? 'text-slate-400' : 'text-slate-600'}>SMA 20</span>
-                      <span className={`font-medium ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>${analysis.indicators.moving_averages.sma_20.toFixed(2)}</span>
+                      <span className={`font-medium ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>{currencySymbol}{analysis.indicators.moving_averages.sma_20.toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className={isDark ? 'text-slate-400' : 'text-slate-600'}>SMA 50</span>
-                      <span className={`font-medium ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>${analysis.indicators.moving_averages.sma_50.toFixed(2)}</span>
+                      <span className={`font-medium ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>{currencySymbol}{analysis.indicators.moving_averages.sma_50.toFixed(2)}</span>
                     </div>
                     <p className={`${isDark ? 'text-slate-400' : 'text-slate-600'} mt-1`}>
                       Price is {analysis.indicators.moving_averages.price_vs_sma50} SMA 50
@@ -269,15 +304,15 @@ export default function StockAnalysis() {
                   <div className="mt-2 space-y-1 text-sm">
                     <div className="flex justify-between">
                       <span className={isDark ? 'text-slate-400' : 'text-slate-600'}>Upper</span>
-                      <span className={`font-medium ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>${analysis.indicators.bollinger.upper.toFixed(2)}</span>
+                      <span className={`font-medium ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>{currencySymbol}{analysis.indicators.bollinger.upper.toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className={isDark ? 'text-slate-400' : 'text-slate-600'}>Middle</span>
-                      <span className={`font-medium ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>${analysis.indicators.bollinger.middle.toFixed(2)}</span>
+                      <span className={`font-medium ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>{currencySymbol}{analysis.indicators.bollinger.middle.toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className={isDark ? 'text-slate-400' : 'text-slate-600'}>Lower</span>
-                      <span className={`font-medium ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>${analysis.indicators.bollinger.lower.toFixed(2)}</span>
+                      <span className={`font-medium ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>{currencySymbol}{analysis.indicators.bollinger.lower.toFixed(2)}</span>
                     </div>
                     <p className={`${isDark ? 'text-slate-400' : 'text-slate-600'} mt-1`}>
                       Position: {analysis.indicators.bollinger.position.replace('_', ' ')}

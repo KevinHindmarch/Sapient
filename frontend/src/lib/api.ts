@@ -80,10 +80,10 @@ export const portfolioApi = {
 }
 
 export const indicatorsApi = {
-  analyze: (symbol: string, period: string = '1y') =>
-    api.get(`/indicators/analyze/${symbol}?period=${period}`),
-  chartData: (symbol: string, indicator: string = 'all', period: string = '1y') =>
-    api.get(`/indicators/chart-data/${symbol}?indicator=${indicator}&period=${period}`),
+  analyze: (symbol: string, period: string = '1y', market: string = 'asx') =>
+    api.get(`/indicators/analyze/${symbol}?period=${period}&market=${market}`),
+  chartData: (symbol: string, indicator: string = 'all', period: string = '1y', market: string = 'asx') =>
+    api.get(`/indicators/chart-data/${symbol}?indicator=${indicator}&period=${period}&market=${market}`),
 }
 
 export default api

@@ -10,9 +10,9 @@ router = APIRouter()
 
 
 @router.get("/analyze/{symbol}")
-async def analyze_stock(symbol: str, period: str = "1y"):
+async def analyze_stock(symbol: str, period: str = "1y", market: str = "asx"):
     """Perform comprehensive technical analysis on a stock."""
-    result = TechnicalIndicatorService.analyze_stock(symbol, period)
+    result = TechnicalIndicatorService.analyze_stock(symbol, period, market)
     
     if 'error' in result:
         raise HTTPException(status_code=400, detail=result['error'])
@@ -21,9 +21,9 @@ async def analyze_stock(symbol: str, period: str = "1y"):
 
 
 @router.get("/chart-data/{symbol}")
-async def get_chart_data(symbol: str, indicator: str = "all", period: str = "1y"):
+async def get_chart_data(symbol: str, indicator: str = "all", period: str = "1y", market: str = "asx"):
     """Get indicator data formatted for charting."""
-    result = TechnicalIndicatorService.get_chart_data(symbol, indicator, period)
+    result = TechnicalIndicatorService.get_chart_data(symbol, indicator, period, market)
     
     if 'error' in result:
         raise HTTPException(status_code=400, detail=result['error'])

@@ -172,18 +172,20 @@ class TechnicalIndicatorService:
             }
     
     @staticmethod
-    def analyze_stock(symbol: str, period: str = "1y") -> Dict:
+    def analyze_stock(symbol: str, period: str = "1y", market: str = "asx") -> Dict:
         """
         Perform comprehensive technical analysis on a stock.
         
         Args:
             symbol: Stock symbol (with or without .AX suffix)
             period: Data period for analysis
+            market: Market type ('asx' or 'us')
             
         Returns:
             Dict with all indicators and signals
         """
-        if not symbol.endswith('.AX'):
+        # Only add .AX suffix for ASX stocks
+        if market == "asx" and not symbol.endswith('.AX'):
             symbol += '.AX'
         
         try:
@@ -274,7 +276,7 @@ class TechnicalIndicatorService:
             return {'symbol': symbol, 'error': str(e)}
     
     @staticmethod
-    def get_chart_data(symbol: str, indicator: str = 'all', period: str = "1y") -> Dict:
+    def get_chart_data(symbol: str, indicator: str = 'all', period: str = "1y", market: str = "asx") -> Dict:
         """
         Get indicator data formatted for charting.
         
@@ -282,11 +284,13 @@ class TechnicalIndicatorService:
             symbol: Stock symbol
             indicator: 'rsi', 'macd', 'bollinger', 'sma', or 'all'
             period: Data period
+            market: Market type ('asx' or 'us')
             
         Returns:
             Dict with indicator time series data
         """
-        if not symbol.endswith('.AX'):
+        # Only add .AX suffix for ASX stocks
+        if market == "asx" and not symbol.endswith('.AX'):
             symbol += '.AX'
         
         try:

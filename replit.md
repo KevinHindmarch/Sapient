@@ -199,6 +199,13 @@ The application uses a premium theme with luxury aesthetics, supporting both lig
 
 ## Recent Changes
 
+**February 5, 2026**:
+- Extended Stock Analysis page to support US shares
+  - Market selector toggle: ASX (🇦🇺) and S&P 500 (🇺🇸)
+  - Dynamic placeholder text based on market selection
+  - Currency display: A$ for ASX, $ for US
+  - Technical indicators (RSI, MACD, Bollinger Bands) work for both markets
+
 **February 4, 2026**:
 - Added S&P 500 (US market) support to Fundamentals Builder
   - Market selector toggle: ASX (🇦🇺) and S&P 500 (🇺🇸)
