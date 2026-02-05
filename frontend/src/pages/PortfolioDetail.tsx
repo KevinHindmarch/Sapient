@@ -255,8 +255,13 @@ export default function PortfolioDetail() {
     return sum + (price * Number(p.quantity))
   }, 0)
 
-  const totalReturn = totalValue - Number(portfolio.initial_investment)
-  const totalReturnPct = (totalReturn / Number(portfolio.initial_investment)) * 100
+  const costBasis = positions.reduce((sum, p) => {
+    if (p.status !== 'active') return sum
+    return sum + (Number(p.avg_cost) * Number(p.quantity))
+  }, 0)
+
+  const totalReturn = totalValue - costBasis
+  const totalReturnPct = costBasis > 0 ? (totalReturn / costBasis) * 100 : 0
 
   const generateGrowthData = () => {
     const initial = Number(portfolio.initial_investment)
@@ -376,9 +381,9 @@ export default function PortfolioDetail() {
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="card">
-          <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Initial Investment</p>
+          <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Cost Basis</p>
           <p className={`text-2xl font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
-            ${Number(portfolio.initial_investment).toLocaleString()}
+            ${costBasis.toLocaleString(undefined, { maximumFractionDigits: 0 })}
           </p>
         </div>
         <div className="card">
