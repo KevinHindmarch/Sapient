@@ -558,33 +558,39 @@ class FundamentalsService:
         return max(-0.05, min(0.25, expected_return))
     
     @staticmethod
-    def scan_stocks(symbols: List[str], max_workers: int = 10) -> List[Dict]:
+    def scan_stocks(symbols: List[str], max_workers: int = 10, timeout_per_stock: int = 15) -> List[Dict]:
         """
         Scan multiple stocks in parallel and return fundamentals with scores.
+        Uses timeout to skip slow stocks and avoid hanging.
         """
         results = []
         
         def fetch_and_score(symbol: str) -> Optional[Dict]:
-            fundamentals = FundamentalsService.get_stock_fundamentals(symbol)
-            if fundamentals and fundamentals.get('current_price'):
-                scores = FundamentalsService.calculate_composite_score(fundamentals)
-                expected_return = FundamentalsService.calculate_fundamental_expected_return(fundamentals)
-                
-                return {
-                    **fundamentals,
-                    **scores,
-                    'expected_return': round(expected_return, 4)
-                }
+            try:
+                fundamentals = FundamentalsService.get_stock_fundamentals(symbol)
+                if fundamentals and fundamentals.get('current_price'):
+                    scores = FundamentalsService.calculate_composite_score(fundamentals)
+                    expected_return = FundamentalsService.calculate_fundamental_expected_return(fundamentals)
+                    
+                    return {
+                        **fundamentals,
+                        **scores,
+                        'expected_return': round(expected_return, 4)
+                    }
+            except Exception as e:
+                print(f"Error fetching {symbol}: {e}")
             return None
         
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = {executor.submit(fetch_and_score, s): s for s in symbols}
             
-            for future in as_completed(futures):
+            for future in as_completed(futures, timeout=timeout_per_stock * len(symbols) / max_workers + 30):
                 try:
-                    result = future.result()
+                    result = future.result(timeout=timeout_per_stock)
                     if result:
                         results.append(result)
+                except TimeoutError:
+                    print(f"Timeout processing {futures[future]}, skipping...")
                 except Exception as e:
                     print(f"Error processing {futures[future]}: {e}")
         

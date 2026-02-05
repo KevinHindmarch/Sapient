@@ -2,14 +2,55 @@ import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { stocksApi, portfolioApi } from '../lib/api'
-import { OptimizationResult } from '../types'
+import { portfolioApi } from '../lib/api'
 import { toast } from 'sonner'
-import { Wand2, Save, TrendingUp, AlertCircle, Loader2, CheckCircle, Info, AlertTriangle } from 'lucide-react'
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts'
+import { Wand2, Save, TrendingUp, Loader2, CheckCircle, Info, AlertTriangle, Target, Globe } from 'lucide-react'
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts'
 import { useTheme } from '../lib/theme'
 
 const COLORS = ['#0ea5e9', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#6366f1', '#14b8a6']
+
+type Market = 'ASX' | 'US'
+
+interface StockFundamentals {
+  symbol: string
+  name: string
+  sector: string
+  current_price: number
+  market_cap: number
+  earnings_yield: number | null
+  roe: number | null
+  earnings_growth: number | null
+  dividend_yield: number | null
+  value_score: number
+  quality_score: number
+  growth_score: number
+  size_score?: number
+  momentum_score?: number
+  composite_score: number
+  expected_return: number
+}
+
+interface OptimizationResult {
+  weights: Record<string, number>
+  expected_return: number
+  volatility: number
+  sharpe_ratio: number
+  var_95: number
+  max_drawdown: number
+  portfolio_dividend_yield: number
+  correlation_matrix?: number[][]
+  correlation_symbols?: string[]
+  stock_fundamentals?: {
+    symbol: string
+    name: string
+    weight: number
+    expected_return: number
+    value_score: number
+    quality_score: number
+    composite_score: number
+  }[]
+}
 
 const formSchema = z.object({
   investment_amount: z.number().min(1000, 'Minimum $1,000').max(10000000, 'Maximum $10,000,000'),
@@ -20,9 +61,9 @@ const formSchema = z.object({
 type FormData = z.infer<typeof formSchema>
 
 const PORTFOLIO_SIZES = {
-  small: { min: 5, max: 8, label: 'Small (5-8 stocks)' },
-  medium: { min: 8, max: 12, label: 'Medium (8-12 stocks)' },
-  large: { min: 12, max: 20, label: 'Large (12-20 stocks)' },
+  small: { target: 6, label: 'Small (5-8 stocks)' },
+  medium: { target: 10, label: 'Medium (8-12 stocks)' },
+  large: { target: 15, label: 'Large (12-20 stocks)' },
 }
 
 const getCorrelationColor = (value: number): string => {
@@ -46,14 +87,14 @@ const CorrelationMatrix = ({ matrix, symbols, isDark }: { matrix: number[][], sy
             <tr>
               <th className="p-2"></th>
               {symbols.map(s => (
-                <th key={s} className={`p-2 font-semibold text-center ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{s}</th>
+                <th key={s} className={`p-2 font-semibold text-center ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{s.replace('.AX', '')}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {matrix.map((row, i) => (
               <tr key={symbols[i]}>
-                <td className={`p-2 font-semibold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{symbols[i]}</td>
+                <td className={`p-2 font-semibold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{symbols[i].replace('.AX', '')}</td>
                 {row.map((val, j) => (
                   <td key={j} className={`p-2 text-center rounded transition-all duration-300 ${i === j ? (isDark ? 'bg-slate-700' : 'bg-slate-200') : getCorrelationColor(val)}`}>
                     {val.toFixed(2)}
@@ -85,15 +126,29 @@ const CorrelationMatrix = ({ matrix, symbols, isDark }: { matrix: number[][], sy
   )
 }
 
+const getScoreColor = (score: number) => {
+  if (score >= 70) return 'text-emerald-400'
+  if (score >= 50) return 'text-sky-400'
+  if (score >= 30) return 'text-amber-400'
+  return 'text-red-400'
+}
+
+const formatMarketCap = (val: number) => {
+  if (val >= 1e12) return `$${(val / 1e12).toFixed(1)}T`
+  if (val >= 1e9) return `$${(val / 1e9).toFixed(1)}B`
+  if (val >= 1e6) return `$${(val / 1e6).toFixed(0)}M`
+  return `$${val.toLocaleString()}`
+}
+
 export default function AutoBuilder() {
   const { theme } = useTheme()
   const isDark = theme === 'dark'
   
+  const [market, setMarket] = useState<Market>('ASX')
   const [building, setBuilding] = useState(false)
   const [result, setResult] = useState<OptimizationResult | null>(null)
+  const [scannedStocks, setScannedStocks] = useState<StockFundamentals[]>([])
   const [selectedStocks, setSelectedStocks] = useState<string[]>([])
-  const [stockSectors, setStockSectors] = useState<Record<string, string>>({})
-  const [stockNames, setStockNames] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
   const [progress, setProgress] = useState('')
   const [showSaveModal, setShowSaveModal] = useState(false)
@@ -110,54 +165,58 @@ export default function AutoBuilder() {
 
   const investmentAmount = watch('investment_amount')
   const riskTolerance = watch('risk_tolerance')
+  
+  const currency = market === 'US' ? 'USD' : 'AUD'
+  const currencySymbol = market === 'US' ? '$' : 'A$'
+  const marketLabel = market === 'US' ? 'S&P 500' : 'ASX200'
+
+  const handleMarketChange = (newMarket: Market) => {
+    setMarket(newMarket)
+    setResult(null)
+    setScannedStocks([])
+    setSelectedStocks([])
+  }
 
   const onSubmit = async (data: FormData) => {
     setBuilding(true)
-    setProgress('Analyzing all ASX200 stocks by Sharpe ratio...')
+    setProgress(`Scanning ${marketLabel} using Fama-French factors...`)
+    setResult(null)
+    setScannedStocks([])
+    setSelectedStocks([])
     
     try {
-      const rankResponse = await stocksApi.rankByPerformance()
-      const rankings = rankResponse.data.rankings as Array<{symbol: string, name?: string, sharpe_ratio: number, annual_return: number, sector?: string}>
+      const sizeConfig = PORTFOLIO_SIZES[data.portfolio_size]
+      const targetSize = sizeConfig.target
       
-      if (!rankings || rankings.length === 0) {
+      const scanResponse = await portfolioApi.scanFundamentals(30, market)
+      const stocks = scanResponse.data.stocks as StockFundamentals[]
+      
+      if (!stocks || stocks.length === 0) {
         throw new Error('No stock data available')
       }
       
-      setProgress(`Ranked ${rankings.length} stocks - selecting top performers...`)
+      setProgress(`Found ${stocks.length} opportunities - selecting top ${targetSize}...`)
+      setScannedStocks(stocks)
       
-      const sizeConfig = PORTFOLIO_SIZES[data.portfolio_size]
-      const targetSize = Math.floor((sizeConfig.min + sizeConfig.max) / 2)
+      const topStocks = stocks.slice(0, targetSize).map(s => s.symbol)
       
-      const topRankings = rankings
-        .filter(s => s.sharpe_ratio > 0)
-        .slice(0, targetSize)
-      
-      const sectors: Record<string, string> = {}
-      const names: Record<string, string> = {}
-      topRankings.forEach(s => {
-        sectors[s.symbol] = s.sector || 'Unknown'
-        names[s.symbol] = s.name || s.symbol.replace('.AX', '')
-      })
-      setStockSectors(sectors)
-      setStockNames(names)
-      
-      const topStocks = topRankings.map(s => s.symbol)
-      
-      if (topStocks.length < 3) {
-        throw new Error('Not enough stocks with positive Sharpe ratio')
+      if (topStocks.length < 2) {
+        throw new Error('Not enough stocks with valid fundamentals')
       }
       
       setSelectedStocks(topStocks)
-      setProgress(`Optimizing top ${topStocks.length} performers for maximum Sharpe ratio...`)
+      setProgress(`Optimizing portfolio using fundamentals-weighted returns...`)
       
-      const response = await portfolioApi.optimize(
+      const response = await portfolioApi.optimizeFundamentals(
         topStocks,
         data.investment_amount,
-        data.risk_tolerance
+        data.risk_tolerance,
+        '1y',
+        market
       )
       
       setResult(response.data)
-      toast.success(`Selected top ${topStocks.length} stocks from ${rankings.length} analyzed!`)
+      toast.success(`Auto-built portfolio from ${scanResponse.data.total_scanned} ${marketLabel} stocks!`)
     } catch (error: unknown) {
       const err = error as { response?: { data?: { detail?: string } } }
       toast.error(err.response?.data?.detail || 'Failed to build portfolio')
@@ -177,7 +236,7 @@ export default function AutoBuilder() {
 
     setSaving(true)
     try {
-      await portfolioApi.save(portfolioName.trim(), result, investmentAmount, 'auto', riskTolerance)
+      await portfolioApi.save(portfolioName.trim(), result, investmentAmount, 'auto', riskTolerance, market)
       toast.success('Portfolio saved successfully!')
       setShowSaveModal(false)
     } catch (error: unknown) {
@@ -196,13 +255,65 @@ export default function AutoBuilder() {
       value: (weight as number) * 100,
     })) : []
 
+  const selectedStockDetails = scannedStocks.filter(s => selectedStocks.includes(s.symbol))
+
   return (
     <div className="space-y-6 animate-fade-in">
-      <div>
-        <h1 className={`text-3xl font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Auto Portfolio Builder</h1>
-        <p className={`mt-1 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-          Automatically generate an optimized portfolio from ASX200 stocks
-        </p>
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <div>
+          <h1 className={`text-3xl font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Auto Portfolio Builder</h1>
+          <p className={`mt-1 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+            Automatically generate an optimized portfolio using Fama-French fundamentals
+          </p>
+        </div>
+        
+        <div className="flex items-center gap-2">
+          <Globe className="w-4 h-4 text-slate-500" />
+          <span className={`text-sm font-medium ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Market:</span>
+          <div className={`inline-flex rounded-lg p-1 ${isDark ? 'bg-slate-800/50' : 'bg-slate-100'}`}>
+            <button
+              onClick={() => handleMarketChange('ASX')}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
+                market === 'ASX'
+                  ? 'bg-gradient-to-r from-sky-500 to-indigo-500 text-white shadow-lg'
+                  : isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              🇦🇺 ASX
+            </button>
+            <button
+              onClick={() => handleMarketChange('US')}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
+                market === 'US'
+                  ? 'bg-gradient-to-r from-sky-500 to-indigo-500 text-white shadow-lg'
+                  : isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              🇺🇸 S&P 500
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className={`card p-6 ${isDark ? 'bg-gradient-to-r from-indigo-500/20 to-purple-500/20 border-indigo-500/30' : 'bg-gradient-to-r from-indigo-50 to-purple-50 border-indigo-200'}`}>
+        <div className="flex items-start gap-4">
+          <div className={`p-3 rounded-xl ${isDark ? 'bg-indigo-500/30' : 'bg-indigo-100'}`}>
+            <Target className="w-8 h-8 text-indigo-400" />
+          </div>
+          <div>
+            <h3 className={`font-semibold text-lg ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>How it works</h3>
+            <p className={`mt-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+              Uses <strong>Fama-French multi-factor model</strong> backed by Nobel Prize-winning research:
+            </p>
+            <ul className={`mt-2 space-y-1 text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+              <li><strong>Value</strong> = Earnings Yield, Price-to-Book (high = undervalued)</li>
+              <li><strong>Quality</strong> = ROE, Profit Margins, Low Debt (profitability factor)</li>
+              <li><strong>Size</strong> = Small-cap premium (smaller companies outperform)</li>
+              <li><strong>Momentum</strong> = 12-month price trend (strongest 2024 factor)</li>
+              <li><strong>Growth</strong> = Sustainable Growth Rate (ROE × Retention + Historical CAGR)</li>
+            </ul>
+          </div>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -212,7 +323,7 @@ export default function AutoBuilder() {
             
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
-                <label className="label">Investment Amount (AUD)</label>
+                <label className="label">Investment Amount ({currency})</label>
                 <input
                   type="number"
                   {...register('investment_amount', { valueAsNumber: true })}
@@ -242,17 +353,6 @@ export default function AutoBuilder() {
               </div>
             </div>
 
-            <div className="mt-4 p-4 bg-amber-500/20 border border-amber-500/30 rounded-lg flex items-start gap-3 backdrop-blur-sm">
-              <AlertCircle className="w-5 h-5 text-amber-400 mt-0.5" />
-              <div>
-                <p className="text-sm text-amber-300 font-medium">How it works</p>
-                <p className="text-sm text-amber-300/80 mt-1">
-                  Sapient fetches the full ASX200 index, selects diversified stocks based on your portfolio size,
-                  and optimizes allocations using real Yahoo Finance data and Modern Portfolio Theory (Sharpe ratio maximization).
-                </p>
-              </div>
-            </div>
-
             <button
               type="submit"
               disabled={building}
@@ -263,44 +363,50 @@ export default function AutoBuilder() {
               ) : (
                 <Wand2 className="w-5 h-5" />
               )}
-              {building ? progress || 'Building...' : 'Build Portfolio'}
+              {building ? progress || 'Building...' : `Build ${marketLabel} Portfolio`}
             </button>
           </form>
 
           {building && (
             <div className="card mt-6">
               <div className="flex flex-col items-center justify-center py-12">
-                <Loader2 className="w-12 h-12 animate-spin text-sky-400 mb-4" />
+                <Loader2 className="w-12 h-12 animate-spin text-indigo-400 mb-4" />
                 <p className={`text-lg font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{progress || 'Processing...'}</p>
-                <p className={`mt-2 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>This may take a moment as we fetch real market data</p>
+                <p className={`mt-2 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Analyzing fundamentals and optimizing allocations</p>
+                <p className={`mt-1 text-sm ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>This may take 30-60 seconds</p>
               </div>
             </div>
           )}
 
-          {!building && result && (
+          {!building && result && selectedStockDetails.length > 0 && (
             <>
               <div className="card mt-6">
-                <h2 className={`text-lg font-semibold mb-4 ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Recommended Allocation</h2>
+                <h2 className={`text-lg font-semibold mb-4 ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+                  Selected Stocks ({selectedStockDetails.length})
+                </h2>
                 <div className="overflow-x-auto">
-                  <table className="w-full">
+                  <table className="w-full text-sm">
                     <thead>
-                      <tr className={`text-left text-sm border-b ${isDark ? 'text-slate-400 border-slate-600/50' : 'text-slate-600 border-slate-300'}`}>
-                        <th className="pb-3 font-medium">Stock</th>
-                        <th className="pb-3 font-medium">Sector</th>
-                        <th className="pb-3 font-medium text-right">Weight</th>
-                        <th className="pb-3 font-medium text-right">Amount</th>
+                      <tr className={isDark ? 'text-slate-400' : 'text-slate-600'}>
+                        <th className="text-left p-2">Stock</th>
+                        <th className="text-right p-2">Score</th>
+                        <th className="text-right p-2">Weight</th>
+                        <th className="text-right p-2">Amount</th>
+                        <th className="text-right p-2">Value</th>
+                        <th className="text-right p-2">Quality</th>
+                        <th className="text-right p-2">Market Cap</th>
                       </tr>
                     </thead>
                     <tbody>
                       {Object.entries(result.weights)
                         .sort(([, a], [, b]) => (b as number) - (a as number))
                         .map(([symbol, weight], index) => {
+                          const stockInfo = scannedStocks.find(s => s.symbol === symbol)
                           const weightNum = weight as number
                           const amount = weightNum * investmentAmount
-                          const sector = stockSectors[symbol] || 'Unknown'
                           return (
-                            <tr key={symbol} className={`border-b last:border-0 transition-all duration-300 ${isDark ? 'border-slate-700/50 hover:bg-slate-800/50' : 'border-slate-200 hover:bg-slate-100'}`}>
-                              <td className="py-3">
+                            <tr key={symbol} className={`border-t ${isDark ? 'border-slate-700/50 hover:bg-slate-800/50' : 'border-slate-200 hover:bg-slate-50'}`}>
+                              <td className="p-2">
                                 <div className="flex items-center gap-2">
                                   <div 
                                     className="w-3 h-3 rounded-full" 
@@ -308,18 +414,27 @@ export default function AutoBuilder() {
                                   />
                                   <div>
                                     <span className={`font-medium ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{symbol.replace('.AX', '')}</span>
-                                    <p className="text-xs text-slate-500">{stockNames[symbol] || ''}</p>
+                                    <p className="text-xs text-slate-500 truncate max-w-[120px]">{stockInfo?.name || ''}</p>
                                   </div>
                                 </div>
                               </td>
-                              <td className="py-3">
-                                <span className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>{sector}</span>
+                              <td className={`p-2 text-right font-bold ${getScoreColor(stockInfo?.composite_score || 0)}`}>
+                                {stockInfo?.composite_score?.toFixed(0) || '-'}
                               </td>
-                              <td className="py-3 text-right">
+                              <td className="p-2 text-right">
                                 <span className="font-medium text-sky-400">{(weightNum * 100).toFixed(1)}%</span>
                               </td>
-                              <td className="py-3 text-right">
-                                <span className={isDark ? 'text-slate-300' : 'text-slate-700'}>${amount.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                              <td className="p-2 text-right">
+                                <span className={isDark ? 'text-slate-300' : 'text-slate-700'}>{currencySymbol}{amount.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                              </td>
+                              <td className={`p-2 text-right ${getScoreColor(stockInfo?.value_score || 0)}`}>
+                                {stockInfo?.value_score?.toFixed(0) || '-'}
+                              </td>
+                              <td className={`p-2 text-right ${getScoreColor(stockInfo?.quality_score || 0)}`}>
+                                {stockInfo?.quality_score?.toFixed(0) || '-'}
+                              </td>
+                              <td className={`p-2 text-right ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                                {stockInfo ? formatMarketCap(stockInfo.market_cap) : '-'}
                               </td>
                             </tr>
                           )
@@ -329,10 +444,33 @@ export default function AutoBuilder() {
                       <tr className={`border-t-2 ${isDark ? 'border-slate-600/50' : 'border-slate-300'}`}>
                         <td className={`py-3 font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`} colSpan={2}>Total</td>
                         <td className="py-3 text-right font-semibold text-sky-400">100%</td>
-                        <td className={`py-3 text-right font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>${investmentAmount.toLocaleString()}</td>
+                        <td className={`py-3 text-right font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{currencySymbol}{investmentAmount.toLocaleString()}</td>
+                        <td colSpan={3}></td>
                       </tr>
                     </tfoot>
                   </table>
+                </div>
+              </div>
+
+              <div className={`card mt-4 ${isDark ? 'bg-slate-800/50' : 'bg-slate-50'}`}>
+                <h3 className={`font-semibold mb-3 ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Score Legend</h3>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 rounded-full bg-emerald-400"></div>
+                    <span className={isDark ? 'text-slate-300' : 'text-slate-700'}>70+ Excellent</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 rounded-full bg-sky-400"></div>
+                    <span className={isDark ? 'text-slate-300' : 'text-slate-700'}>50-69 Good</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 rounded-full bg-amber-400"></div>
+                    <span className={isDark ? 'text-slate-300' : 'text-slate-700'}>30-49 Average</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 rounded-full bg-red-400"></div>
+                    <span className={isDark ? 'text-slate-300' : 'text-slate-700'}>Below 30 Poor</span>
+                  </div>
                 </div>
               </div>
             </>
@@ -344,37 +482,31 @@ export default function AutoBuilder() {
             <>
               <div className="card">
                 <h2 className={`text-lg font-semibold mb-4 ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Portfolio Metrics</h2>
-                <div className="space-y-3">
-                  <div className="flex justify-between">
-                    <span className={isDark ? 'text-slate-400' : 'text-slate-600'}>Expected Return</span>
-                    <span className="font-medium text-emerald-400">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-emerald-500/20 border border-emerald-500/30 p-3 rounded-xl">
+                    <p className="text-xs text-emerald-300">Expected Return</p>
+                    <p className="text-xl font-bold text-emerald-400">
                       {(result.expected_return * 100).toFixed(2)}%
-                    </span>
+                    </p>
                   </div>
-                  <div className="flex justify-between">
-                    <span className={isDark ? 'text-slate-400' : 'text-slate-600'}>Volatility</span>
-                    <span className={`font-medium ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{(result.volatility * 100).toFixed(2)}%</span>
+                  <div className="bg-sky-500/20 border border-sky-500/30 p-3 rounded-xl">
+                    <p className="text-xs text-sky-300">Sharpe Ratio</p>
+                    <p className="text-xl font-bold text-sky-400">{result.sharpe_ratio.toFixed(3)}</p>
                   </div>
-                  <div className="flex justify-between">
-                    <span className={isDark ? 'text-slate-400' : 'text-slate-600'}>Sharpe Ratio</span>
-                    <span className="font-medium text-sky-400">{result.sharpe_ratio.toFixed(3)}</span>
+                  <div className="bg-amber-500/20 border border-amber-500/30 p-3 rounded-xl">
+                    <p className="text-xs text-amber-300">Volatility</p>
+                    <p className="text-xl font-bold text-amber-400">{(result.volatility * 100).toFixed(2)}%</p>
                   </div>
-                  <div className="flex justify-between">
-                    <span className={isDark ? 'text-slate-400' : 'text-slate-600'}>Max Drawdown</span>
-                    <span className="font-medium text-red-400">
-                      {(result.max_drawdown * 100).toFixed(2)}%
-                    </span>
+                  <div className="bg-red-500/20 border border-red-500/30 p-3 rounded-xl">
+                    <p className="text-xs text-red-300">Max Drawdown</p>
+                    <p className="text-xl font-bold text-red-400">{(result.max_drawdown * 100).toFixed(2)}%</p>
                   </div>
-                  <div className="flex justify-between">
-                    <span className={isDark ? 'text-slate-400' : 'text-slate-600'}>Dividend Yield</span>
-                    <span className="font-medium text-purple-400">
-                      {(result.portfolio_dividend_yield * 100).toFixed(2)}%
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className={isDark ? 'text-slate-400' : 'text-slate-600'}>Stocks in Portfolio</span>
-                    <span className={`font-medium ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{Object.keys(result.weights).length}</span>
-                  </div>
+                </div>
+
+                <div className={`mt-3 p-2 rounded-lg border ${isDark ? 'bg-purple-500/10 border-purple-500/30' : 'bg-purple-50 border-purple-200'}`}>
+                  <p className={`text-xs ${isDark ? 'text-purple-300' : 'text-purple-700'}`}>
+                    Dividend Yield: {(result.portfolio_dividend_yield * 100).toFixed(2)}% • {Object.keys(result.weights).length} stocks
+                  </p>
                 </div>
 
                 <button
@@ -435,12 +567,12 @@ export default function AutoBuilder() {
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50">
           <div className="rounded-2xl p-6 w-full max-w-md border transition-all duration-300" style={{ background: isDark ? 'rgba(15, 23, 42, 0.9)' : 'rgba(255, 255, 255, 0.95)', borderColor: isDark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.3)', boxShadow: isDark ? '0 8px 32px rgba(0, 0, 0, 0.5), 0 0 20px rgba(56, 189, 248, 0.1)' : '0 8px 32px rgba(0, 0, 0, 0.15)' }}>
             <h3 className={`text-xl font-bold mb-4 ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Save Portfolio</h3>
-            <p className={`mb-4 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Enter a name for your auto-generated portfolio:</p>
+            <p className={`mb-4 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Enter a name for your {market === 'US' ? 'US' : 'Australian'} portfolio:</p>
             <input
               type="text"
               value={portfolioName}
               onChange={(e) => setPortfolioName(e.target.value)}
-              placeholder="e.g., ASX200 Optimized"
+              placeholder={`e.g., ${market === 'US' ? 'US Growth' : 'ASX Value'} Portfolio`}
               className="input mb-4"
               autoFocus
               onKeyDown={(e) => e.key === 'Enter' && portfolioName.trim() && savePortfolio()}

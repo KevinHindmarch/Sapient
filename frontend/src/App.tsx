@@ -6,7 +6,6 @@ import Register from './pages/Register'
 import Dashboard from './pages/Dashboard'
 import ManualBuilder from './pages/ManualBuilder'
 import AutoBuilder from './pages/AutoBuilder'
-import FundamentalsBuilder from './pages/FundamentalsBuilder'
 import CAPMBuilder from './pages/CAPMBuilder'
 import Portfolios from './pages/Portfolios'
 import PortfolioDetail from './pages/PortfolioDetail'
@@ -48,7 +47,7 @@ function App() {
         <Route index element={<Dashboard />} />
         <Route path="manual-builder" element={<ManualBuilder />} />
         <Route path="auto-builder" element={<AutoBuilder />} />
-        <Route path="fundamentals-builder" element={<FundamentalsBuilder />} />
+        <Route path="fundamentals-builder" element={<Navigate to="/auto-builder" replace />} />
         <Route path="capm-builder" element={<CAPMBuilder />} />
         <Route path="portfolios" element={<Portfolios />} />
         <Route path="portfolios/:id" element={<PortfolioDetail />} />

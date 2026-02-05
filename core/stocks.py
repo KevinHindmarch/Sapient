@@ -375,7 +375,6 @@ SP500_STOCKS = {
     'HUM': ('Humana Inc', 'Healthcare'),
     'CNC': ('Centene Corporation', 'Healthcare'),
     'CVS': ('CVS Health Corp', 'Healthcare'),
-    'WBA': ('Walgreens Boots Alliance', 'Consumer Staples'),
     'SBUX': ('Starbucks Corporation', 'Consumer Discretionary'),
     'CMG': ('Chipotle Mexican Grill', 'Consumer Discretionary'),
     'YUM': ('Yum Brands Inc', 'Consumer Discretionary'),
