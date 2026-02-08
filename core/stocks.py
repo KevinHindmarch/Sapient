@@ -490,7 +490,8 @@ class StockDataService:
     @staticmethod
     def get_stock_info(symbol: str) -> Dict:
         """Get basic information about a stock."""
-        symbol = StockDataService.format_symbol(symbol)
+        market = "ASX" if symbol.endswith('.AX') else "US"
+        symbol = StockDataService.format_symbol(symbol, market)
         
         try:
             ticker = yf.Ticker(symbol)
@@ -517,7 +518,8 @@ class StockDataService:
     @staticmethod
     def validate_stock(symbol: str) -> bool:
         """Validate if a stock symbol exists and has data."""
-        symbol = StockDataService.format_symbol(symbol)
+        market = "ASX" if symbol.endswith('.AX') else "US"
+        symbol = StockDataService.format_symbol(symbol, market)
         
         try:
             ticker = yf.Ticker(symbol)
@@ -532,7 +534,8 @@ class StockDataService:
         dividend_yields = {}
         
         for symbol in stock_symbols:
-            symbol = StockDataService.format_symbol(symbol)
+            market = "ASX" if symbol.endswith('.AX') else "US"
+            symbol = StockDataService.format_symbol(symbol, market)
             try:
                 ticker = yf.Ticker(symbol)
                 info = ticker.info
@@ -551,7 +554,8 @@ class StockDataService:
     @staticmethod
     def get_current_price(symbol: str) -> float:
         """Get current price for a stock."""
-        symbol = StockDataService.format_symbol(symbol)
+        market = "ASX" if symbol.endswith('.AX') else "US"
+        symbol = StockDataService.format_symbol(symbol, market)
         
         try:
             ticker = yf.Ticker(symbol)
