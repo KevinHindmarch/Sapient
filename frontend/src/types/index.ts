@@ -117,3 +117,12 @@ export interface IndicatorSignal {
   value: number
   explanation: string
 }
+
+export interface RsiScreenerResult {
+  symbol: string
+  name: string
+  current_price: number
+  rsi_value: number
+  signal: string
+  strength: string
+}

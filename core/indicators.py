@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 from typing import Tuple, Dict, List, Optional
 import yfinance as yf
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 class TechnicalIndicatorService:
@@ -333,3 +334,81 @@ class TechnicalIndicatorService:
             
         except Exception as e:
             return {'error': str(e)}
+
+    @staticmethod
+    def scan_rsi_signals(symbols: List[str], market: str = "asx", period: str = "3mo") -> Dict:
+        """
+        Scan multiple stocks for RSI signals (oversold/overbought).
+        
+        Args:
+            symbols: List of stock symbols to scan
+            market: Market type ('asx' or 'us')
+            period: Data period for RSI calculation
+            
+        Returns:
+            Dict with results list, total_scanned, and signals_found
+        """
+        results = []
+        total_scanned = 0
+
+        def scan_single_stock(sym: str) -> Optional[Dict]:
+            try:
+                ticker_symbol = sym
+                if market.lower() == "asx" and not sym.endswith('.AX'):
+                    ticker_symbol = sym + '.AX'
+
+                ticker = yf.Ticker(ticker_symbol)
+                data = ticker.history(period=period)
+
+                if data.empty or len(data) < 30:
+                    return None
+
+                close = data['Close']
+                rsi = TechnicalIndicatorService.calculate_rsi(close)
+                current_rsi = float(rsi.iloc[-1])
+
+                if pd.isna(current_rsi):
+                    return None
+
+                if current_rsi <= 30:
+                    signal = "buy"
+                    strength = "strong" if current_rsi <= 20 else "moderate"
+                elif current_rsi >= 70:
+                    signal = "sell"
+                    strength = "strong" if current_rsi >= 80 else "moderate"
+                else:
+                    return None
+
+                info = ticker.info
+                name = info.get('shortName', info.get('longName', sym))
+                current_price = float(close.iloc[-1])
+
+                return {
+                    "symbol": sym,
+                    "name": name,
+                    "current_price": current_price,
+                    "rsi_value": round(current_rsi, 2),
+                    "signal": signal,
+                    "strength": strength
+                }
+            except Exception:
+                return None
+
+        with ThreadPoolExecutor(max_workers=15) as executor:
+            future_to_symbol = {executor.submit(scan_single_stock, sym): sym for sym in symbols}
+            for future in as_completed(future_to_symbol):
+                total_scanned += 1
+                try:
+                    result = future.result(timeout=10)
+                    if result is not None:
+                        results.append(result)
+                except Exception:
+                    pass
+
+        results.sort(key=lambda x: x["rsi_value"])
+
+        return {
+            "results": results,
+            "total_scanned": total_scanned,
+            "signals_found": len(results)
+        }

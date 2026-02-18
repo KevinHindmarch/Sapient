@@ -84,6 +84,8 @@ export const indicatorsApi = {
     api.get(`/indicators/analyze/${symbol}?period=${period}&market=${market}`),
   chartData: (symbol: string, indicator: string = 'all', period: string = '1y', market: string = 'asx') =>
     api.get(`/indicators/chart-data/${symbol}?indicator=${indicator}&period=${period}&market=${market}`),
+  rsiScreener: (market: string = 'asx', signal: string = 'buy') =>
+    api.get(`/indicators/rsi-screener?market=${market}&signal=${signal}`),
 }
 
 export default api
