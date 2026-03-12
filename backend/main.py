@@ -5,7 +5,7 @@ Sapient API - FastAPI Backend for Australian Stock Portfolio Optimizer
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from contextlib import asynccontextmanager
 import os
 
@@ -53,10 +53,22 @@ async def health_check():
 
 FRONTEND_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend", "dist")
 
+def no_cache_html_response(path: str) -> FileResponse:
+    """Serve HTML with no-cache headers so browsers always get the latest version."""
+    return FileResponse(
+        path,
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        }
+    )
+
+
 if os.path.exists(FRONTEND_DIR):
     @app.get("/")
     async def serve_index():
-        return FileResponse(os.path.join(FRONTEND_DIR, "index.html"))
+        return no_cache_html_response(os.path.join(FRONTEND_DIR, "index.html"))
     
     app.mount("/assets", StaticFiles(directory=os.path.join(FRONTEND_DIR, "assets")), name="assets")
 
@@ -69,4 +81,4 @@ if os.path.exists(FRONTEND_DIR):
         if os.path.isfile(file_path):
             return FileResponse(file_path)
         
-        return FileResponse(os.path.join(FRONTEND_DIR, "index.html"))
+        return no_cache_html_response(os.path.join(FRONTEND_DIR, "index.html"))
