@@ -171,15 +171,15 @@ export default function Portfolios() {
                   </div>
                 </div>
 
-                <div className={`mt-4 pt-4 border-t ${isDark ? 'border-slate-700/50' : 'border-slate-200'} text-sm text-slate-500`}>
+                <div className={`mt-4 pt-4 border-t ${isDark ? 'border-slate-700/50' : 'border-slate-200'} text-sm text-slate-500 pr-8`}>
                   {portfolio.position_count} positions
                 </div>
               </Link>
 
-              {/* Delete button is OUTSIDE the Link so it doesn't trigger navigation */}
+              {/* Delete button outside the Link to avoid triggering navigation */}
               <button
                 onClick={() => setDeleteTarget(portfolio)}
-                className="absolute top-3 right-10 p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-all duration-200 bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 border border-red-500/20 hover:border-red-500/40"
+                className="absolute bottom-3 right-3 p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-all duration-200 bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 border border-red-500/20 hover:border-red-500/40"
                 title="Delete portfolio"
               >
                 <Trash2 className="w-4 h-4" />
