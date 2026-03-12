@@ -4,6 +4,7 @@ import { portfolioApi, stocksApi } from '../lib/api'
 import { Portfolio, Position, Transaction } from '../types'
 import { toast } from 'sonner'
 import { ArrowLeft, TrendingUp, TrendingDown, DollarSign, Pencil, Trash2, Plus, X, Search } from 'lucide-react'
+import HelpTooltip from '../components/HelpTooltip'
 import { format } from 'date-fns'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, LineChart, Line, XAxis, YAxis, CartesianGrid } from 'recharts'
 import { differenceInDays } from 'date-fns'
@@ -427,7 +428,7 @@ export default function PortfolioDetail() {
           </p>
         </div>
         <div className="card">
-          <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Expected Sharpe</p>
+          <p className={`text-sm flex items-center ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Expected Sharpe<HelpTooltip term="Sharpe Ratio" /></p>
           <p className="text-2xl font-bold text-sky-400">
             {Number(portfolio.expected_sharpe || 0).toFixed(2)}
           </p>

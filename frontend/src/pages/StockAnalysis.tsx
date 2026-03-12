@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { Search, TrendingUp, TrendingDown, Activity, AlertCircle, BarChart3, Loader2 } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, CartesianGrid } from 'recharts'
 import { useTheme } from '../lib/theme'
+import HelpTooltip from '../components/HelpTooltip'
 
 type Market = 'asx' | 'us'
 
@@ -135,8 +136,11 @@ export default function StockAnalysis() {
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
           <h1 className={`text-3xl font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Stock Analysis</h1>
-          <p className={`${isDark ? 'text-slate-400' : 'text-slate-600'} mt-1`}>
-            Technical indicator analysis with RSI, MACD, and Bollinger Bands
+          <p className={`${isDark ? 'text-slate-400' : 'text-slate-600'} mt-1 flex items-center flex-wrap gap-x-0`}>
+            Technical indicator analysis with
+            <span className="inline-flex items-center mx-1">RSI<HelpTooltip term="RSI" /></span>,
+            <span className="inline-flex items-center mx-1">MACD<HelpTooltip term="MACD" /></span>, and
+            <span className="inline-flex items-center mx-1">Bollinger Bands<HelpTooltip term="Bollinger Bands" /></span>
           </p>
         </div>
         
@@ -369,7 +373,7 @@ export default function StockAnalysis() {
                 </div>
 
                 <div className={`card backdrop-blur-xl ${isDark ? 'bg-slate-900/60 border-slate-700/50' : 'bg-white border-slate-300'}`}>
-                  <h2 className={`text-lg font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'} mb-4`}>RSI (Relative Strength Index)</h2>
+                  <h2 className={`text-lg font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'} mb-4 flex items-center`}>RSI (Relative Strength Index)<HelpTooltip term="RSI" /></h2>
                   {chartData && (
                     <ResponsiveContainer width="100%" height={150}>
                       <LineChart data={chartData}>
@@ -439,7 +443,7 @@ export default function StockAnalysis() {
                   <div className="space-y-4">
                     <div className={`p-3 ${isDark ? 'bg-slate-800/50 border-slate-700/30' : 'bg-slate-100 border-slate-200'} rounded-lg border backdrop-blur-sm`}>
                       <div className="flex items-center justify-between mb-1">
-                        <span className={`font-medium ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>RSI</span>
+                        <span className={`font-medium ${isDark ? 'text-slate-200' : 'text-slate-800'} flex items-center`}>RSI<HelpTooltip term="RSI" /></span>
                         <span className={`px-2 py-0.5 rounded text-xs font-medium ${
                           getSignalColor(analysis.indicators.rsi.signal.signal)
                         }`}>
@@ -454,7 +458,7 @@ export default function StockAnalysis() {
 
                     <div className={`p-3 ${isDark ? 'bg-slate-800/50 border-slate-700/30' : 'bg-slate-100 border-slate-200'} rounded-lg border backdrop-blur-sm`}>
                       <div className="flex items-center justify-between mb-1">
-                        <span className={`font-medium ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>MACD</span>
+                        <span className={`font-medium ${isDark ? 'text-slate-200' : 'text-slate-800'} flex items-center`}>MACD<HelpTooltip term="MACD" /></span>
                         <span className={`px-2 py-0.5 rounded text-xs font-medium ${
                           getSignalColor(analysis.indicators.macd.signal.signal)
                         }`}>
@@ -473,7 +477,7 @@ export default function StockAnalysis() {
                     </div>
 
                     <div className={`p-3 ${isDark ? 'bg-slate-800/50 border-slate-700/30' : 'bg-slate-100 border-slate-200'} rounded-lg border backdrop-blur-sm`}>
-                      <span className={`font-medium ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>Moving Averages</span>
+                      <span className={`font-medium ${isDark ? 'text-slate-200' : 'text-slate-800'} flex items-center`}>Moving Averages<HelpTooltip term="SMA" /></span>
                       <div className="mt-2 space-y-1 text-sm">
                         <div className="flex justify-between">
                           <span className={isDark ? 'text-slate-400' : 'text-slate-600'}>SMA 20</span>

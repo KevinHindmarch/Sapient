@@ -6,6 +6,7 @@ import { stocksApi, portfolioApi } from '../lib/api'
 import { OptimizationResult } from '../types'
 import { toast } from 'sonner'
 import { Search, X, TrendingUp, Save, AlertTriangle, CheckCircle, Info, Loader2 } from 'lucide-react'
+import HelpTooltip from '../components/HelpTooltip'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts'
 import { useTheme } from '../lib/theme'
 
@@ -296,34 +297,34 @@ export default function ManualBuilder() {
                 <h2 className={`text-lg font-semibold mb-4 ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Portfolio Metrics</h2>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="bg-emerald-500/20 border border-emerald-500/30 p-4 rounded-xl backdrop-blur-sm transition-all duration-300 hover:bg-emerald-500/30">
-                    <p className="text-sm text-emerald-300">Expected Return</p>
+                    <p className="text-sm text-emerald-300 flex items-center">Expected Return<HelpTooltip term="Expected Return" /></p>
                     <p className="text-2xl font-bold text-emerald-400">
                       {(result.expected_return * 100).toFixed(2)}%
                     </p>
                   </div>
                   <div className="bg-sky-500/20 border border-sky-500/30 p-4 rounded-xl backdrop-blur-sm transition-all duration-300 hover:bg-sky-500/30">
-                    <p className="text-sm text-sky-300">Sharpe Ratio</p>
+                    <p className="text-sm text-sky-300 flex items-center">Sharpe Ratio<HelpTooltip term="Sharpe Ratio" /></p>
                     <p className="text-2xl font-bold text-sky-400">{result.sharpe_ratio.toFixed(3)}</p>
                   </div>
                   <div className="bg-amber-500/20 border border-amber-500/30 p-4 rounded-xl backdrop-blur-sm transition-all duration-300 hover:bg-amber-500/30">
-                    <p className="text-sm text-amber-300">Volatility</p>
+                    <p className="text-sm text-amber-300 flex items-center">Volatility<HelpTooltip term="Volatility" /></p>
                     <p className="text-2xl font-bold text-amber-400">{(result.volatility * 100).toFixed(2)}%</p>
                   </div>
                   <div className="bg-red-500/20 border border-red-500/30 p-4 rounded-xl backdrop-blur-sm transition-all duration-300 hover:bg-red-500/30">
-                    <p className="text-sm text-red-300">Max Drawdown</p>
+                    <p className="text-sm text-red-300 flex items-center">Max Drawdown<HelpTooltip term="Max Drawdown" /></p>
                     <p className="text-2xl font-bold text-red-400">{(result.max_drawdown * 100).toFixed(2)}%</p>
                   </div>
                 </div>
                 
                 <div className={`mt-4 p-4 border rounded-xl backdrop-blur-sm ${isDark ? 'bg-slate-800/50 border-slate-600/50' : 'bg-slate-100 border-slate-300'}`}>
                   <div className="flex justify-between items-center">
-                    <span className={isDark ? 'text-slate-400' : 'text-slate-600'}>Dividend Yield</span>
+                    <span className={`flex items-center ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Dividend Yield<HelpTooltip term="Dividend Yield" /></span>
                     <span className="font-semibold text-purple-400">
                       {(result.portfolio_dividend_yield * 100).toFixed(2)}%
                     </span>
                   </div>
                   <div className="flex justify-between items-center mt-2">
-                    <span className={isDark ? 'text-slate-400' : 'text-slate-600'}>Value at Risk (95%)</span>
+                    <span className={`flex items-center ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Value at Risk (95%)<HelpTooltip term="VaR" /></span>
                     <span className={`font-semibold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
                       {(result.var_95 * 100).toFixed(2)}%
                     </span>

@@ -91,11 +91,11 @@ export default function Portfolios() {
                 className="card card-hover block"
               >
                 <div className="flex items-start justify-between mb-4">
-                  <div>
+                  <div className="flex-1 min-w-0 pr-8">
                     <h3 className={`text-lg font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'} group-hover:text-sky-400 transition-colors`}>
                       {portfolio.name}
                     </h3>
-                    <div className="flex items-center gap-2 mt-1">
+                    <div className="flex items-center gap-2 mt-1 flex-wrap">
                       <span className={`text-xs px-2 py-0.5 rounded-full border backdrop-blur-sm ${
                         portfolio.mode === 'auto' 
                           ? 'bg-purple-500/20 text-purple-300 border-purple-500/30' 
@@ -114,7 +114,7 @@ export default function Portfolios() {
                       </span>
                     </div>
                   </div>
-                  <ArrowRight className="w-5 h-5 text-slate-500 group-hover:text-sky-400 group-hover:translate-x-1 transition-all" />
+                  <ArrowRight className="w-5 h-5 text-slate-500 group-hover:text-sky-400 group-hover:translate-x-1 transition-all shrink-0" />
                 </div>
 
                 <div className="space-y-3">
@@ -176,9 +176,10 @@ export default function Portfolios() {
                 </div>
               </Link>
 
+              {/* Delete button is OUTSIDE the Link so it doesn't trigger navigation */}
               <button
-                onClick={(e) => { e.preventDefault(); setDeleteTarget(portfolio) }}
-                className="absolute top-3 right-3 p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-all duration-200 bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 border border-red-500/20 hover:border-red-500/40"
+                onClick={() => setDeleteTarget(portfolio)}
+                className="absolute top-3 right-10 p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-all duration-200 bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 border border-red-500/20 hover:border-red-500/40"
                 title="Delete portfolio"
               >
                 <Trash2 className="w-4 h-4" />
