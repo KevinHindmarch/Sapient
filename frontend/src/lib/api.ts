@@ -66,6 +66,8 @@ export const portfolioApi = {
     api.delete(`/portfolio/${portfolioId}/positions/${positionId}`),
   addStock: (portfolioId: number, symbol: string, quantity: number, avg_cost: number) =>
     api.post(`/portfolio/${portfolioId}/stocks`, { symbol, quantity, avg_cost }),
+  deletePortfolio: (portfolioId: number) =>
+    api.delete(`/portfolio/${portfolioId}`),
   scanFundamentals: (top_n: number = 20, market: string = 'ASX') =>
     api.get(`/portfolio/fundamentals/scan?top_n=${top_n}&market=${market}`),
   optimizeFundamentals: (symbols: string[], investment_amount: number, risk_tolerance: string, period: string = '1y', market: string = 'ASX') =>

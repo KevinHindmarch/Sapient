@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useNavigate } from 'react-router-dom'
 import { portfolioApi, stocksApi } from '../lib/api'
 import { Portfolio, Position, Transaction } from '../types'
 import { toast } from 'sonner'
@@ -25,11 +25,14 @@ interface StockSearchResult {
 
 export default function PortfolioDetail() {
   const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
   const [data, setData] = useState<PortfolioData | null>(null)
   const [loading, setLoading] = useState(true)
   const [currentPrices, setCurrentPrices] = useState<Record<string, number>>({})
   const { theme } = useTheme()
   const isDark = theme === 'dark'
+  const [showDeletePortfolioModal, setShowDeletePortfolioModal] = useState(false)
+  const [deletingPortfolio, setDeletingPortfolio] = useState(false)
 
   const [showEditModal, setShowEditModal] = useState(false)
   const [editingPosition, setEditingPosition] = useState<Position | null>(null)
@@ -138,6 +141,19 @@ export default function PortfolioDetail() {
       toast.error(err.response?.data?.detail || 'Failed to remove position')
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleDeletePortfolio = async () => {
+    if (!id || !data) return
+    setDeletingPortfolio(true)
+    try {
+      await portfolioApi.deletePortfolio(Number(id))
+      toast.success(`"${data.portfolio.name}" deleted`)
+      navigate('/portfolios')
+    } catch {
+      toast.error('Failed to delete portfolio')
+      setDeletingPortfolio(false)
     }
   }
 
@@ -370,13 +386,22 @@ export default function PortfolioDetail() {
             </div>
           </div>
         </div>
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="btn-primary flex items-center gap-2"
-        >
-          <Plus className="w-5 h-5" />
-          Add Stock
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowDeletePortfolioModal(true)}
+            className="flex items-center gap-2 px-4 py-2.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 rounded-xl border border-red-500/20 hover:border-red-500/40 font-medium transition-all duration-200"
+          >
+            <Trash2 className="w-4 h-4" />
+            Delete
+          </button>
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="btn-primary flex items-center gap-2"
+          >
+            <Plus className="w-5 h-5" />
+            Add Stock
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -793,6 +818,46 @@ export default function PortfolioDetail() {
                   {saving ? 'Adding...' : 'Add Stock'}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showDeletePortfolioModal && data && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className={`rounded-2xl border max-w-md w-full p-6 shadow-2xl`} style={modalStyle}>
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-red-500/20 rounded-xl border border-red-500/30">
+                  <Trash2 className="w-5 h-5 text-red-400" />
+                </div>
+                <h2 className={`text-lg font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Delete Portfolio</h2>
+              </div>
+              <button onClick={() => setShowDeletePortfolioModal(false)} className="text-slate-400 hover:text-slate-300">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <p className={`text-sm mb-2 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+              Are you sure you want to delete <span className="font-semibold text-red-400">"{data.portfolio.name}"</span>?
+            </p>
+            <p className={`text-sm mb-6 ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
+              This will permanently remove all positions, transactions and history. This action cannot be undone.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowDeletePortfolioModal(false)}
+                className="btn-secondary flex-1"
+                disabled={deletingPortfolio}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeletePortfolio}
+                disabled={deletingPortfolio}
+                className="flex-1 px-4 py-2.5 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-xl border border-red-500/30 font-medium transition-all duration-200 disabled:opacity-50"
+              >
+                {deletingPortfolio ? 'Deleting...' : 'Delete Portfolio'}
+              </button>
             </div>
           </div>
         </div>

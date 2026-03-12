@@ -230,6 +230,23 @@ async def update_position(
     return result
 
 
+@router.delete("/{portfolio_id}")
+async def delete_portfolio(
+    portfolio_id: int,
+    current_user: dict = Depends(get_current_user)
+):
+    """Delete a portfolio and all its data."""
+    result = PortfolioService.delete_portfolio(
+        portfolio_id=portfolio_id,
+        user_id=current_user['id']
+    )
+    
+    if not result['success']:
+        raise HTTPException(status_code=400, detail=result['error'])
+    
+    return result
+
+
 @router.delete("/{portfolio_id}/positions/{position_id}")
 async def remove_position(
     portfolio_id: int,

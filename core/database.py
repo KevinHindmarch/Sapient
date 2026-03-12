@@ -553,6 +553,25 @@ class PortfolioService:
                 return {'success': False, 'error': str(e)}
 
     @staticmethod
+    def delete_portfolio(portfolio_id: int, user_id: int) -> dict:
+        """Delete a portfolio and all its associated data."""
+        with get_db_cursor() as (cur, conn):
+            try:
+                cur.execute("""
+                    SELECT id FROM portfolios WHERE id = %s AND user_id = %s
+                """, (portfolio_id, user_id))
+                
+                if not cur.fetchone():
+                    return {'success': False, 'error': 'Portfolio not found'}
+                
+                cur.execute("DELETE FROM portfolios WHERE id = %s AND user_id = %s", 
+                            (portfolio_id, user_id))
+                conn.commit()
+                return {'success': True, 'message': 'Portfolio deleted'}
+            except Exception as e:
+                return {'success': False, 'error': str(e)}
+
+    @staticmethod
     def add_stock_to_portfolio(portfolio_id: int, user_id: int, symbol: str, 
                                quantity: float, avg_cost: float) -> dict:
         """Add a new stock to an existing portfolio."""

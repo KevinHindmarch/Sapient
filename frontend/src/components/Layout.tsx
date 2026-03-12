@@ -13,9 +13,11 @@ import {
   X,
   Settings,
   Moon,
-  Sun
+  Sun,
+  HelpCircle
 } from 'lucide-react'
 import { useState } from 'react'
+import HelpModal from './HelpModal'
 
 const navItems = [
   { path: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -31,6 +33,7 @@ export default function Layout() {
   const { theme, toggleTheme } = useTheme()
   const navigate = useNavigate()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [showHelp, setShowHelp] = useState(false)
 
   const handleLogout = () => {
     logout()
@@ -105,6 +108,18 @@ export default function Layout() {
           </div>
           
           <div className="space-y-1">
+            <button
+              onClick={() => setShowHelp(true)}
+              className={`flex items-center gap-3 px-4 py-2.5 w-full rounded-xl transition-all duration-300 ${
+                isDark 
+                  ? 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200'
+                  : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+              }`}
+            >
+              <HelpCircle className="w-5 h-5" />
+              Help & Glossary
+            </button>
+
             <NavLink
               to="/settings"
               className={({ isActive }) =>
@@ -238,6 +253,8 @@ export default function Layout() {
           <Outlet />
         </main>
       </div>
+
+      {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
     </div>
   )
 }
