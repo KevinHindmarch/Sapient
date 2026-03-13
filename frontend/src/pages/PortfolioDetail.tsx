@@ -3,7 +3,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom'
 import { portfolioApi, stocksApi } from '../lib/api'
 import { Portfolio, Position, Transaction } from '../types'
 import { toast } from 'sonner'
-import { ArrowLeft, TrendingUp, TrendingDown, DollarSign, Pencil, Trash2, Plus, X, Search } from 'lucide-react'
+import { ArrowLeft, TrendingUp, TrendingDown, DollarSign, Pencil, Trash2, Plus, X, Search, RefreshCw } from 'lucide-react'
 import HelpTooltip from '../components/HelpTooltip'
 import { format } from 'date-fns'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, LineChart, Line, XAxis, YAxis, CartesianGrid } from 'recharts'
@@ -29,6 +29,8 @@ export default function PortfolioDetail() {
   const navigate = useNavigate()
   const [data, setData] = useState<PortfolioData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [loadingPrices, setLoadingPrices] = useState(false)
+  const [priceProgress, setPriceProgress] = useState({ done: 0, total: 0 })
   const [currentPrices, setCurrentPrices] = useState<Record<string, number>>({})
   const { theme } = useTheme()
   const isDark = theme === 'dark'
@@ -75,16 +77,20 @@ export default function PortfolioDetail() {
   }
 
   const loadCurrentPrices = async (symbols: string[]) => {
+    setLoadingPrices(true)
+    setPriceProgress({ done: 0, total: symbols.length })
     const prices: Record<string, number> = {}
-    for (const symbol of symbols) {
+    for (let i = 0; i < symbols.length; i++) {
       try {
-        const response = await stocksApi.info(symbol)
-        prices[symbol] = response.data.current_price
+        const response = await stocksApi.info(symbols[i])
+        prices[symbols[i]] = response.data.current_price
       } catch {
-        prices[symbol] = 0
+        prices[symbols[i]] = 0
       }
+      setPriceProgress({ done: i + 1, total: symbols.length })
     }
     setCurrentPrices(prices)
+    setLoadingPrices(false)
   }
 
   const openEditModal = (position: Position) => {
@@ -405,6 +411,33 @@ export default function PortfolioDetail() {
         </div>
       </div>
 
+      {/* Live price loading banner */}
+      {loadingPrices && (
+        <div className={`flex items-center gap-3 px-4 py-3 rounded-xl border ${
+          isDark
+            ? 'bg-sky-500/10 border-sky-500/30 text-sky-300'
+            : 'bg-sky-50 border-sky-200 text-sky-700'
+        }`}>
+          <RefreshCw className="w-4 h-4 animate-spin shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium">Fetching live prices…</p>
+            {priceProgress.total > 0 && (
+              <div className="flex items-center gap-2 mt-1">
+                <div className={`flex-1 h-1.5 rounded-full ${isDark ? 'bg-slate-700' : 'bg-sky-100'}`}>
+                  <div
+                    className="h-1.5 rounded-full bg-gradient-to-r from-sky-500 to-indigo-500 transition-all duration-500"
+                    style={{ width: `${(priceProgress.done / priceProgress.total) * 100}%` }}
+                  />
+                </div>
+                <span className="text-xs shrink-0 tabular-nums">
+                  {priceProgress.done} / {priceProgress.total}
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="card">
           <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Cost Basis</p>
@@ -414,18 +447,32 @@ export default function PortfolioDetail() {
         </div>
         <div className="card">
           <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Current Value</p>
-          <p className={`text-2xl font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
-            ${totalValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-          </p>
+          {loadingPrices ? (
+            <div className="mt-2 space-y-1.5">
+              <div className="animate-pulse h-8 w-28 rounded-lg bg-slate-500/20" />
+              <p className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Loading live data…</p>
+            </div>
+          ) : (
+            <p className={`text-2xl font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+              ${totalValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+            </p>
+          )}
         </div>
         <div className="card">
           <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Total Return</p>
-          <p className={`text-2xl font-bold flex items-center gap-1 ${
-            totalReturn >= 0 ? 'text-emerald-400' : 'text-red-400'
-          }`} style={{ textShadow: totalReturn >= 0 ? '0 0 15px rgba(52, 211, 153, 0.4)' : '0 0 15px rgba(248, 113, 113, 0.4)' }}>
-            {totalReturn >= 0 ? <TrendingUp className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />}
-            {totalReturn >= 0 ? '+' : ''}{totalReturnPct.toFixed(2)}%
-          </p>
+          {loadingPrices ? (
+            <div className="mt-2 space-y-1.5">
+              <div className="animate-pulse h-8 w-24 rounded-lg bg-slate-500/20" />
+              <p className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Loading live data…</p>
+            </div>
+          ) : (
+            <p className={`text-2xl font-bold flex items-center gap-1 ${
+              totalReturn >= 0 ? 'text-emerald-400' : 'text-red-400'
+            }`} style={{ textShadow: totalReturn >= 0 ? '0 0 15px rgba(52, 211, 153, 0.4)' : '0 0 15px rgba(248, 113, 113, 0.4)' }}>
+              {totalReturn >= 0 ? <TrendingUp className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />}
+              {totalReturn >= 0 ? '+' : ''}{totalReturnPct.toFixed(2)}%
+            </p>
+          )}
         </div>
         <div className="card">
           <p className={`text-sm flex items-center ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Expected Sharpe<HelpTooltip term="Sharpe Ratio" /></p>
