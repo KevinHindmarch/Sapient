@@ -357,14 +357,14 @@ export default function PortfolioDetail() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Link to="/portfolios" className={`p-2 ${isDark ? 'hover:bg-slate-800/50' : 'hover:bg-slate-100'} rounded-lg transition-colors border border-transparent ${isDark ? 'hover:border-slate-700/50' : 'hover:border-slate-200'}`}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex items-start gap-3">
+          <Link to="/portfolios" className={`p-2 mt-1 ${isDark ? 'hover:bg-slate-800/50' : 'hover:bg-slate-100'} rounded-lg transition-colors border border-transparent ${isDark ? 'hover:border-slate-700/50' : 'hover:border-slate-200'} shrink-0`}>
             <ArrowLeft className={`w-5 h-5 ${isDark ? 'text-slate-400' : 'text-slate-600'}`} />
           </Link>
           <div>
-            <h1 className={`text-3xl font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{portfolio.name}</h1>
-            <div className="flex items-center gap-2 mt-1">
+            <h1 className={`text-2xl sm:text-3xl font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{portfolio.name}</h1>
+            <div className="flex flex-wrap items-center gap-2 mt-1">
               <span className={`text-xs px-2 py-0.5 rounded-full border backdrop-blur-sm ${
                 portfolio.mode === 'auto' 
                   ? 'bg-purple-500/20 text-purple-300 border-purple-500/30' 
@@ -381,26 +381,26 @@ export default function PortfolioDetail() {
               }`}>
                 {portfolio.risk_tolerance}
               </span>
-              <span className="text-sm text-slate-500">
+              <span className="hidden sm:inline text-sm text-slate-500">
                 Created {format(new Date(portfolio.created_at), 'MMM d, yyyy')}
               </span>
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           <button
             onClick={() => setShowDeletePortfolioModal(true)}
-            className="flex items-center gap-2 px-4 py-2.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 rounded-xl border border-red-500/20 hover:border-red-500/40 font-medium transition-all duration-200"
+            className="flex items-center gap-1.5 px-3 py-2 sm:px-4 sm:py-2.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 rounded-xl border border-red-500/20 hover:border-red-500/40 font-medium transition-all duration-200 text-sm"
           >
             <Trash2 className="w-4 h-4" />
-            Delete
+            <span className="hidden sm:inline">Delete</span>
           </button>
           <button
             onClick={() => setShowAddModal(true)}
-            className="btn-primary flex items-center gap-2"
+            className="btn-primary flex items-center gap-2 text-sm"
           >
-            <Plus className="w-5 h-5" />
-            Add Stock
+            <Plus className="w-4 h-4 sm:w-5 sm:h-5" />
+            <span>Add Stock</span>
           </button>
         </div>
       </div>

@@ -232,16 +232,16 @@ body {
 }
 
 .page-header {
-  @apply mb-8;
+  @apply mb-6;
 }
 
 .page-title {
-  @apply text-3xl font-bold tracking-tight;
+  @apply text-2xl sm:text-3xl font-bold tracking-tight;
   color: var(--text-primary);
 }
 
 .page-subtitle {
-  @apply mt-2;
+  @apply mt-2 text-sm sm:text-base;
   color: var(--text-secondary);
 }
 

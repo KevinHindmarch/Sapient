@@ -55,12 +55,12 @@ export default function Portfolios() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className={`text-3xl font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>My Portfolios</h1>
-          <p className={`${isDark ? 'text-slate-400' : 'text-slate-600'} mt-1`}>Track and manage your optimized portfolios</p>
+          <h1 className={`text-2xl sm:text-3xl font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>My Portfolios</h1>
+          <p className={`${isDark ? 'text-slate-400' : 'text-slate-600'} mt-1 text-sm sm:text-base`}>Track and manage your optimized portfolios</p>
         </div>
-        <Link to="/auto-builder" className="btn-primary flex items-center gap-2">
+        <Link to="/auto-builder" className="btn-primary flex items-center gap-2 shrink-0">
           <TrendingUp className="w-5 h-5" />
           New Portfolio
         </Link>

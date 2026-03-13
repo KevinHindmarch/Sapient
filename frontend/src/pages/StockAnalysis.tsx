@@ -135,7 +135,7 @@ export default function StockAnalysis() {
     <div className="space-y-6 animate-fade-in">
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
-          <h1 className={`text-3xl font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Stock Analysis</h1>
+          <h1 className={`text-2xl sm:text-3xl font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Stock Analysis</h1>
           <p className={`${isDark ? 'text-slate-400' : 'text-slate-600'} mt-1 flex items-center flex-wrap gap-x-0`}>
             Technical indicator analysis with
             <span className="inline-flex items-center mx-1">RSI<HelpTooltip term="RSI" /></span>,
