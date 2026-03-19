@@ -107,9 +107,11 @@ const CorrelationMatrix = ({ matrix, symbols, isDark }: { matrix: number[][], sy
       </div>
       
       <div className={`flex items-center gap-2 p-3 rounded-lg border backdrop-blur-sm ${
-        avgCorr < 0.3 ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' :
-        avgCorr < 0.5 ? 'bg-sky-500/20 text-sky-300 border-sky-500/30' :
-        'bg-amber-500/20 text-amber-300 border-amber-500/30'
+        avgCorr < 0.3
+          ? isDark ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' : 'bg-emerald-100 text-emerald-700 border-emerald-300'
+          : avgCorr < 0.5
+          ? isDark ? 'bg-sky-500/20 text-sky-300 border-sky-500/30' : 'bg-sky-100 text-sky-700 border-sky-300'
+          : isDark ? 'bg-amber-500/20 text-amber-300 border-amber-500/30' : 'bg-amber-100 text-amber-700 border-amber-300'
       }`}>
         {avgCorr < 0.3 ? <CheckCircle className="w-5 h-5" /> :
          avgCorr < 0.5 ? <Info className="w-5 h-5" /> :
@@ -483,23 +485,23 @@ export default function AutoBuilder() {
               <div className="card">
                 <h2 className={`text-lg font-semibold mb-4 ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Portfolio Metrics</h2>
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="bg-emerald-500/20 border border-emerald-500/30 p-3 rounded-xl">
-                    <p className="text-xs text-emerald-300">Expected Return</p>
-                    <p className="text-xl font-bold text-emerald-400">
+                  <div className={`border p-3 rounded-xl ${isDark ? 'bg-emerald-500/20 border-emerald-500/30' : 'bg-emerald-50 border-emerald-200'}`}>
+                    <p className={`text-xs ${isDark ? 'text-emerald-300' : 'text-emerald-700'}`}>Expected Return</p>
+                    <p className="text-xl font-bold text-emerald-500">
                       {(result.expected_return * 100).toFixed(2)}%
                     </p>
                   </div>
-                  <div className="bg-sky-500/20 border border-sky-500/30 p-3 rounded-xl">
-                    <p className="text-xs text-sky-300">Sharpe Ratio</p>
-                    <p className="text-xl font-bold text-sky-400">{result.sharpe_ratio.toFixed(3)}</p>
+                  <div className={`border p-3 rounded-xl ${isDark ? 'bg-sky-500/20 border-sky-500/30' : 'bg-sky-50 border-sky-200'}`}>
+                    <p className={`text-xs ${isDark ? 'text-sky-300' : 'text-sky-700'}`}>Sharpe Ratio</p>
+                    <p className="text-xl font-bold text-sky-500">{result.sharpe_ratio.toFixed(3)}</p>
                   </div>
-                  <div className="bg-amber-500/20 border border-amber-500/30 p-3 rounded-xl">
-                    <p className="text-xs text-amber-300">Volatility</p>
-                    <p className="text-xl font-bold text-amber-400">{(result.volatility * 100).toFixed(2)}%</p>
+                  <div className={`border p-3 rounded-xl ${isDark ? 'bg-amber-500/20 border-amber-500/30' : 'bg-amber-50 border-amber-200'}`}>
+                    <p className={`text-xs ${isDark ? 'text-amber-300' : 'text-amber-700'}`}>Volatility</p>
+                    <p className="text-xl font-bold text-amber-500">{(result.volatility * 100).toFixed(2)}%</p>
                   </div>
-                  <div className="bg-red-500/20 border border-red-500/30 p-3 rounded-xl">
-                    <p className="text-xs text-red-300">Max Drawdown</p>
-                    <p className="text-xl font-bold text-red-400">{(result.max_drawdown * 100).toFixed(2)}%</p>
+                  <div className={`border p-3 rounded-xl ${isDark ? 'bg-red-500/20 border-red-500/30' : 'bg-red-50 border-red-200'}`}>
+                    <p className={`text-xs ${isDark ? 'text-red-300' : 'text-red-700'}`}>Max Drawdown</p>
+                    <p className="text-xl font-bold text-red-500">{(result.max_drawdown * 100).toFixed(2)}%</p>
                   </div>
                 </div>
 

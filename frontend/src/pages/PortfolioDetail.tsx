@@ -371,19 +371,19 @@ export default function PortfolioDetail() {
           <div>
             <h1 className={`text-2xl sm:text-3xl font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{portfolio.name}</h1>
             <div className="flex flex-wrap items-center gap-2 mt-1">
-              <span className={`text-xs px-2 py-0.5 rounded-full border backdrop-blur-sm ${
+              <span className={`text-xs font-medium px-2 py-0.5 rounded-full border ${
                 portfolio.mode === 'auto' 
-                  ? 'bg-purple-500/20 text-purple-300 border-purple-500/30' 
-                  : 'bg-sky-500/20 text-sky-300 border-sky-500/30'
+                  ? isDark ? 'bg-purple-500/20 text-purple-300 border-purple-500/30' : 'bg-purple-100 text-purple-700 border-purple-300'
+                  : isDark ? 'bg-sky-500/20 text-sky-300 border-sky-500/30' : 'bg-sky-100 text-sky-700 border-sky-300'
               }`}>
                 {portfolio.mode === 'auto' ? 'Auto' : 'Manual'}
               </span>
-              <span className={`text-xs px-2 py-0.5 rounded-full border backdrop-blur-sm ${
+              <span className={`text-xs font-medium px-2 py-0.5 rounded-full border ${
                 portfolio.risk_tolerance === 'conservative'
-                  ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                  ? isDark ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' : 'bg-emerald-100 text-emerald-700 border-emerald-300'
                   : portfolio.risk_tolerance === 'aggressive'
-                  ? 'bg-red-500/20 text-red-300 border-red-500/30'
-                  : 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                  ? isDark ? 'bg-red-500/20 text-red-300 border-red-500/30' : 'bg-red-100 text-red-700 border-red-300'
+                  : isDark ? 'bg-amber-500/20 text-amber-300 border-amber-500/30' : 'bg-amber-100 text-amber-700 border-amber-300'
               }`}>
                 {portfolio.risk_tolerance}
               </span>

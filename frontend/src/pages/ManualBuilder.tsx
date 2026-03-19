@@ -53,9 +53,11 @@ const CorrelationMatrix = ({ matrix, symbols, isDark }: { matrix: number[][], sy
       </div>
       
       <div className={`flex items-center gap-2 p-3 rounded-lg border backdrop-blur-sm ${
-        avgCorr < 0.3 ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' :
-        avgCorr < 0.5 ? 'bg-sky-500/20 text-sky-300 border-sky-500/30' :
-        'bg-amber-500/20 text-amber-300 border-amber-500/30'
+        avgCorr < 0.3
+          ? isDark ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' : 'bg-emerald-100 text-emerald-700 border-emerald-300'
+          : avgCorr < 0.5
+          ? isDark ? 'bg-sky-500/20 text-sky-300 border-sky-500/30' : 'bg-sky-100 text-sky-700 border-sky-300'
+          : isDark ? 'bg-amber-500/20 text-amber-300 border-amber-500/30' : 'bg-amber-100 text-amber-700 border-amber-300'
       }`}>
         {avgCorr < 0.3 ? <CheckCircle className="w-5 h-5" /> :
          avgCorr < 0.5 ? <Info className="w-5 h-5" /> :
@@ -225,7 +227,7 @@ export default function ManualBuilder() {
               {selectedStocks.map((symbol) => (
                 <span
                   key={symbol}
-                  className="inline-flex items-center gap-1 px-3 py-1 bg-sky-500/20 text-sky-300 border border-sky-500/30 rounded-full text-sm backdrop-blur-sm transition-all duration-300 hover:bg-sky-500/30"
+                  className={`inline-flex items-center gap-1 px-3 py-1 border rounded-full text-sm transition-all duration-300 ${isDark ? 'bg-sky-500/20 text-sky-300 border-sky-500/30 hover:bg-sky-500/30' : 'bg-sky-100 text-sky-700 border-sky-300 hover:bg-sky-200'}`}
                 >
                   {symbol}
                   <button onClick={() => removeStock(symbol)} className="hover:text-sky-100 transition-colors">
@@ -296,23 +298,23 @@ export default function ManualBuilder() {
               <div className="card">
                 <h2 className={`text-lg font-semibold mb-4 ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Portfolio Metrics</h2>
                 <div className="grid grid-cols-2 gap-4">
-                  <div className="bg-emerald-500/20 border border-emerald-500/30 p-4 rounded-xl backdrop-blur-sm transition-all duration-300 hover:bg-emerald-500/30">
-                    <p className="text-sm text-emerald-300 flex items-center">Expected Return<HelpTooltip term="Expected Return" /></p>
-                    <p className="text-2xl font-bold text-emerald-400">
+                  <div className={`border p-4 rounded-xl transition-all duration-300 ${isDark ? 'bg-emerald-500/20 border-emerald-500/30 hover:bg-emerald-500/30' : 'bg-emerald-50 border-emerald-200 hover:bg-emerald-100'}`}>
+                    <p className={`text-sm flex items-center ${isDark ? 'text-emerald-300' : 'text-emerald-700'}`}>Expected Return<HelpTooltip term="Expected Return" /></p>
+                    <p className="text-2xl font-bold text-emerald-500">
                       {(result.expected_return * 100).toFixed(2)}%
                     </p>
                   </div>
-                  <div className="bg-sky-500/20 border border-sky-500/30 p-4 rounded-xl backdrop-blur-sm transition-all duration-300 hover:bg-sky-500/30">
-                    <p className="text-sm text-sky-300 flex items-center">Sharpe Ratio<HelpTooltip term="Sharpe Ratio" /></p>
-                    <p className="text-2xl font-bold text-sky-400">{result.sharpe_ratio.toFixed(3)}</p>
+                  <div className={`border p-4 rounded-xl transition-all duration-300 ${isDark ? 'bg-sky-500/20 border-sky-500/30 hover:bg-sky-500/30' : 'bg-sky-50 border-sky-200 hover:bg-sky-100'}`}>
+                    <p className={`text-sm flex items-center ${isDark ? 'text-sky-300' : 'text-sky-700'}`}>Sharpe Ratio<HelpTooltip term="Sharpe Ratio" /></p>
+                    <p className="text-2xl font-bold text-sky-500">{result.sharpe_ratio.toFixed(3)}</p>
                   </div>
-                  <div className="bg-amber-500/20 border border-amber-500/30 p-4 rounded-xl backdrop-blur-sm transition-all duration-300 hover:bg-amber-500/30">
-                    <p className="text-sm text-amber-300 flex items-center">Volatility<HelpTooltip term="Volatility" /></p>
-                    <p className="text-2xl font-bold text-amber-400">{(result.volatility * 100).toFixed(2)}%</p>
+                  <div className={`border p-4 rounded-xl transition-all duration-300 ${isDark ? 'bg-amber-500/20 border-amber-500/30 hover:bg-amber-500/30' : 'bg-amber-50 border-amber-200 hover:bg-amber-100'}`}>
+                    <p className={`text-sm flex items-center ${isDark ? 'text-amber-300' : 'text-amber-700'}`}>Volatility<HelpTooltip term="Volatility" /></p>
+                    <p className="text-2xl font-bold text-amber-500">{(result.volatility * 100).toFixed(2)}%</p>
                   </div>
-                  <div className="bg-red-500/20 border border-red-500/30 p-4 rounded-xl backdrop-blur-sm transition-all duration-300 hover:bg-red-500/30">
-                    <p className="text-sm text-red-300 flex items-center">Max Drawdown<HelpTooltip term="Max Drawdown" /></p>
-                    <p className="text-2xl font-bold text-red-400">{(result.max_drawdown * 100).toFixed(2)}%</p>
+                  <div className={`border p-4 rounded-xl transition-all duration-300 ${isDark ? 'bg-red-500/20 border-red-500/30 hover:bg-red-500/30' : 'bg-red-50 border-red-200 hover:bg-red-100'}`}>
+                    <p className={`text-sm flex items-center ${isDark ? 'text-red-300' : 'text-red-700'}`}>Max Drawdown<HelpTooltip term="Max Drawdown" /></p>
+                    <p className="text-2xl font-bold text-red-500">{(result.max_drawdown * 100).toFixed(2)}%</p>
                   </div>
                 </div>
                 
