@@ -146,7 +146,7 @@ export default function Login() {
 
           <p className={`text-center mt-6 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
             Don't have an account?{' '}
-            <Link to="/register" className="text-sky-400 hover:text-sky-300 font-medium transition-colors">
+            <Link to="/register" className="text-sky-600 dark:text-sky-400 hover:text-sky-700 dark:hover:text-sky-300 font-medium transition-colors">
               Create one
             </Link>
           </p>

@@ -277,7 +277,7 @@ export default function Dashboard() {
               </span>
             )}
           </div>
-          <Link to="/portfolios" className="text-sky-400 hover:text-sky-300 text-sm font-medium transition-colors">
+          <Link to="/portfolios" className="text-sky-600 dark:text-sky-400 hover:text-sky-700 dark:hover:text-sky-300 text-sm font-medium transition-colors">
             View all
           </Link>
         </div>

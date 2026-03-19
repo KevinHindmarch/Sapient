@@ -256,7 +256,7 @@ export default function PortfolioDetail() {
     return (
       <div className="text-center py-12">
         <p className={isDark ? 'text-slate-400' : 'text-slate-600'}>Portfolio not found</p>
-        <Link to="/portfolios" className="text-sky-400 hover:text-sky-300 mt-2 inline-block">
+        <Link to="/portfolios" className="text-sky-600 dark:text-sky-400 hover:text-sky-700 dark:hover:text-sky-300 mt-2 inline-block">
           Back to portfolios
         </Link>
       </div>
@@ -476,7 +476,7 @@ export default function PortfolioDetail() {
         </div>
         <div className="card">
           <p className={`text-sm flex items-center ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Expected Sharpe<HelpTooltip term="Sharpe Ratio" /></p>
-          <p className="text-2xl font-bold text-sky-400">
+          <p className="text-2xl font-bold text-sky-700 dark:text-sky-400">
             {Number(portfolio.expected_sharpe || 0).toFixed(2)}
           </p>
         </div>
@@ -812,9 +812,9 @@ export default function PortfolioDetail() {
 
               {selectedStock && (
                 <>
-                  <div className="p-3 bg-sky-500/20 rounded-lg border border-sky-500/30">
-                    <p className="font-medium text-sky-300">{selectedStock.symbol.replace('.AX', '')}</p>
-                    <p className="text-sm text-sky-400">{selectedStock.name}</p>
+                  <div className={`p-3 rounded-lg border ${isDark ? 'bg-sky-500/20 border-sky-500/30' : 'bg-sky-50 border-sky-200'}`}>
+                    <p className="font-medium text-sky-700 dark:text-sky-300">{selectedStock.symbol.replace('.AX', '')}</p>
+                    <p className="text-sm text-sky-600 dark:text-sky-400">{selectedStock.name}</p>
                   </div>
                   
                   <div>

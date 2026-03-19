@@ -564,7 +564,7 @@ export default function CAPMBuilder() {
                     </div>
                     <div className={`border p-4 rounded-xl ${isDark ? 'bg-sky-500/20 border-sky-500/30' : 'bg-sky-50 border-sky-200'}`}>
                       <p className={`text-sm ${isDark ? 'text-sky-300' : 'text-sky-700'}`}>Sharpe Ratio</p>
-                      <p className="text-2xl font-bold text-sky-500">{result.sharpe_ratio.toFixed(3)}</p>
+                      <p className="text-2xl font-bold text-sky-700 dark:text-sky-400">{result.sharpe_ratio.toFixed(3)}</p>
                     </div>
                     <div className={`border p-4 rounded-xl ${isDark ? 'bg-amber-500/20 border-amber-500/30' : 'bg-amber-50 border-amber-200'}`}>
                       <p className={`text-sm ${isDark ? 'text-amber-300' : 'text-amber-700'}`}>Volatility</p>

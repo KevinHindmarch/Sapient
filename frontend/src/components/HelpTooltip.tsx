@@ -91,7 +91,7 @@ export default function HelpTooltip({ term }: HelpTooltipProps) {
       <button
         ref={btnRef}
         onClick={handleToggle}
-        className="inline-flex items-center justify-center w-4 h-4 rounded-full text-sky-400 hover:text-sky-300 hover:bg-sky-500/20 transition-colors align-middle ml-1 shrink-0"
+        className="inline-flex items-center justify-center w-4 h-4 rounded-full text-sky-600 dark:text-sky-400 hover:text-sky-700 dark:hover:text-sky-300 hover:bg-sky-500/20 transition-colors align-middle ml-1 shrink-0"
         title={`Learn about ${entry.short || entry.term}`}
         aria-label={`Help: ${entry.term}`}
       >
@@ -140,7 +140,7 @@ export default function HelpTooltip({ term }: HelpTooltipProps) {
                   {entry.term}
                 </span>
                 {entry.short && (
-                  <span className="text-xs px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-400 border border-sky-500/30 font-mono">
+                  <span className="text-xs px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-700 dark:text-sky-400 border border-sky-500/30 font-mono">
                     {entry.short}
                   </span>
                 )}

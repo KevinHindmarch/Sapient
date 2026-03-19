@@ -146,12 +146,12 @@ export default function Portfolios() {
 
                   {portfolio.expected_sharpe && (
                     <div className="flex items-center gap-3 text-sm">
-                      <div className="p-2 bg-sky-500/20 rounded border border-sky-500/30">
-                        <Shield className="w-4 h-4 text-sky-400" />
+                      <div className={`p-2 rounded border ${isDark ? 'bg-sky-500/20 border-sky-500/30' : 'bg-sky-100 border-sky-200'}`}>
+                        <Shield className="w-4 h-4 text-sky-600 dark:text-sky-400" />
                       </div>
                       <div>
                         <p className="text-slate-500">Sharpe Ratio</p>
-                        <p className="font-medium text-sky-400">
+                        <p className="font-medium text-sky-700 dark:text-sky-400">
                           {Number(portfolio.expected_sharpe).toFixed(2)}
                         </p>
                       </div>

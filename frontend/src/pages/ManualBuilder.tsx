@@ -306,7 +306,7 @@ export default function ManualBuilder() {
                   </div>
                   <div className={`border p-4 rounded-xl transition-all duration-300 ${isDark ? 'bg-sky-500/20 border-sky-500/30 hover:bg-sky-500/30' : 'bg-sky-50 border-sky-200 hover:bg-sky-100'}`}>
                     <p className={`text-sm flex items-center ${isDark ? 'text-sky-300' : 'text-sky-700'}`}>Sharpe Ratio<HelpTooltip term="Sharpe Ratio" /></p>
-                    <p className="text-2xl font-bold text-sky-500">{result.sharpe_ratio.toFixed(3)}</p>
+                    <p className="text-2xl font-bold text-sky-700 dark:text-sky-400">{result.sharpe_ratio.toFixed(3)}</p>
                   </div>
                   <div className={`border p-4 rounded-xl transition-all duration-300 ${isDark ? 'bg-amber-500/20 border-amber-500/30 hover:bg-amber-500/30' : 'bg-amber-50 border-amber-200 hover:bg-amber-100'}`}>
                     <p className={`text-sm flex items-center ${isDark ? 'text-amber-300' : 'text-amber-700'}`}>Volatility<HelpTooltip term="Volatility" /></p>

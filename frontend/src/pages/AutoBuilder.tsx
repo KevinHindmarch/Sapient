@@ -129,10 +129,10 @@ const CorrelationMatrix = ({ matrix, symbols, isDark }: { matrix: number[][], sy
 }
 
 const getScoreColor = (score: number) => {
-  if (score >= 70) return 'text-emerald-400'
-  if (score >= 50) return 'text-sky-400'
-  if (score >= 30) return 'text-amber-400'
-  return 'text-red-400'
+  if (score >= 70) return 'text-emerald-600 dark:text-emerald-400'
+  if (score >= 50) return 'text-sky-600 dark:text-sky-400'
+  if (score >= 30) return 'text-amber-600 dark:text-amber-400'
+  return 'text-red-600 dark:text-red-400'
 }
 
 const formatMarketCap = (val: number) => {
@@ -424,7 +424,7 @@ export default function AutoBuilder() {
                                 {stockInfo?.composite_score?.toFixed(0) || '-'}
                               </td>
                               <td className="p-2 text-right">
-                                <span className="font-medium text-sky-400">{(weightNum * 100).toFixed(1)}%</span>
+                                <span className="font-medium text-sky-600 dark:text-sky-400">{(weightNum * 100).toFixed(1)}%</span>
                               </td>
                               <td className="p-2 text-right">
                                 <span className={isDark ? 'text-slate-300' : 'text-slate-700'}>{currencySymbol}{amount.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
@@ -445,7 +445,7 @@ export default function AutoBuilder() {
                     <tfoot>
                       <tr className={`border-t-2 ${isDark ? 'border-slate-600/50' : 'border-slate-300'}`}>
                         <td className={`py-3 font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`} colSpan={2}>Total</td>
-                        <td className="py-3 text-right font-semibold text-sky-400">100%</td>
+                        <td className="py-3 text-right font-semibold text-sky-600 dark:text-sky-400">100%</td>
                         <td className={`py-3 text-right font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{currencySymbol}{investmentAmount.toLocaleString()}</td>
                         <td colSpan={3}></td>
                       </tr>
@@ -493,7 +493,7 @@ export default function AutoBuilder() {
                   </div>
                   <div className={`border p-3 rounded-xl ${isDark ? 'bg-sky-500/20 border-sky-500/30' : 'bg-sky-50 border-sky-200'}`}>
                     <p className={`text-xs ${isDark ? 'text-sky-300' : 'text-sky-700'}`}>Sharpe Ratio</p>
-                    <p className="text-xl font-bold text-sky-500">{result.sharpe_ratio.toFixed(3)}</p>
+                    <p className="text-xl font-bold text-sky-700 dark:text-sky-400">{result.sharpe_ratio.toFixed(3)}</p>
                   </div>
                   <div className={`border p-3 rounded-xl ${isDark ? 'bg-amber-500/20 border-amber-500/30' : 'bg-amber-50 border-amber-200'}`}>
                     <p className={`text-xs ${isDark ? 'text-amber-300' : 'text-amber-700'}`}>Volatility</p>

@@ -257,7 +257,7 @@ export default function HelpModal({ onClose }: HelpModalProps) {
                         <div className="flex items-center gap-2 mb-1">
                           <span className={`font-medium text-sm ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{term.term}</span>
                           {term.short && (
-                            <span className="text-xs px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-400 border border-sky-500/30 font-mono">
+                            <span className="text-xs px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-700 dark:text-sky-400 border border-sky-500/30 font-mono">
                               {term.short}
                             </span>
                           )}
