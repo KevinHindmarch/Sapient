@@ -79,7 +79,8 @@ class PortfolioOptimizerService:
         price_data: pd.DataFrame,
         investment_amount: float,
         risk_tolerance: str = 'moderate',
-        dividend_yields: Optional[Dict[str, float]] = None
+        dividend_yields: Optional[Dict[str, float]] = None,
+        risk_free_rate: float = RISK_FREE_RATE
     ) -> Optional[Dict]:
         """
         Optimize portfolio to maximize Sharpe ratio with risk tolerance constraints.
@@ -129,7 +130,7 @@ class PortfolioOptimizerService:
                     return -np.inf
                 
                 adjusted_volatility = portfolio_volatility * params['volatility_penalty']
-                sharpe_ratio = (portfolio_return - RISK_FREE_RATE) / adjusted_volatility
+                sharpe_ratio = (portfolio_return - risk_free_rate) / adjusted_volatility
                 return -sharpe_ratio
             
             constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
@@ -150,7 +151,7 @@ class PortfolioOptimizerService:
             
             portfolio_return = np.sum(mean_returns * optimal_weights)
             portfolio_volatility = np.sqrt(np.dot(optimal_weights.T, np.dot(cov_matrix, optimal_weights)))
-            sharpe_ratio = (portfolio_return - RISK_FREE_RATE) / portfolio_volatility
+            sharpe_ratio = (portfolio_return - risk_free_rate) / portfolio_volatility
             
             portfolio_returns = returns.dot(optimal_weights)
             var_95 = float(np.percentile(portfolio_returns, 5))

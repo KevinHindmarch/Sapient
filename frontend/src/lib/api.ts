@@ -36,7 +36,7 @@ export const authApi = {
 }
 
 export const stocksApi = {
-  search: (q: string) => api.get(`/stocks/search?q=${q}`),
+  search: (q: string, market: string = 'ASX') => api.get(`/stocks/search?q=${encodeURIComponent(q)}&market=${market}`),
   info: (symbol: string) => api.get(`/stocks/info/${symbol}`),
   historical: (symbols: string[], period: string = '2y') =>
     api.post('/stocks/historical', { symbols, period }),
@@ -48,8 +48,8 @@ export const stocksApi = {
 }
 
 export const portfolioApi = {
-  optimize: (symbols: string[], investment_amount: number, risk_tolerance: string, period: string = '2y') =>
-    api.post('/portfolio/optimize', { symbols, investment_amount, risk_tolerance, period }),
+  optimize: (symbols: string[], investment_amount: number, risk_tolerance: string, period: string = '2y', market: string = 'ASX') =>
+    api.post('/portfolio/optimize', { symbols, investment_amount, risk_tolerance, period, market }),
   backtest: (symbols: string[], weights: Record<string, number>, initial_investment: number, period: string = '2y') =>
     api.post('/portfolio/backtest', { symbols, weights, initial_investment, period }),
   compareStrategies: (symbols: string[], investment_amount: number, period: string = '2y') =>

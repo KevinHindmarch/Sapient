@@ -18,9 +18,9 @@ router = APIRouter()
 
 
 @router.get("/search")
-async def search_stocks(q: str = Query(..., min_length=1)) -> List[StockSearchResult]:
-    """Search for ASX stocks by symbol or name."""
-    results = StockDataService.search_stocks(q)
+async def search_stocks(q: str = Query(..., min_length=1), market: str = "ASX") -> List[StockSearchResult]:
+    """Search for stocks by symbol or name (market: ASX or US)."""
+    results = StockDataService.search_stocks(q, market)
     return [StockSearchResult(**r) for r in results]
 
 

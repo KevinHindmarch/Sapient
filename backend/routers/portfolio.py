@@ -33,18 +33,27 @@ router = APIRouter()
 @router.post("/optimize", response_model=OptimizeResponse)
 async def optimize_portfolio(request: OptimizeRequest):
     """Optimize portfolio allocation for given stocks."""
-    price_data = StockDataService.get_stock_data(request.symbols, request.period)
+    market = request.market.upper() if request.market else "ASX"
+    
+    # Format symbols correctly for the market
+    formatted_symbols = [StockDataService.format_symbol(s, market) for s in request.symbols]
+    
+    price_data = StockDataService.get_stock_data(formatted_symbols, request.period, market)
     
     if price_data is None or price_data.empty:
         raise HTTPException(status_code=400, detail="Could not fetch stock data")
     
-    dividend_yields = StockDataService.get_dividend_yields(request.symbols)
+    dividend_yields = StockDataService.get_dividend_yields(formatted_symbols)
+    
+    # Use correct risk-free rate for the market
+    risk_free_rate = StockDataService.get_risk_free_rate(market)
     
     result = PortfolioOptimizerService.optimize_portfolio(
         price_data, 
         request.investment_amount,
         request.risk_tolerance,
-        dividend_yields
+        dividend_yields,
+        risk_free_rate=risk_free_rate
     )
     
     if result is None:
@@ -60,6 +69,7 @@ async def optimize_portfolio(request: OptimizeRequest):
         if len(returns) > 1:
             corr = returns.corr()
             correlation_matrix = corr.values.tolist()
+            # Strip .AX only for ASX stocks
             correlation_symbols = [s.replace('.AX', '') for s in corr.columns.tolist()]
     except Exception:
         pass

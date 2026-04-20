@@ -5,10 +5,12 @@ import { z } from 'zod'
 import { stocksApi, portfolioApi } from '../lib/api'
 import { OptimizationResult } from '../types'
 import { toast } from 'sonner'
-import { Search, X, TrendingUp, Save, AlertTriangle, CheckCircle, Info, Loader2 } from 'lucide-react'
+import { Search, X, TrendingUp, Save, AlertTriangle, CheckCircle, Info, Loader2, Globe } from 'lucide-react'
 import HelpTooltip from '../components/HelpTooltip'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts'
 import { useTheme } from '../lib/theme'
+
+type Market = 'ASX' | 'US'
 
 const COLORS = ['#0ea5e9', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#6366f1', '#14b8a6']
 
@@ -21,10 +23,10 @@ const getCorrelationColor = (value: number): string => {
 }
 
 const CorrelationMatrix = ({ matrix, symbols, isDark }: { matrix: number[][], symbols: string[], isDark: boolean }) => {
-  const avgCorr = matrix.reduce((sum, row, i) => 
+  const avgCorr = matrix.reduce((sum, row, i) =>
     sum + row.reduce((rowSum, val, j) => i !== j ? rowSum + val : rowSum, 0), 0
   ) / (matrix.length * (matrix.length - 1))
-  
+
   return (
     <div className="space-y-4">
       <div className="overflow-x-auto">
@@ -51,7 +53,7 @@ const CorrelationMatrix = ({ matrix, symbols, isDark }: { matrix: number[][], sy
           </tbody>
         </table>
       </div>
-      
+
       <div className={`flex items-center gap-2 p-3 rounded-lg border backdrop-blur-sm ${
         avgCorr < 0.3
           ? isDark ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' : 'bg-emerald-100 text-emerald-700 border-emerald-300'
@@ -63,7 +65,7 @@ const CorrelationMatrix = ({ matrix, symbols, isDark }: { matrix: number[][], sy
          avgCorr < 0.5 ? <Info className="w-5 h-5" /> :
          <AlertTriangle className="w-5 h-5" />}
         <span className="text-sm font-medium">
-          Avg. correlation: {avgCorr.toFixed(2)} - {
+          Avg. correlation: {avgCorr.toFixed(2)} — {
             avgCorr < 0.3 ? 'Excellent diversification!' :
             avgCorr < 0.5 ? 'Good diversification' :
             'Consider adding less correlated assets'
@@ -84,7 +86,8 @@ type FormData = z.infer<typeof formSchema>
 export default function ManualBuilder() {
   const { theme } = useTheme()
   const isDark = theme === 'dark'
-  
+
+  const [market, setMarket] = useState<Market>('ASX')
   const [selectedStocks, setSelectedStocks] = useState<string[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<{ symbol: string; name: string }[]>([])
@@ -105,13 +108,26 @@ export default function ManualBuilder() {
   const investmentAmount = watch('investment_amount')
   const riskTolerance = watch('risk_tolerance')
 
+  const currency = market === 'US' ? 'USD' : 'AUD'
+  const currencySymbol = market === 'US' ? '$' : 'A$'
+
+  const handleMarketChange = (newMarket: Market) => {
+    setMarket(newMarket)
+    setSelectedStocks([])
+    setSearchQuery('')
+    setSearchResults([])
+    setResult(null)
+  }
+
+  const displaySymbol = (sym: string) => sym.replace('.AX', '')
+
   const searchStocks = async (query: string) => {
     if (query.length < 1) {
       setSearchResults([])
       return
     }
     try {
-      const response = await stocksApi.search(query)
+      const response = await stocksApi.search(query, market)
       setSearchResults(response.data.filter((s: { symbol: string }) => !selectedStocks.includes(s.symbol)))
     } catch (error) {
       console.error('Search failed:', error)
@@ -142,7 +158,9 @@ export default function ManualBuilder() {
       const response = await portfolioApi.optimize(
         selectedStocks,
         data.investment_amount,
-        data.risk_tolerance
+        data.risk_tolerance,
+        '2y',
+        market
       )
       setResult(response.data)
       toast.success('Portfolio optimized successfully!')
@@ -165,7 +183,7 @@ export default function ManualBuilder() {
 
     setSaving(true)
     try {
-      await portfolioApi.save(portfolioName.trim(), result, investmentAmount, 'manual', riskTolerance)
+      await portfolioApi.save(portfolioName.trim(), result, investmentAmount, 'manual', riskTolerance, market)
       toast.success('Portfolio saved successfully!')
       setShowSaveModal(false)
       setPortfolioName('')
@@ -178,22 +196,59 @@ export default function ManualBuilder() {
   }
 
   const chartData = result ? Object.entries(result.weights).map(([symbol, weight]) => ({
-    name: symbol.replace('.AX', ''),
+    name: displaySymbol(symbol),
     value: (weight as number) * 100,
   })) : []
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div>
-        <h1 className={`text-3xl font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Manual Portfolio Builder</h1>
-        <p className={`mt-1 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Select ASX stocks and optimize your portfolio allocation</p>
+      {/* Header + Market Toggle */}
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <div>
+          <h1 className={`text-2xl sm:text-3xl font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Manual Portfolio Builder</h1>
+          <p className={`mt-1 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+            {market === 'ASX'
+              ? 'Search any ASX-listed stock and build an optimized portfolio'
+              : 'Search S&P 500 stocks and build an optimized US portfolio'}
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Globe className="w-4 h-4 text-slate-500" />
+          <span className={`text-sm font-medium ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Market:</span>
+          <div className={`inline-flex rounded-lg p-1 ${isDark ? 'bg-slate-800/50' : 'bg-slate-100'}`}>
+            <button
+              onClick={() => handleMarketChange('ASX')}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
+                market === 'ASX'
+                  ? 'bg-gradient-to-r from-sky-500 to-indigo-500 text-white shadow-lg'
+                  : isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              🇦🇺 ASX
+            </button>
+            <button
+              onClick={() => handleMarketChange('US')}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
+                market === 'US'
+                  ? 'bg-gradient-to-r from-sky-500 to-indigo-500 text-white shadow-lg'
+                  : isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              🇺🇸 S&P 500
+            </button>
+          </div>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
+          {/* Stock Search */}
           <div className="card">
-            <h2 className={`text-lg font-semibold mb-4 ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Select Stocks</h2>
-            
+            <h2 className={`text-lg font-semibold mb-4 ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+              Select Stocks
+            </h2>
+
             <div className="relative">
               <Search className={`absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 ${isDark ? 'text-slate-400' : 'text-slate-600'}`} />
               <input
@@ -203,7 +258,7 @@ export default function ManualBuilder() {
                   setSearchQuery(e.target.value)
                   searchStocks(e.target.value)
                 }}
-                placeholder="Search ASX stocks (e.g., BHP, CBA, CSL)"
+                placeholder={market === 'ASX' ? 'Search any ASX stock (e.g., BHP, CBA, WES)' : 'Search S&P 500 stocks (e.g., AAPL, MSFT, NVDA)'}
                 className="input pl-10"
               />
             </div>
@@ -216,7 +271,7 @@ export default function ManualBuilder() {
                     onClick={() => addStock(stock.symbol)}
                     className={`w-full px-4 py-2 text-left flex justify-between items-center border-b last:border-b-0 transition-all duration-300 ${isDark ? 'hover:bg-slate-700/50 border-slate-600/50' : 'hover:bg-slate-100 border-slate-200'}`}
                   >
-                    <span className={`font-medium ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{stock.symbol}</span>
+                    <span className={`font-medium ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{displaySymbol(stock.symbol)}</span>
                     <span className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>{stock.name}</span>
                   </button>
                 ))}
@@ -229,8 +284,8 @@ export default function ManualBuilder() {
                   key={symbol}
                   className={`inline-flex items-center gap-1 px-3 py-1 border rounded-full text-sm transition-all duration-300 ${isDark ? 'bg-sky-500/20 text-sky-300 border-sky-500/30 hover:bg-sky-500/30' : 'bg-sky-100 text-sky-700 border-sky-300 hover:bg-sky-200'}`}
                 >
-                  {symbol}
-                  <button onClick={() => removeStock(symbol)} className="hover:text-sky-100 transition-colors">
+                  {displaySymbol(symbol)}
+                  <button onClick={() => removeStock(symbol)} className={`transition-colors ${isDark ? 'hover:text-sky-100' : 'hover:text-sky-900'}`}>
                     <X className="w-4 h-4" />
                   </button>
                 </span>
@@ -239,14 +294,21 @@ export default function ManualBuilder() {
                 <p className="text-slate-500 text-sm">No stocks selected. Search and add stocks above.</p>
               )}
             </div>
+
+            {selectedStocks.length > 0 && (
+              <p className={`mt-2 text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                {selectedStocks.length} stock{selectedStocks.length > 1 ? 's' : ''} selected — need at least 2 to optimize
+              </p>
+            )}
           </div>
 
+          {/* Optimization Settings */}
           <form onSubmit={handleSubmit(onSubmit)} className="card">
             <h2 className={`text-lg font-semibold mb-4 ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Optimization Settings</h2>
-            
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="label">Investment Amount (AUD)</label>
+                <label className="label">Investment Amount ({currency})</label>
                 <input
                   type="number"
                   {...register('investment_amount', { valueAsNumber: true })}
@@ -282,17 +344,20 @@ export default function ManualBuilder() {
           </form>
         </div>
 
+        {/* Results Panel */}
         <div className="space-y-6">
           {optimizing && (
             <div className="card">
               <div className="flex flex-col items-center justify-center py-12">
                 <Loader2 className="w-12 h-12 animate-spin text-sky-400 mb-4" />
-                <p className={`text-lg font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Fetching market data from Yahoo Finance...</p>
+                <p className={`text-lg font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+                  Fetching {market === 'US' ? 'US' : 'ASX'} market data…
+                </p>
                 <p className={`mt-2 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Running portfolio optimization algorithm</p>
               </div>
             </div>
           )}
-          
+
           {!optimizing && result && (
             <>
               <div className="card">
@@ -317,7 +382,7 @@ export default function ManualBuilder() {
                     <p className="text-2xl font-bold text-red-500">{(result.max_drawdown * 100).toFixed(2)}%</p>
                   </div>
                 </div>
-                
+
                 <div className={`mt-4 p-4 border rounded-xl backdrop-blur-sm ${isDark ? 'bg-slate-800/50 border-slate-600/50' : 'bg-slate-100 border-slate-300'}`}>
                   <div className="flex justify-between items-center">
                     <span className={`flex items-center ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Dividend Yield<HelpTooltip term="Dividend Yield" /></span>
@@ -329,6 +394,16 @@ export default function ManualBuilder() {
                     <span className={`flex items-center ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Value at Risk (95%)<HelpTooltip term="VaR" /></span>
                     <span className={`font-semibold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
                       {(result.var_95 * 100).toFixed(2)}%
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center mt-2">
+                    <span className={`flex items-center ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Market</span>
+                    <span className={`font-semibold text-xs px-2 py-0.5 rounded-full border ${
+                      market === 'US'
+                        ? isDark ? 'bg-sky-500/20 text-sky-300 border-sky-500/30' : 'bg-sky-100 text-sky-700 border-sky-300'
+                        : isDark ? 'bg-purple-500/20 text-purple-300 border-purple-500/30' : 'bg-purple-100 text-purple-700 border-purple-300'
+                    }`}>
+                      {market === 'US' ? '🇺🇸 S&P 500' : '🇦🇺 ASX'}
                     </span>
                   </div>
                 </div>
@@ -343,6 +418,7 @@ export default function ManualBuilder() {
                 </button>
               </div>
 
+              {/* Allocation pie */}
               <div className="card">
                 <h2 className={`text-lg font-semibold mb-4 ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Allocation</h2>
                 <ResponsiveContainer width="100%" height={250}>
@@ -361,7 +437,7 @@ export default function ManualBuilder() {
                         <Cell key={index} fill={COLORS[index % COLORS.length]} />
                       ))}
                     </Pie>
-                    <Tooltip 
+                    <Tooltip
                       formatter={(value: number) => `${value.toFixed(2)}%`}
                       contentStyle={{ backgroundColor: isDark ? 'rgba(15, 23, 42, 0.9)' : 'rgba(255, 255, 255, 0.95)', border: isDark ? '1px solid rgba(148, 163, 184, 0.2)' : '1px solid rgba(148, 163, 184, 0.3)', borderRadius: '8px' }}
                       labelStyle={{ color: isDark ? '#f1f5f9' : '#0f172a' }}
@@ -372,25 +448,56 @@ export default function ManualBuilder() {
                 </ResponsiveContainer>
               </div>
 
+              {/* Correlation matrix */}
               {result.correlation_matrix && result.correlation_symbols && (
                 <div className="card">
                   <h2 className={`text-lg font-semibold mb-4 ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Correlation Matrix</h2>
-                  <CorrelationMatrix 
-                    matrix={result.correlation_matrix} 
+                  <CorrelationMatrix
+                    matrix={result.correlation_matrix}
                     symbols={result.correlation_symbols}
                     isDark={isDark}
                   />
                 </div>
               )}
 
+              {/* Bar chart */}
               <div className="card">
                 <h2 className={`text-lg font-semibold mb-4 ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Allocation Breakdown</h2>
+                <div className="space-y-3">
+                  {Object.entries(result.weights)
+                    .sort(([, a], [, b]) => (b as number) - (a as number))
+                    .map(([symbol, weight]) => {
+                      const pct = (weight as number) * 100
+                      const amount = (weight as number) * investmentAmount
+                      return (
+                        <div key={symbol}>
+                          <div className="flex justify-between text-sm mb-1">
+                            <span className={`font-medium ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>{displaySymbol(symbol)}</span>
+                            <span className={isDark ? 'text-slate-400' : 'text-slate-600'}>
+                              {pct.toFixed(1)}% · {currencySymbol}{amount.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                            </span>
+                          </div>
+                          <div className={`h-2 rounded-full ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`}>
+                            <div
+                              className="h-2 rounded-full bg-gradient-to-r from-sky-500 to-indigo-500"
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                        </div>
+                      )
+                    })}
+                </div>
+              </div>
+
+              {/* Bar chart visual */}
+              <div className="card">
+                <h2 className={`text-lg font-semibold mb-4 ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Weight Distribution</h2>
                 <ResponsiveContainer width="100%" height={200}>
                   <BarChart data={chartData} layout="vertical">
                     <CartesianGrid strokeDasharray="3 3" stroke={isDark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.3)'} />
                     <XAxis type="number" domain={[0, 100]} tickFormatter={(v) => `${v}%`} stroke={isDark ? '#94a3b8' : '#64748b'} />
                     <YAxis type="category" dataKey="name" width={60} stroke={isDark ? '#94a3b8' : '#64748b'} />
-                    <Tooltip 
+                    <Tooltip
                       formatter={(value: number) => `${value.toFixed(2)}%`}
                       contentStyle={{ backgroundColor: isDark ? 'rgba(15, 23, 42, 0.9)' : 'rgba(255, 255, 255, 0.95)', border: isDark ? '1px solid rgba(148, 163, 184, 0.2)' : '1px solid rgba(148, 163, 184, 0.3)', borderRadius: '8px' }}
                       labelStyle={{ color: isDark ? '#f1f5f9' : '#0f172a' }}
@@ -405,6 +512,7 @@ export default function ManualBuilder() {
         </div>
       </div>
 
+      {/* Save Modal */}
       {showSaveModal && result && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50">
           <div className="rounded-2xl p-6 w-full max-w-md border transition-all duration-300" style={{ background: isDark ? 'rgba(15, 23, 42, 0.9)' : 'rgba(255, 255, 255, 0.95)', borderColor: isDark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.3)', boxShadow: isDark ? '0 8px 32px rgba(0, 0, 0, 0.5), 0 0 20px rgba(56, 189, 248, 0.1)' : '0 8px 32px rgba(0, 0, 0, 0.15)' }}>
@@ -414,7 +522,7 @@ export default function ManualBuilder() {
               type="text"
               value={portfolioName}
               onChange={(e) => setPortfolioName(e.target.value)}
-              placeholder="e.g., My ASX Portfolio"
+              placeholder={market === 'US' ? 'e.g., My US Tech Portfolio' : 'e.g., My ASX Portfolio'}
               className="input mb-4"
               autoFocus
               onKeyDown={(e) => e.key === 'Enter' && portfolioName.trim() && savePortfolio()}

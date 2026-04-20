@@ -199,6 +199,15 @@ The application uses a premium theme with luxury aesthetics, supporting both lig
 
 ## Recent Changes
 
+**April 20, 2026**:
+- Extended Manual Builder to support ALL ASX-listed stocks (search now combines ASX_STOCKS + ASX200_STOCKS, ~250+ tickers)
+- Added US market toggle (🇦🇺 ASX / 🇺🇸 S&P 500) to Manual Builder, matching Auto Builder pattern
+- Search endpoint (`/stocks/search`) now accepts `market` query param (ASX or US) to return correct stock list
+- Portfolio optimize endpoint (`/portfolio/optimize`) now uses market-aware risk-free rate (ASX 4.35%, US 4.5%) and properly formats symbols for each market
+- `stocksApi.search` and `portfolioApi.optimize` in `api.ts` updated to accept market parameter
+- `PortfolioOptimizerService.optimize_portfolio` now accepts `risk_free_rate` parameter (defaults to existing constant)
+- Manual Builder shows AUD/USD label, correct currency symbol, market badge in results, and passes market to save
+
 **February 5, 2026**:
 - Extended Stock Analysis page to support US shares
   - Market selector toggle: ASX (🇦🇺) and S&P 500 (🇺🇸)

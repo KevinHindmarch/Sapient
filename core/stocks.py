@@ -565,19 +565,28 @@ class StockDataService:
             return 0.0
     
     @staticmethod
-    def search_stocks(search_term: str) -> List[Dict]:
-        """Search for ASX stocks by symbol or name."""
+    def search_stocks(search_term: str, market: str = "ASX") -> List[Dict]:
+        """Search for stocks by symbol or name for the given market."""
         search_term = search_term.upper().strip()
         results = []
-        
-        for code, name in ASX_STOCKS.items():
-            code_match = search_term in code.replace('.AX', '')
-            name_match = search_term in name.upper()
-            
-            if code_match or name_match:
-                results.append({'symbol': code, 'name': name})
-        
-        return results[:10]
+
+        if market.upper() == "US":
+            search_dict = {s: data[0] for s, data in SP500_STOCKS.items()}
+            for code, name in search_dict.items():
+                if search_term in code or search_term in name.upper():
+                    results.append({'symbol': code, 'name': name})
+        else:
+            # Combine ASX_STOCKS (legacy) and ASX200_STOCKS into one search pool
+            combined: Dict[str, str] = dict(ASX_STOCKS)
+            for s, data in ASX200_STOCKS.items():
+                if s not in combined:
+                    combined[s] = data[0]
+            for code, name in combined.items():
+                ticker = code.replace('.AX', '')
+                if search_term in ticker or search_term in name.upper():
+                    results.append({'symbol': code, 'name': name})
+
+        return results[:15]
     
     @staticmethod
     def get_asx200_stocks() -> List[Dict]:
