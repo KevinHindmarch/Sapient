@@ -2,6 +2,8 @@
 Stock data router for Sapient API
 """
 
+import asyncio
+import re
 from fastapi import APIRouter, HTTPException, Query
 from typing import List
 
@@ -17,10 +19,48 @@ from core.stocks import StockDataService
 router = APIRouter()
 
 
+def _live_ticker_lookup(ticker_upper: str, market: str) -> dict | None:
+    """Try to validate a ticker live via yfinance. Returns {symbol, name} or None."""
+    try:
+        import yfinance as yf
+        if market.upper() == "US":
+            symbol = ticker_upper
+        else:
+            symbol = f"{ticker_upper}.AX"
+        t = yf.Ticker(symbol)
+        info = t.fast_info
+        name = getattr(info, 'exchange', None)
+        # fast_info doesn't have name; use info dict with short timeout
+        full = t.info
+        long_name = full.get('longName') or full.get('shortName') or ''
+        if long_name and full.get('regularMarketPrice') is not None:
+            return {'symbol': symbol, 'name': long_name}
+    except Exception:
+        pass
+    return None
+
+
 @router.get("/search")
 async def search_stocks(q: str = Query(..., min_length=1), market: str = "ASX") -> List[StockSearchResult]:
     """Search for stocks by symbol or name (market: ASX or US)."""
     results = StockDataService.search_stocks(q, market)
+    found_symbols = {r['symbol'] for r in results}
+
+    # If query looks like a direct ticker (2-6 alpha/digit chars) and not already in results,
+    # try a live yfinance lookup so any valid ASX or US stock can be found
+    q_clean = q.strip().upper()
+    if re.match(r'^[A-Z0-9]{2,6}$', q_clean) and len(results) < 5:
+        try:
+            loop = asyncio.get_event_loop()
+            live = await asyncio.wait_for(
+                loop.run_in_executor(None, _live_ticker_lookup, q_clean, market),
+                timeout=4.0
+            )
+            if live and live['symbol'] not in found_symbols:
+                results.append(live)
+        except (asyncio.TimeoutError, Exception):
+            pass
+
     return [StockSearchResult(**r) for r in results]
 
 
