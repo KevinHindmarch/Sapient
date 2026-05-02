@@ -603,7 +603,11 @@ class StockDataService:
                 'sector': info.get('sector', 'Unknown'),
                 'industry': info.get('industry', 'Unknown'),
                 'current_price': info.get('currentPrice', 0),
-                'market_cap': info.get('marketCap', 0)
+                'market_cap': info.get('marketCap', 0),
+                'description': info.get('longBusinessSummary', ''),
+                'website': info.get('website', ''),
+                'employees': info.get('fullTimeEmployees', None),
+                'country': info.get('country', ''),
             }
         except:
             return {
@@ -612,7 +616,11 @@ class StockDataService:
                 'sector': 'Unknown',
                 'industry': 'Unknown',
                 'current_price': 0,
-                'market_cap': 0
+                'market_cap': 0,
+                'description': '',
+                'website': '',
+                'employees': None,
+                'country': '',
             }
     
     @staticmethod

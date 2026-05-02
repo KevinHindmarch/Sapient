@@ -4,9 +4,10 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { portfolioApi } from '../lib/api'
 import { toast } from 'sonner'
-import { Wand2, Save, TrendingUp, Loader2, CheckCircle, Info, AlertTriangle, Target, Globe } from 'lucide-react'
+import { Wand2, Save, TrendingUp, Loader2, CheckCircle, Info, AlertTriangle, Target, Globe, SlidersHorizontal } from 'lucide-react'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts'
 import { useTheme } from '../lib/theme'
+import WeightEditor from '../components/WeightEditor'
 
 const COLORS = ['#0ea5e9', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#6366f1', '#14b8a6']
 
@@ -155,6 +156,8 @@ export default function AutoBuilder() {
   const [progress, setProgress] = useState('')
   const [showSaveModal, setShowSaveModal] = useState(false)
   const [portfolioName, setPortfolioName] = useState('')
+  const [editedWeights, setEditedWeights] = useState<Record<string, number> | null>(null)
+  const [showWeightEditor, setShowWeightEditor] = useState(false)
 
   const { register, handleSubmit, formState: { errors }, watch } = useForm<FormData>({
     resolver: zodResolver(formSchema),
@@ -218,6 +221,8 @@ export default function AutoBuilder() {
       )
       
       setResult(response.data)
+      setEditedWeights(null)
+      setShowWeightEditor(false)
       toast.success(`Auto-built portfolio from ${scanResponse.data.total_scanned} ${marketLabel} stocks!`)
     } catch (error: unknown) {
       const err = error as { response?: { data?: { detail?: string } } }
@@ -238,7 +243,8 @@ export default function AutoBuilder() {
 
     setSaving(true)
     try {
-      await portfolioApi.save(portfolioName.trim(), result, investmentAmount, 'auto', riskTolerance, market)
+      const resultToSave = editedWeights ? { ...result, weights: editedWeights } : result
+      await portfolioApi.save(portfolioName.trim(), resultToSave, investmentAmount, 'auto', riskTolerance, market)
       toast.success('Portfolio saved successfully!')
       setShowSaveModal(false)
     } catch (error: unknown) {
@@ -511,15 +517,45 @@ export default function AutoBuilder() {
                   </p>
                 </div>
 
-                <button
-                  onClick={openSaveModal}
-                  disabled={saving}
-                  className="btn-success w-full mt-4 flex items-center justify-center gap-2"
-                >
-                  <Save className="w-5 h-5" />
-                  Save Portfolio
-                </button>
+                <div className="flex gap-2 mt-4">
+                  <button
+                    onClick={openSaveModal}
+                    disabled={saving}
+                    className="btn-success flex-1 flex items-center justify-center gap-2"
+                  >
+                    <Save className="w-5 h-5" />
+                    Save Portfolio
+                  </button>
+                  <button
+                    onClick={() => setShowWeightEditor(v => !v)}
+                    className={`px-3 py-2 rounded-lg border text-sm font-medium flex items-center gap-1.5 transition-colors ${
+                      showWeightEditor
+                        ? isDark ? 'bg-sky-500/20 border-sky-500/30 text-sky-300' : 'bg-sky-100 border-sky-300 text-sky-700'
+                        : isDark ? 'border-slate-600 text-slate-300 hover:bg-slate-700' : 'border-slate-300 text-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    <SlidersHorizontal className="w-4 h-4" />
+                    Adjust
+                  </button>
+                </div>
               </div>
+
+              {showWeightEditor && (
+                <div className="card">
+                  <h2 className={`text-lg font-semibold mb-4 ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+                    Customize Allocation
+                  </h2>
+                  <p className={`text-sm mb-4 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                    Manually adjust weights below. The Save button will use your edited allocations.
+                  </p>
+                  <WeightEditor
+                    weights={editedWeights ?? result!.weights}
+                    investmentAmount={investmentAmount}
+                    currency={currency}
+                    onWeightsChange={setEditedWeights}
+                  />
+                </div>
+              )}
 
               <div className="card">
                 <h2 className={`text-lg font-semibold mb-4 ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Top Holdings</h2>

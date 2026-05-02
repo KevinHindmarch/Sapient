@@ -377,7 +377,13 @@ class TechnicalIndicatorService:
                     signal = "sell"
                     strength = "strong" if current_rsi >= 80 else "moderate"
                 else:
-                    return None
+                    signal = "hold"
+                    if current_rsi <= 45:
+                        strength = "leaning oversold"
+                    elif current_rsi >= 55:
+                        strength = "leaning overbought"
+                    else:
+                        strength = "neutral"
 
                 info = ticker.info
                 name = info.get('shortName', info.get('longName', sym))

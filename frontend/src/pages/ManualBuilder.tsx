@@ -5,7 +5,8 @@ import { z } from 'zod'
 import { stocksApi, portfolioApi } from '../lib/api'
 import { OptimizationResult } from '../types'
 import { toast } from 'sonner'
-import { Search, X, TrendingUp, Save, AlertTriangle, CheckCircle, Info, Loader2, Globe } from 'lucide-react'
+import { Search, X, TrendingUp, Save, AlertTriangle, CheckCircle, Info, Loader2, Globe, SlidersHorizontal } from 'lucide-react'
+import WeightEditor from '../components/WeightEditor'
 import HelpTooltip from '../components/HelpTooltip'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts'
 import { useTheme } from '../lib/theme'
@@ -96,6 +97,8 @@ export default function ManualBuilder() {
   const [saving, setSaving] = useState(false)
   const [showSaveModal, setShowSaveModal] = useState(false)
   const [portfolioName, setPortfolioName] = useState('')
+  const [editedWeights, setEditedWeights] = useState<Record<string, number> | null>(null)
+  const [showWeightEditor, setShowWeightEditor] = useState(false)
 
   const { register, handleSubmit, formState: { errors }, watch } = useForm<FormData>({
     resolver: zodResolver(formSchema),
@@ -163,6 +166,8 @@ export default function ManualBuilder() {
         market
       )
       setResult(response.data)
+      setEditedWeights(null)
+      setShowWeightEditor(false)
       toast.success('Portfolio optimized successfully!')
     } catch (error: unknown) {
       const err = error as { response?: { data?: { detail?: string } } }
@@ -183,7 +188,8 @@ export default function ManualBuilder() {
 
     setSaving(true)
     try {
-      await portfolioApi.save(portfolioName.trim(), result, investmentAmount, 'manual', riskTolerance, market)
+      const resultToSave = editedWeights ? { ...result, weights: editedWeights } : result
+      await portfolioApi.save(portfolioName.trim(), resultToSave, investmentAmount, 'manual', riskTolerance, market)
       toast.success('Portfolio saved successfully!')
       setShowSaveModal(false)
       setPortfolioName('')
@@ -408,15 +414,46 @@ export default function ManualBuilder() {
                   </div>
                 </div>
 
-                <button
-                  onClick={openSaveModal}
-                  disabled={saving}
-                  className="btn-success w-full mt-4 flex items-center justify-center gap-2"
-                >
-                  <Save className="w-5 h-5" />
-                  Save Portfolio
-                </button>
+                <div className="flex gap-2 mt-4">
+                  <button
+                    onClick={openSaveModal}
+                    disabled={saving}
+                    className="btn-success flex-1 flex items-center justify-center gap-2"
+                  >
+                    <Save className="w-5 h-5" />
+                    Save Portfolio
+                  </button>
+                  <button
+                    onClick={() => setShowWeightEditor(v => !v)}
+                    className={`px-3 py-2 rounded-lg border text-sm font-medium flex items-center gap-1.5 transition-colors ${
+                      showWeightEditor
+                        ? isDark ? 'bg-sky-500/20 border-sky-500/30 text-sky-300' : 'bg-sky-100 border-sky-300 text-sky-700'
+                        : isDark ? 'border-slate-600 text-slate-300 hover:bg-slate-700' : 'border-slate-300 text-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    <SlidersHorizontal className="w-4 h-4" />
+                    Adjust
+                  </button>
+                </div>
               </div>
+
+              {/* Weight Editor */}
+              {showWeightEditor && (
+                <div className="card">
+                  <h2 className={`text-lg font-semibold mb-2 ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+                    Customize Allocation
+                  </h2>
+                  <p className={`text-sm mb-4 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                    Manually adjust weights below. Your edited allocations will be saved when you click Save Portfolio.
+                  </p>
+                  <WeightEditor
+                    weights={editedWeights ?? result!.weights}
+                    investmentAmount={investmentAmount}
+                    currency={currency}
+                    onWeightsChange={setEditedWeights}
+                  />
+                </div>
+              )}
 
               {/* Allocation pie */}
               <div className="card">

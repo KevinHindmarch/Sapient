@@ -38,6 +38,7 @@ export const authApi = {
 export const stocksApi = {
   search: (q: string, market: string = 'ASX') => api.get(`/stocks/search?q=${encodeURIComponent(q)}&market=${market}`),
   info: (symbol: string) => api.get(`/stocks/info/${symbol}`),
+  quickInfo: (symbol: string) => api.get(`/stocks/info/${symbol}`),
   historical: (symbols: string[], period: string = '2y') =>
     api.post('/stocks/historical', { symbols, period }),
   dividends: (symbols: string[]) =>

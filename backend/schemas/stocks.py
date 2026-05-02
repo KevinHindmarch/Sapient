@@ -10,6 +10,10 @@ class StockInfo(BaseModel):
     industry: str
     current_price: float
     market_cap: float
+    description: Optional[str] = ''
+    website: Optional[str] = ''
+    employees: Optional[int] = None
+    country: Optional[str] = ''
 
 
 class StockSearchResult(BaseModel):

@@ -33,7 +33,7 @@ async def get_chart_data(symbol: str, indicator: str = "all", period: str = "1y"
 
 @router.get("/rsi-screener")
 async def rsi_screener(market: str = "asx", signal: str = "buy"):
-    """Scan stocks for RSI signals (oversold/overbought)."""
+    """Scan stocks for RSI signals (oversold/overbought/hold)."""
     from core.stocks import StockDataService
     
     if market.lower() == "us":
@@ -48,6 +48,11 @@ async def rsi_screener(market: str = "asx", signal: str = "buy"):
         result["results"] = [r for r in result["results"] if r["signal"] == "buy"]
     elif signal == "sell":
         result["results"] = [r for r in result["results"] if r["signal"] == "sell"]
+    elif signal == "hold":
+        result["results"] = [r for r in result["results"] if r["signal"] == "hold"]
+        # Sort hold by RSI value (closest to neutral 50 last, extremes first)
+        result["results"].sort(key=lambda x: abs(x["rsi_value"] - 50), reverse=True)
+    # "all" returns everything, already sorted by rsi_value ascending
     
     result["signals_found"] = len(result["results"])
     return result

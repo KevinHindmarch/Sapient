@@ -12,6 +12,10 @@ export interface StockInfo {
   industry: string
   current_price: number
   market_cap: number
+  description?: string
+  website?: string
+  employees?: number | null
+  country?: string
 }
 
 export interface OptimizationResult {
