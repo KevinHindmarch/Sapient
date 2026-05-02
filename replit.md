@@ -199,6 +199,58 @@ The application uses a premium theme with luxury aesthetics, supporting both lig
 
 ## Recent Changes
 
+**May 2, 2026 — Interactive Brokers integration (BYO-key) + AI Trading**:
+- New encrypted broker credential vault. Each user can save their own IBKR
+  consumer key, access token + secret, and RSA private-key PEM. All secrets
+  are encrypted at rest with Fernet using the `BROKER_ENCRYPTION_KEY` env var
+  (32-byte url-safe b64). Helpers in `core/crypto.py`.
+- `core/ibkr_client.py` ships a real OAuth1-RSA-SHA256 signing layer (RFC5849
+  + IBKR spec) and a `IBKR_SIMULATION_MODE = True` switch. While the switch is
+  on, `test_connection`, `get_account_summary`, and `place_order` return
+  realistic stubs (paper account `DU1234567`, deterministic fills from a price
+  table). Flipping the switch to `False` and implementing `_request()` is the
+  only thing needed to go live.
+- AI signal engine in `core/ai_engine.py` reuses `TechnicalIndicatorService`
+  (RSI primary, MACD confirmation), enforces "most-restrictive wins" mode
+  semantics (skip if EITHER global OR per-portfolio AI mode is `off`), and
+  applies persisted-state guardrails: `max_trade_pct`, `max_daily_trades`
+  (today's signal COUNT), `max_daily_turnover_pct` (today's signal value +
+  broker order value), and a 24h kill-switch cooldown via
+  `last_kill_switch_at`. In `autonomous` + `autonomous` mode the engine
+  routes orders through IBKR via `IBKRClient.place_order`, mirrors fills back
+  into portfolio positions, and writes audit entries.
+- Server-side execution policy gate (`assert_execution_allowed` +
+  `ExecutionPolicyError` in `core/ibkr_client.py`) is enforced on every order
+  path: `/broker/orders`, `/ai/signals/{id}/approve`,
+  `/portfolio/{id}/execute-rebalance`, and the autonomous engine. When
+  `paper_only` is enabled (default) and broker `environment != 'paper'` the
+  request is refused with HTTP 403 (engine logs `autonomous_skipped`).
+- New backend routers:
+  - `/api/broker/*` — credentials (POST/GET/DELETE), test, account, orders,
+    orders/recent
+  - `/api/ai/*` — settings (GET/PUT), kill-switch, signals (list / approve /
+    reject / snooze), scan/{portfolio_id}, audit
+  - Extended `/api/portfolio/*` — `PUT /{id}/ai-mode`, `GET /{id}/rebalance-plan`,
+    `POST /{id}/execute-rebalance`
+- New DB tables (auto-created in `init_database()`):
+  `broker_credentials`, `ai_trading_settings`, `ai_signals`, `broker_orders`,
+  `ai_audit_log`. Existing `portfolios` table gains an `ai_mode` column
+  (`off` | `suggestions` | `autonomous`).
+- New frontend pages:
+  - `/brokerage` — 5-step IBKR onboarding wizard, connected-state account card
+  - `/ai-trading` — global AI mode, RSI thresholds, guardrails, kill switch
+  - `/ai-inbox` — pending signal inbox with Approve / Reject / Snooze and a
+    recent activity rail
+- `PortfolioDetail` gained an AI Trading Mode segmented control, "Sync IBKR"
+  and "Execute via Broker" header buttons, an IBKR account card, and a
+  Pending Broker Sync drawer that previews drift-based rebalance legs and
+  executes them via the broker.
+- `Layout` nav now includes an "AI Trading" entry (Sparkles icon → /ai-inbox)
+  and a Trading group (Brokerage, AI Settings) next to Settings.
+- Required env var: `BROKER_ENCRYPTION_KEY` (auto-provisioned).
+  Important note: the app currently runs in **broker simulation mode**. UI
+  banners and toasts surface "(sim)" so users know orders are not real.
+
 **April 20, 2026**:
 - Extended Manual Builder to support ALL ASX-listed stocks (search now combines ASX_STOCKS + ASX200_STOCKS, ~250+ tickers)
 - Added US market toggle (🇦🇺 ASX / 🇺🇸 S&P 500) to Manual Builder, matching Auto Builder pattern

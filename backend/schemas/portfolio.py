@@ -90,6 +90,8 @@ class PortfolioResponse(BaseModel):
     created_at: datetime
     status: str
     position_count: Optional[int] = 0
+    ai_mode: Optional[str] = "off"
+    market: Optional[str] = "ASX"
 
 
 class PortfolioDetailResponse(BaseModel):

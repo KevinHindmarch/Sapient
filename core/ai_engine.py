@@ -1,0 +1,468 @@
+"""
+AI signal engine for the Sapient × IBKR integration.
+
+Generates BUY / SELL signals for a portfolio's positions using
+TechnicalIndicatorService (RSI primary, MACD as confirmation) and the user's
+guardrails from AITradingSettingsService. Signals are persisted via
+AISignalService.create_many.
+
+Mode semantics (most-restrictive wins):
+  - If EITHER the global user-level mode OR the portfolio-level ai_mode is
+    `off`, the scan returns no signals.
+  - In `suggestions` mode, signals are persisted as `pending` for the user to
+    approve in /ai-inbox.
+  - In `autonomous` mode (both scopes set to autonomous), signals are
+    immediately routed through the broker via IBKRClient.place_order.
+
+Guardrails enforced on every candidate signal:
+  - max_trade_pct       — single-trade size cap as % of portfolio
+  - max_daily_trades    — total signals generated for this user today
+  - max_daily_turnover_pct — cumulative order value for the user today
+  - kill-switch cooldown — 24h after kill-switch is triggered, no new signals
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+from typing import Any
+
+import yfinance as yf
+
+from core.database import (
+    AIAuditService,
+    AISignalService,
+    AITradingSettingsService,
+    BrokerCredentialService,
+    BrokerOrderService,
+    PortfolioService,
+    get_db_cursor,
+)
+from core.indicators import TechnicalIndicatorService
+
+
+SIGNAL_TTL_HOURS = 12
+KILL_SWITCH_COOLDOWN_HOURS = 24
+
+
+def _safe_market_for_symbol(symbol: str) -> str:
+    return "asx" if symbol.upper().endswith(".AX") else "us"
+
+
+def _company_name(symbol: str) -> str:
+    try:
+        info = yf.Ticker(symbol).info or {}
+        return info.get("shortName") or info.get("longName") or symbol
+    except Exception:
+        return symbol
+
+
+def _portfolio_total_value(positions: list[dict]) -> float:
+    total = 0.0
+    for p in positions:
+        if p.get("status") != "active":
+            continue
+        qty = float(p.get("quantity") or 0)
+        cost = float(p.get("avg_cost") or 0)
+        total += qty * cost
+    return total
+
+
+def _signals_today_count(user_id: int) -> int:
+    """Count BUY/SELL signals already created for this user today (UTC)."""
+    with get_db_cursor() as (cur, _conn):
+        cur.execute(
+            """
+            SELECT COUNT(*) AS c
+            FROM ai_signals
+            WHERE user_id = %s
+              AND generated_at >= date_trunc('day', NOW() AT TIME ZONE 'UTC')
+            """,
+            (user_id,),
+        )
+        row = cur.fetchone()
+        return int((row or {}).get("c", 0))
+
+
+def _turnover_today(user_id: int) -> float:
+    """Sum of estimated order value for today's signals + executed broker orders."""
+    with get_db_cursor() as (cur, _conn):
+        cur.execute(
+            """
+            SELECT COALESCE(SUM(quantity * price_at_signal), 0) AS v
+            FROM ai_signals
+            WHERE user_id = %s
+              AND generated_at >= date_trunc('day', NOW() AT TIME ZONE 'UTC')
+            """,
+            (user_id,),
+        )
+        signal_v = float((cur.fetchone() or {}).get("v") or 0)
+
+        cur.execute(
+            """
+            SELECT COALESCE(SUM(filled_qty * COALESCE(avg_fill_price, limit_price, 0)), 0) AS v
+            FROM broker_orders
+            WHERE user_id = %s
+              AND submitted_at >= date_trunc('day', NOW() AT TIME ZONE 'UTC')
+            """,
+            (user_id,),
+        )
+        order_v = float((cur.fetchone() or {}).get("v") or 0)
+        return signal_v + order_v
+
+
+def _kill_switch_active(settings: dict) -> bool:
+    ks_at = settings.get("last_kill_switch_at")
+    if not ks_at:
+        return False
+    if isinstance(ks_at, str):
+        try:
+            ks_at = datetime.fromisoformat(ks_at)
+        except ValueError:
+            return False
+    if ks_at.tzinfo is None:
+        ks_at = ks_at.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) - ks_at < timedelta(hours=KILL_SWITCH_COOLDOWN_HOURS)
+
+
+def _within_guardrails(
+    estimated_value: float,
+    portfolio_value: float,
+    signals_today: int,
+    turnover_today: float,
+    settings: dict,
+) -> tuple[bool, str | None]:
+    """Apply per-trade and per-day guardrails. Returns (ok, reason_if_skipped)."""
+    if portfolio_value <= 0:
+        return False, "portfolio_value_zero"
+
+    trade_pct = (estimated_value / portfolio_value) * 100.0
+    max_trade_pct = float(settings.get("max_trade_pct") or 0)
+    if trade_pct > max_trade_pct:
+        return False, f"trade_pct {trade_pct:.2f}% exceeds max_trade_pct {max_trade_pct}%"
+
+    max_daily_trades = int(settings.get("max_daily_trades") or 0)
+    if signals_today >= max_daily_trades:
+        return False, f"max_daily_trades reached ({signals_today}/{max_daily_trades})"
+
+    max_turnover_pct = float(settings.get("max_daily_turnover_pct") or 0)
+    new_turnover_pct = ((turnover_today + estimated_value) / portfolio_value) * 100.0
+    if max_turnover_pct > 0 and new_turnover_pct > max_turnover_pct:
+        return False, (
+            f"daily turnover {new_turnover_pct:.2f}% would exceed "
+            f"max_daily_turnover_pct {max_turnover_pct}%"
+        )
+
+    return True, None
+
+
+def _build_signal(
+    portfolio_id: int,
+    portfolio: dict,
+    position: dict,
+    analysis: dict,
+    settings: dict,
+    portfolio_value: float,
+) -> dict | None:
+    """
+    Decide whether the analyzed position should yield a BUY/SELL signal.
+    Returns a dict matching AISignalService.create_many input shape, or None.
+    """
+    indicators = analysis.get("indicators") or {}
+    rsi_block = indicators.get("rsi") or {}
+    rsi_value = rsi_block.get("value")
+    if rsi_value is None:
+        return None
+
+    macd_block = indicators.get("macd") or {}
+    macd_signal = (macd_block.get("signal") or {}).get("signal")  # 'buy'/'sell'/'bullish'/'bearish'
+    current_price = float(analysis.get("current_price") or 0)
+    if current_price <= 0:
+        return None
+
+    rsi_buy = float(settings.get("rsi_buy_threshold") or 30)
+    rsi_sell = float(settings.get("rsi_sell_threshold") or 70)
+
+    action: str | None = None
+    confidence = 0.5
+    rule_summary = ""
+
+    qty_held = float(position.get("quantity") or 0)
+    symbol = position["symbol"]
+
+    if rsi_value <= rsi_buy:
+        action = "BUY"
+        depth = max(0.0, (rsi_buy - rsi_value) / max(rsi_buy, 1.0))
+        confidence = min(0.95, 0.55 + depth * 0.4 + (0.05 if macd_signal in ("buy", "bullish") else 0.0))
+        max_trade_pct = float(settings.get("max_trade_pct") or 5.0)
+        target_value = portfolio_value * (max_trade_pct / 100.0) * min(1.0, 0.6 + depth)
+        quantity = max(round(target_value / current_price, 4), 0.0001)
+        rule_summary = (
+            f"RSI {rsi_value:.1f} ≤ buy threshold {rsi_buy:.1f}"
+            + (" + MACD bullish" if macd_signal in ("buy", "bullish") else "")
+        )
+    elif rsi_value >= rsi_sell and qty_held > 0:
+        action = "SELL"
+        depth = max(0.0, (rsi_value - rsi_sell) / max(100.0 - rsi_sell, 1.0))
+        confidence = min(0.95, 0.55 + depth * 0.4 + (0.05 if macd_signal in ("sell", "bearish") else 0.0))
+        max_trade_pct = float(settings.get("max_trade_pct") or 5.0)
+        max_value_to_sell = portfolio_value * (max_trade_pct / 100.0)
+        max_qty_by_value = max_value_to_sell / current_price if current_price else qty_held
+        sell_fraction = min(1.0, 0.4 + depth * 0.6)
+        quantity = round(min(qty_held * sell_fraction, max_qty_by_value, qty_held), 4)
+        if quantity <= 0:
+            return None
+        rule_summary = (
+            f"RSI {rsi_value:.1f} ≥ sell threshold {rsi_sell:.1f}"
+            + (" + MACD bearish" if macd_signal in ("sell", "bearish") else "")
+        )
+    else:
+        return None
+
+    rationale: dict[str, Any] = {
+        "rsi": rsi_value,
+        "rsi_buy_threshold": rsi_buy,
+        "rsi_sell_threshold": rsi_sell,
+        "macd_signal": macd_signal,
+        "trend": analysis.get("trend"),
+        "current_price": current_price,
+        "portfolio_value": portfolio_value,
+    }
+    bb = (indicators.get("bollinger") or {})
+    if bb:
+        rationale["bollinger_position"] = bb.get("position")
+
+    return {
+        "portfolio_id": portfolio_id,
+        "symbol": symbol,
+        "company_name": _company_name(symbol),
+        "market": (portfolio.get("market") or "ASX").upper(),
+        "action": action,
+        "quantity": float(quantity),
+        "price_at_signal": float(current_price),
+        "confidence": float(round(confidence, 3)),
+        "rationale": rationale,
+        "rule_summary": rule_summary,
+        "expires_at": datetime.now(timezone.utc) + timedelta(hours=SIGNAL_TTL_HOURS),
+    }
+
+
+def _maybe_autonomous_execute(
+    user_id: int,
+    portfolio_id: int,
+    persisted_signals: list[dict],
+) -> list[dict]:
+    """
+    If both the user-level and portfolio-level modes are 'autonomous' AND
+    the user has saved broker credentials AND the paper_only safety gate
+    allows it, place each signal directly through the broker.
+
+    Returns a list of audit dicts describing what happened. Errors are
+    logged to ai_audit_log but never raised — autonomous execution is
+    best-effort and visible in the audit trail.
+    """
+    from core.ibkr_client import (
+        ExecutionPolicyError,
+        IBKRClient,
+        assert_execution_allowed,
+    )
+
+    creds = BrokerCredentialService.get_decrypted(user_id)
+    if creds is None:
+        AIAuditService.log(
+            user_id=user_id,
+            event_type="autonomous_skipped",
+            portfolio_id=portfolio_id,
+            payload={"reason": "no_broker_credentials", "signals": len(persisted_signals)},
+        )
+        return []
+
+    try:
+        client = IBKRClient(creds)
+        account = client.get_account_summary()
+    except Exception as e:
+        AIAuditService.log(
+            user_id=user_id,
+            event_type="autonomous_skipped",
+            portfolio_id=portfolio_id,
+            payload={"reason": f"account_lookup_failed: {e}", "signals": len(persisted_signals)},
+        )
+        return []
+
+    try:
+        assert_execution_allowed(user_id, account.environment)
+    except ExecutionPolicyError as e:
+        AIAuditService.log(
+            user_id=user_id,
+            event_type="autonomous_skipped",
+            portfolio_id=portfolio_id,
+            payload={"reason": f"policy_block: {e}", "signals": len(persisted_signals)},
+        )
+        return []
+
+    results: list[dict] = []
+    for sig in persisted_signals:
+        try:
+            order = client.place_order(
+                account_id=account.account_id,
+                symbol=sig["symbol"],
+                side=sig["action"],
+                quantity=float(sig["quantity"]),
+                order_type="MKT",
+            )
+            saved = BrokerOrderService.insert(
+                user_id=user_id,
+                order=order,
+                account_id=account.account_id,
+                portfolio_id=portfolio_id,
+                signal_id=sig["id"],
+            )
+            if order.status == "Filled" and order.filled_qty and order.avg_fill_price:
+                PortfolioService.execute_trade(
+                    portfolio_id=portfolio_id,
+                    user_id=user_id,
+                    symbol=sig["symbol"],
+                    txn_type="buy" if sig["action"] == "BUY" else "sell",
+                    quantity=float(order.filled_qty),
+                    price=float(order.avg_fill_price),
+                    notes=f"Autonomous AI signal #{sig['id']}",
+                )
+            AISignalService.update_status(
+                user_id=user_id,
+                signal_id=sig["id"],
+                status="executed",
+                decided_by="autonomous",
+                executed_order_id=saved["id"],
+            )
+            AIAuditService.log(
+                user_id=user_id,
+                event_type="autonomous_executed",
+                portfolio_id=portfolio_id,
+                signal_id=sig["id"],
+                order_id=saved["id"],
+                payload={
+                    "symbol": sig["symbol"],
+                    "action": sig["action"],
+                    "quantity": float(sig["quantity"]),
+                },
+            )
+            results.append({"signal_id": sig["id"], "order_id": saved["id"], "status": "executed"})
+        except Exception as e:
+            AIAuditService.log(
+                user_id=user_id,
+                event_type="autonomous_failed",
+                portfolio_id=portfolio_id,
+                signal_id=sig["id"],
+                payload={"symbol": sig["symbol"], "action": sig["action"], "error": str(e)},
+            )
+            results.append({"signal_id": sig["id"], "status": "failed", "error": str(e)})
+    return results
+
+
+def scan_portfolio(user_id: int, portfolio_id: int) -> dict:
+    """
+    Run a fresh signal scan for one portfolio. Honours the user's AI settings
+    and the portfolio's per-portfolio ai_mode (most-restrictive wins).
+    """
+    details = PortfolioService.get_portfolio_details(portfolio_id, user_id)
+    if not details:
+        raise ValueError("Portfolio not found")
+
+    portfolio = details["portfolio"]
+    positions = [p for p in (details.get("positions") or []) if p.get("status") == "active"]
+
+    settings = AITradingSettingsService.get(user_id) or {}
+    global_mode = (settings.get("mode") or "off").lower()
+    portfolio_mode = (portfolio.get("ai_mode") or "off").lower()
+
+    # Most-restrictive wins: if EITHER scope is off, no signals.
+    if global_mode == "off" or portfolio_mode == "off":
+        return {
+            "portfolio_id": portfolio_id,
+            "new_signals": [],
+            "skipped": [{
+                "symbol": "*",
+                "reason": f"AI mode is off (global={global_mode}, portfolio={portfolio_mode})",
+            }],
+            "scanned_symbols": 0,
+        }
+
+    # Kill-switch cooldown
+    if _kill_switch_active(settings):
+        return {
+            "portfolio_id": portfolio_id,
+            "new_signals": [],
+            "skipped": [{"symbol": "*", "reason": "kill-switch cooldown active (24h)"}],
+            "scanned_symbols": 0,
+        }
+
+    portfolio_value = _portfolio_total_value(positions)
+    signals_today_baseline = _signals_today_count(user_id)
+    turnover_today_baseline = _turnover_today(user_id)
+
+    new_signals_payload: list[dict] = []
+    skipped: list[dict] = []
+    scanned = 0
+
+    for position in positions:
+        symbol = position["symbol"]
+        scanned += 1
+        try:
+            analysis = TechnicalIndicatorService.analyze_stock(
+                symbol, period="6mo", market=_safe_market_for_symbol(symbol)
+            )
+        except Exception as e:
+            skipped.append({"symbol": symbol, "reason": f"analysis error: {e}"})
+            continue
+
+        if "error" in analysis:
+            skipped.append({"symbol": symbol, "reason": analysis["error"]})
+            continue
+
+        candidate = _build_signal(
+            portfolio_id=portfolio_id,
+            portfolio=portfolio,
+            position=position,
+            analysis=analysis,
+            settings=settings,
+            portfolio_value=portfolio_value,
+        )
+        if candidate is None:
+            continue
+
+        estimated_value = candidate["quantity"] * candidate["price_at_signal"]
+        ok, reason = _within_guardrails(
+            estimated_value=estimated_value,
+            portfolio_value=portfolio_value,
+            signals_today=signals_today_baseline + len(new_signals_payload),
+            turnover_today=turnover_today_baseline
+                + sum(s["quantity"] * s["price_at_signal"] for s in new_signals_payload),
+            settings=settings,
+        )
+        if not ok:
+            skipped.append({"symbol": symbol, "reason": reason})
+            continue
+
+        new_signals_payload.append(candidate)
+
+    created: list[dict] = []
+    if new_signals_payload:
+        created = AISignalService.create_many(user_id, new_signals_payload)
+
+    autonomous_results: list[dict] = []
+    if global_mode == "autonomous" and portfolio_mode == "autonomous" and created:
+        autonomous_results = _maybe_autonomous_execute(user_id, portfolio_id, created)
+        # Re-fetch executed signals so the response reflects the new status
+        if autonomous_results:
+            refreshed = []
+            for s in created:
+                fresh = AISignalService.get(user_id, s["id"])
+                refreshed.append(fresh or s)
+            created = refreshed
+
+    return {
+        "portfolio_id": portfolio_id,
+        "new_signals": created,
+        "skipped": skipped,
+        "scanned_symbols": scanned,
+        "autonomous_executions": autonomous_results,
+    }

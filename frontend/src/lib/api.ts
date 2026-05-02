@@ -80,6 +80,10 @@ export const portfolioApi = {
     api.post('/portfolio/capm/optimize', { symbols, investment_amount, risk_tolerance, period }),
   scanCAPM: (top_n: number = 30) =>
     api.get(`/portfolio/capm/scan?top_n=${top_n}`),
+  getRebalancePlan: (portfolioId: number) =>
+    api.get(`/portfolio/${portfolioId}/rebalance-plan`),
+  executeRebalance: (portfolioId: number) =>
+    api.post(`/portfolio/${portfolioId}/execute-rebalance`),
 }
 
 export const indicatorsApi = {
@@ -89,6 +93,67 @@ export const indicatorsApi = {
     api.get(`/indicators/chart-data/${symbol}?indicator=${indicator}&period=${period}&market=${market}`),
   rsiScreener: (market: string = 'asx', signal: string = 'buy') =>
     api.get(`/indicators/rsi-screener?market=${market}&signal=${signal}`),
+}
+
+export interface BrokerCredentialsPayload {
+  consumer_key: string
+  access_token: string
+  access_token_secret: string
+  private_key_pem: string
+  environment: 'paper' | 'live'
+}
+
+export interface BrokerOrderPayload {
+  symbol: string
+  side: 'BUY' | 'SELL'
+  quantity: number
+  order_type?: 'MKT' | 'LMT'
+  limit_price?: number | null
+  portfolio_id?: number | null
+  signal_id?: number | null
+}
+
+export const brokerApi = {
+  getStatus: () => api.get('/broker/credentials'),
+  saveCredentials: (payload: BrokerCredentialsPayload) =>
+    api.post('/broker/credentials', payload),
+  deleteCredentials: () => api.delete('/broker/credentials'),
+  account: () => api.get('/broker/account'),
+  test: () => api.post('/broker/test'),
+  placeOrders: (orders: BrokerOrderPayload[]) =>
+    api.post('/broker/orders', { orders }),
+  recentOrders: (limit: number = 25) =>
+    api.get(`/broker/orders/recent?limit=${limit}`),
+}
+
+export interface AISettingsUpdate {
+  mode?: 'off' | 'suggestions' | 'autonomous'
+  rsi_buy_threshold?: number
+  rsi_sell_threshold?: number
+  max_trade_pct?: number
+  max_daily_trades?: number
+  max_daily_turnover_pct?: number
+  sector_cap_pct?: number
+  paper_only?: boolean
+  breaker_on_loss_pct?: number
+  breaker_on_volatility_spike?: boolean
+  breaker_on_news_event?: boolean
+}
+
+export const aiApi = {
+  getSettings: () => api.get('/ai/settings'),
+  updateSettings: (payload: AISettingsUpdate) => api.put('/ai/settings', payload),
+  killSwitch: () => api.post('/ai/kill-switch'),
+  listSignals: (status: string = 'pending') =>
+    api.get(`/ai/signals?status=${status}`),
+  approveSignal: (id: number) => api.post(`/ai/signals/${id}/approve`),
+  rejectSignal: (id: number) => api.post(`/ai/signals/${id}/reject`),
+  snoozeSignal: (id: number, snooze_minutes: number = 60) =>
+    api.post(`/ai/signals/${id}/snooze`, { snooze_minutes }),
+  scan: (portfolioId: number) => api.post(`/ai/scan/${portfolioId}`),
+  audit: () => api.get('/ai/audit'),
+  setPortfolioMode: (portfolioId: number, mode: 'off' | 'suggestions' | 'autonomous') =>
+    api.put(`/portfolio/${portfolioId}/ai-mode`, { ai_mode: mode }),
 }
 
 export default api

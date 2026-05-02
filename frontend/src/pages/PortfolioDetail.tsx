@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
-import { portfolioApi, stocksApi } from '../lib/api'
+import { portfolioApi, stocksApi, brokerApi, aiApi } from '../lib/api'
 import { Portfolio, Position, Transaction } from '../types'
 import { toast } from 'sonner'
-import { ArrowLeft, TrendingUp, TrendingDown, DollarSign, Pencil, Trash2, Plus, X, Search, RefreshCw } from 'lucide-react'
+import { ArrowLeft, TrendingUp, TrendingDown, DollarSign, Pencil, Trash2, Plus, X, Search, RefreshCw, Sparkles, Send, Zap, Activity, Link2 } from 'lucide-react'
 import HelpTooltip from '../components/HelpTooltip'
 import { format } from 'date-fns'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, LineChart, Line, XAxis, YAxis, CartesianGrid } from 'recharts'
@@ -46,6 +46,42 @@ export default function PortfolioDetail() {
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [deletingPosition, setDeletingPosition] = useState<Position | null>(null)
 
+  const [aiMode, setAiMode] = useState<'off' | 'suggestions' | 'autonomous'>('off')
+  const [savingAiMode, setSavingAiMode] = useState(false)
+
+  const [brokerConnected, setBrokerConnected] = useState(false)
+  const [brokerEnv, setBrokerEnv] = useState<'paper' | 'live' | null>(null)
+  const [brokerSimMode, setBrokerSimMode] = useState(true)
+  const [accountSummary, setAccountSummary] = useState<{
+    account_id?: string
+    currency?: string
+    cash?: number
+    nav?: number
+    buying_power?: number
+    server_time?: string
+  } | null>(null)
+  const [syncingBroker, setSyncingBroker] = useState(false)
+
+  type RebalanceLeg = {
+    symbol: string
+    side: 'BUY' | 'SELL'
+    quantity: number
+    price: number
+    estimated_value: number
+    current_weight: number
+    target_weight: number
+    drift_pct: number
+  }
+  const [showRebalanceDrawer, setShowRebalanceDrawer] = useState(false)
+  const [rebalanceLoading, setRebalanceLoading] = useState(false)
+  const [rebalancePlan, setRebalancePlan] = useState<{
+    legs: RebalanceLeg[]
+    portfolio_value: number
+    total_drift_value: number
+    notes: string
+  } | null>(null)
+  const [executingRebalance, setExecutingRebalance] = useState(false)
+
   const [showAddModal, setShowAddModal] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<StockSearchResult[]>([])
@@ -57,14 +93,118 @@ export default function PortfolioDetail() {
   useEffect(() => {
     if (id) {
       loadPortfolio()
+      loadBrokerStatus()
     }
   }, [id])
+
+  const loadBrokerStatus = async () => {
+    try {
+      const res = await brokerApi.getStatus()
+      const s = res.data
+      if (s?.connected) {
+        setBrokerConnected(true)
+        setBrokerEnv(s.environment || 'paper')
+        setBrokerSimMode(s.sim_mode !== false)
+      } else {
+        setBrokerConnected(false)
+        setBrokerSimMode(s?.sim_mode !== false)
+      }
+    } catch {
+      setBrokerConnected(false)
+    }
+  }
+
+  const handleSyncBroker = async () => {
+    if (!brokerConnected) {
+      toast.error('Connect IBKR in Brokerage Settings first')
+      navigate('/brokerage')
+      return
+    }
+    setSyncingBroker(true)
+    try {
+      const res = await brokerApi.account()
+      setAccountSummary(res.data)
+      toast.success(`Synced ${res.data.account_id || 'account'} with IBKR${brokerSimMode ? ' (sim)' : ''}`)
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } } }
+      toast.error(err.response?.data?.detail || 'Sync failed')
+    } finally {
+      setSyncingBroker(false)
+    }
+  }
+
+  const handleAiModeChange = async (mode: 'off' | 'suggestions' | 'autonomous') => {
+    if (!id || mode === aiMode) return
+    setSavingAiMode(true)
+    const previous = aiMode
+    setAiMode(mode)
+    try {
+      await aiApi.setPortfolioMode(Number(id), mode)
+      toast.success(`AI mode set to ${mode}`)
+    } catch (e: unknown) {
+      setAiMode(previous)
+      const err = e as { response?: { data?: { detail?: string } } }
+      toast.error(err.response?.data?.detail || 'Failed to update AI mode')
+    } finally {
+      setSavingAiMode(false)
+    }
+  }
+
+  const openRebalanceDrawer = async () => {
+    if (!id) return
+    setShowRebalanceDrawer(true)
+    setRebalanceLoading(true)
+    setRebalancePlan(null)
+    try {
+      const res = await portfolioApi.getRebalancePlan(Number(id))
+      setRebalancePlan({
+        legs: res.data.legs || [],
+        portfolio_value: res.data.portfolio_value || 0,
+        total_drift_value: res.data.total_drift_value || 0,
+        notes: res.data.notes || '',
+      })
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } } }
+      toast.error(err.response?.data?.detail || 'Failed to compute rebalance plan')
+      setShowRebalanceDrawer(false)
+    } finally {
+      setRebalanceLoading(false)
+    }
+  }
+
+  const handleExecuteRebalance = async () => {
+    if (!id) return
+    if (!brokerConnected) {
+      toast.error('Connect IBKR in Brokerage Settings first')
+      return
+    }
+    setExecutingRebalance(true)
+    try {
+      const res = await portfolioApi.executeRebalance(Number(id))
+      const placed = res.data.placed?.length || 0
+      const failed = res.data.failed?.length || 0
+      if (placed > 0) {
+        toast.success(`${placed} order(s) placed via IBKR${brokerSimMode ? ' (sim)' : ''}`)
+      }
+      if (failed > 0) {
+        toast.error(`${failed} order(s) failed to place`)
+      }
+      setShowRebalanceDrawer(false)
+      loadPortfolio()
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } } }
+      toast.error(err.response?.data?.detail || 'Rebalance failed')
+    } finally {
+      setExecutingRebalance(false)
+    }
+  }
 
   const loadPortfolio = async () => {
     try {
       const response = await portfolioApi.detail(Number(id))
       setData(response.data)
-      
+      setAiMode(response.data.portfolio?.ai_mode || 'off')
+
       const symbols = response.data.positions.map((p: Position) => p.symbol)
       if (symbols.length > 0) {
         loadCurrentPrices(symbols)
@@ -393,7 +533,31 @@ export default function PortfolioDetail() {
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <button
+            onClick={handleSyncBroker}
+            disabled={syncingBroker}
+            title={brokerConnected ? `Sync with IBKR (${brokerEnv})` : 'Connect IBKR first'}
+            className={`flex items-center gap-1.5 px-3 py-2 sm:px-4 sm:py-2.5 rounded-xl border font-medium transition-all duration-200 text-sm disabled:opacity-50 ${
+              brokerConnected
+                ? isDark
+                  ? 'bg-sky-500/10 hover:bg-sky-500/20 text-sky-300 border-sky-500/30 hover:border-sky-500/50'
+                  : 'bg-sky-50 hover:bg-sky-100 text-sky-700 border-sky-200 hover:border-sky-300'
+                : isDark
+                ? 'bg-slate-800/50 text-slate-500 border-slate-700/50'
+                : 'bg-slate-100 text-slate-500 border-slate-200'
+            }`}
+          >
+            {syncingBroker ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Link2 className="w-4 h-4" />}
+            <span className="hidden sm:inline">Sync IBKR</span>
+          </button>
+          <button
+            onClick={openRebalanceDrawer}
+            className="flex items-center gap-1.5 px-3 py-2 sm:px-4 sm:py-2.5 bg-gradient-to-r from-emerald-500/15 to-sky-500/15 hover:from-emerald-500/25 hover:to-sky-500/25 text-emerald-400 hover:text-emerald-300 rounded-xl border border-emerald-500/30 hover:border-emerald-500/50 font-medium transition-all duration-200 text-sm"
+          >
+            <Send className="w-4 h-4" />
+            <span className="hidden sm:inline">Execute via Broker</span>
+          </button>
           <button
             onClick={() => setShowDeletePortfolioModal(true)}
             className="flex items-center gap-1.5 px-3 py-2 sm:px-4 sm:py-2.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 rounded-xl border border-red-500/20 hover:border-red-500/40 font-medium transition-all duration-200 text-sm"
@@ -410,6 +574,92 @@ export default function PortfolioDetail() {
           </button>
         </div>
       </div>
+
+      {/* AI Trading Mode + Broker Status row */}
+      <div className="card flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className={`p-2.5 rounded-xl ${isDark ? 'bg-purple-500/15 text-purple-300' : 'bg-purple-100 text-purple-600'}`}>
+            <Sparkles className="w-5 h-5" />
+          </div>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <h3 className={`text-sm font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>AI Trading Mode</h3>
+              {brokerSimMode && (
+                <span className={`text-[10px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded-md ${isDark ? 'bg-amber-500/20 text-amber-300' : 'bg-amber-100 text-amber-700'}`}>
+                  Sim
+                </span>
+              )}
+            </div>
+            <p className={`text-xs mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+              {aiMode === 'off' && 'AI engine ignores this portfolio.'}
+              {aiMode === 'suggestions' && 'AI sends signals to your inbox; you approve every trade.'}
+              {aiMode === 'autonomous' && 'AI places orders within your guardrails (paper-only by default).'}
+            </p>
+          </div>
+        </div>
+        <div className={`inline-flex p-1 rounded-xl border ${isDark ? 'bg-slate-900/50 border-slate-700/50' : 'bg-slate-100 border-slate-200'}`}>
+          {(['off', 'suggestions', 'autonomous'] as const).map((m) => {
+            const active = aiMode === m
+            return (
+              <button
+                key={m}
+                onClick={() => handleAiModeChange(m)}
+                disabled={savingAiMode}
+                className={`px-3 sm:px-4 py-1.5 text-xs sm:text-sm font-medium rounded-lg transition-all capitalize ${
+                  active
+                    ? m === 'autonomous'
+                      ? 'bg-gradient-to-r from-purple-500 to-indigo-500 text-white shadow-lg shadow-purple-500/30'
+                      : m === 'suggestions'
+                      ? 'bg-gradient-to-r from-sky-500 to-indigo-500 text-white shadow-lg shadow-sky-500/30'
+                      : isDark ? 'bg-slate-700 text-slate-100' : 'bg-white text-slate-900 shadow-sm'
+                    : isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-600 hover:text-slate-900'
+                } disabled:opacity-50`}
+              >
+                {m}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {accountSummary && brokerConnected && (
+        <div className={`card border ${isDark ? 'border-sky-500/30' : 'border-sky-200'}`}>
+          <div className="flex items-start justify-between gap-3 mb-3">
+            <div className="flex items-center gap-2">
+              <Activity className={`w-4 h-4 ${isDark ? 'text-sky-300' : 'text-sky-600'}`} />
+              <h3 className={`text-sm font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+                IBKR Account · {accountSummary.account_id}
+              </h3>
+              <span className={`text-[10px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded-md ${isDark ? 'bg-slate-700/50 text-slate-300' : 'bg-slate-100 text-slate-600'}`}>
+                {brokerEnv}
+              </span>
+            </div>
+            <span className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
+              {accountSummary.server_time && format(new Date(accountSummary.server_time), 'HH:mm:ss')}
+            </span>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
+            <div>
+              <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Cash</p>
+              <p className={`font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+                {accountSummary.currency || ''} {(accountSummary.cash || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+              </p>
+            </div>
+            <div>
+              <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Buying Power</p>
+              <p className={`font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+                {accountSummary.currency || ''} {(accountSummary.buying_power || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+              </p>
+            </div>
+            <div>
+              <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Net Liq Value</p>
+              <p className={`font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+                {accountSummary.currency || ''} {(accountSummary.nav || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Live price loading banner */}
       {loadingPrices && (
@@ -905,6 +1155,141 @@ export default function PortfolioDetail() {
                 className="flex-1 px-4 py-2.5 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-xl border border-red-500/30 font-medium transition-all duration-200 disabled:opacity-50"
               >
                 {deletingPortfolio ? 'Deleting...' : 'Delete Portfolio'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Pending Broker Sync drawer */}
+      {showRebalanceDrawer && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in" onClick={() => !executingRebalance && setShowRebalanceDrawer(false)}>
+          <div
+            className={`max-w-2xl w-full rounded-2xl border ${isDark ? 'border-slate-700/50' : 'border-slate-200'} max-h-[90vh] flex flex-col`}
+            style={modalStyle}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className={`flex items-center justify-between px-6 py-4 border-b ${isDark ? 'border-slate-700/50' : 'border-slate-200'}`}>
+              <div className="flex items-center gap-3">
+                <div className={`p-2 rounded-lg ${isDark ? 'bg-emerald-500/15 text-emerald-300' : 'bg-emerald-100 text-emerald-600'}`}>
+                  <Send className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className={`text-lg font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Pending Broker Sync</h2>
+                  <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                    Drift-based orders {brokerSimMode ? '(simulated execution)' : `(live · ${brokerEnv})`}
+                  </p>
+                </div>
+              </div>
+              <button onClick={() => !executingRebalance && setShowRebalanceDrawer(false)} className={`${isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-800'}`}>
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-6 py-4">
+              {rebalanceLoading && (
+                <div className="flex items-center justify-center py-12">
+                  <RefreshCw className={`w-6 h-6 animate-spin ${isDark ? 'text-sky-400' : 'text-sky-600'}`} />
+                </div>
+              )}
+
+              {!rebalanceLoading && rebalancePlan && rebalancePlan.legs.length === 0 && (
+                <div className="text-center py-12">
+                  <div className={`inline-flex p-3 rounded-full mb-3 ${isDark ? 'bg-emerald-500/15 text-emerald-300' : 'bg-emerald-100 text-emerald-600'}`}>
+                    <Zap className="w-6 h-6" />
+                  </div>
+                  <p className={`font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Portfolio is in balance</p>
+                  <p className={`text-sm mt-1 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>{rebalancePlan.notes}</p>
+                </div>
+              )}
+
+              {!rebalanceLoading && rebalancePlan && rebalancePlan.legs.length > 0 && (
+                <>
+                  <div className={`grid grid-cols-2 gap-3 mb-4 text-sm`}>
+                    <div className={`p-3 rounded-xl ${isDark ? 'bg-slate-800/50' : 'bg-slate-50'}`}>
+                      <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Portfolio value</p>
+                      <p className={`font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+                        ${rebalancePlan.portfolio_value.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                      </p>
+                    </div>
+                    <div className={`p-3 rounded-xl ${isDark ? 'bg-slate-800/50' : 'bg-slate-50'}`}>
+                      <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Estimated turnover</p>
+                      <p className={`font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+                        ${rebalancePlan.total_drift_value.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    {rebalancePlan.legs.map((leg, idx) => (
+                      <div
+                        key={`${leg.symbol}-${idx}`}
+                        className={`p-3 rounded-xl border flex items-center justify-between ${
+                          isDark ? 'border-slate-700/50 bg-slate-800/30' : 'border-slate-200 bg-white'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <span
+                            className={`px-2 py-1 rounded-md text-xs font-bold ${
+                              leg.side === 'BUY'
+                                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                : 'bg-red-500/20 text-red-400 border border-red-500/30'
+                            }`}
+                          >
+                            {leg.side}
+                          </span>
+                          <div className="min-w-0">
+                            <p className={`font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+                              {leg.symbol.replace('.AX', '')}
+                              <span className={`ml-2 text-xs font-normal ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                                {leg.quantity} @ ${leg.price.toFixed(2)}
+                              </span>
+                            </p>
+                            <p className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
+                              Drift {leg.drift_pct.toFixed(1)}pp · target {(leg.target_weight * 100).toFixed(1)}% · current {(leg.current_weight * 100).toFixed(1)}%
+                            </p>
+                          </div>
+                        </div>
+                        <p className={`text-sm font-semibold tabular-nums shrink-0 ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
+                          ${leg.estimated_value.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+
+                  {!brokerConnected && (
+                    <div className={`mt-4 p-3 rounded-xl text-xs ${isDark ? 'bg-amber-500/10 text-amber-300 border border-amber-500/30' : 'bg-amber-50 text-amber-700 border border-amber-200'}`}>
+                      Connect IBKR in Brokerage Settings to enable execution.
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            <div className={`flex gap-3 px-6 py-4 border-t ${isDark ? 'border-slate-700/50' : 'border-slate-200'}`}>
+              <button
+                onClick={() => setShowRebalanceDrawer(false)}
+                disabled={executingRebalance}
+                className="btn-secondary flex-1"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleExecuteRebalance}
+                disabled={executingRebalance || !brokerConnected || !rebalancePlan || rebalancePlan.legs.length === 0}
+                className="btn-primary flex-1 flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                {executingRebalance ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    Sending…
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-4 h-4" />
+                    Execute {rebalancePlan?.legs.length || 0} order(s)
+                  </>
+                )}
               </button>
             </div>
           </div>

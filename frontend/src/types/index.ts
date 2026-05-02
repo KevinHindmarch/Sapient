@@ -59,6 +59,8 @@ export interface Portfolio {
   created_at: string
   status: string
   position_count?: number
+  ai_mode?: 'off' | 'suggestions' | 'autonomous'
+  market?: string
 }
 
 export interface Position {

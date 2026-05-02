@@ -596,3 +596,254 @@ async def scan_capm_opportunities(top_n: int = 30, period: str = "2y"):
         "stocks": stocks_with_data,
         "recommendations": undervalued[:10]
     }
+
+
+# ============================================================================
+# IBKR / AI trading hooks for portfolio detail
+# ============================================================================
+
+from pydantic import BaseModel as _BaseModel, Field as _Field
+from typing import Literal as _Literal, Optional as _Optional
+
+
+class _AIModeUpdate(_BaseModel):
+    ai_mode: _Literal["off", "suggestions", "autonomous"]
+
+
+class _RebalanceLeg(_BaseModel):
+    symbol: str
+    side: _Literal["BUY", "SELL"]
+    quantity: float
+    price: float
+    estimated_value: float
+    current_weight: float
+    target_weight: float
+    drift_pct: float
+
+
+class _RebalancePlan(_BaseModel):
+    portfolio_id: int
+    portfolio_value: float
+    total_drift_value: float
+    legs: list[_RebalanceLeg]
+    notes: str
+    sim: bool = True
+
+
+@router.put("/{portfolio_id}/ai-mode")
+async def set_portfolio_ai_mode(
+    portfolio_id: int,
+    body: _AIModeUpdate,
+    current_user: dict = Depends(get_current_user),
+):
+    """Set the per-portfolio AI trading mode (off/suggestions/autonomous)."""
+    from core.database import get_db_cursor, AIAuditService
+
+    with get_db_cursor() as (cur, conn):
+        cur.execute(
+            "SELECT id, ai_mode FROM portfolios WHERE id = %s AND user_id = %s",
+            (portfolio_id, current_user["id"]),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(404, "Portfolio not found")
+        previous = row["ai_mode"]
+        cur.execute(
+            "UPDATE portfolios SET ai_mode = %s WHERE id = %s",
+            (body.ai_mode, portfolio_id),
+        )
+        conn.commit()
+
+    AIAuditService.log(
+        user_id=current_user["id"],
+        event_type="portfolio_ai_mode_changed",
+        portfolio_id=portfolio_id,
+        payload={"from": previous, "to": body.ai_mode},
+    )
+    return {"portfolio_id": portfolio_id, "ai_mode": body.ai_mode, "previous": previous}
+
+
+def _compute_rebalance_legs(positions: list, current_prices: dict) -> tuple[list[dict], float]:
+    """Compute drift-based BUY/SELL legs to bring positions back to target weights."""
+    actives = [p for p in positions if p.get("status") == "active"]
+
+    # Current portfolio market value
+    portfolio_value = 0.0
+    pos_values: dict[int, float] = {}
+    for p in actives:
+        price = float(current_prices.get(p["symbol"]) or p.get("avg_cost") or 0)
+        mv = float(p["quantity"]) * price
+        pos_values[p["id"]] = mv
+        portfolio_value += mv
+
+    if portfolio_value <= 0:
+        return [], 0.0
+
+    legs: list[dict] = []
+    total_drift = 0.0
+    for p in actives:
+        target_weight = float(p.get("weight_at_creation") or 0)
+        if target_weight <= 0:
+            continue
+        price = float(current_prices.get(p["symbol"]) or p.get("avg_cost") or 0)
+        if price <= 0:
+            continue
+        current_value = pos_values.get(p["id"], 0.0)
+        current_weight = current_value / portfolio_value if portfolio_value > 0 else 0
+        target_value = target_weight * portfolio_value
+        drift_value = target_value - current_value
+        drift_pct = abs(current_weight - target_weight) * 100
+        # Only propose a leg if drift is meaningful (>= 1.5 percentage points)
+        if drift_pct < 1.5:
+            continue
+        side = "BUY" if drift_value > 0 else "SELL"
+        qty = abs(drift_value) / price
+        # Round to 2 decimals for fractional shares; integer floor for full shares
+        qty = round(qty, 2)
+        if qty <= 0:
+            continue
+        legs.append(
+            {
+                "symbol": p["symbol"],
+                "side": side,
+                "quantity": qty,
+                "price": round(price, 4),
+                "estimated_value": round(qty * price, 2),
+                "current_weight": round(current_weight, 4),
+                "target_weight": round(target_weight, 4),
+                "drift_pct": round(drift_pct, 2),
+            }
+        )
+        total_drift += abs(drift_value)
+
+    legs.sort(key=lambda l: l["drift_pct"], reverse=True)
+    return legs, portfolio_value
+
+
+@router.get("/{portfolio_id}/rebalance-plan", response_model=_RebalancePlan)
+async def get_rebalance_plan(
+    portfolio_id: int,
+    current_user: dict = Depends(get_current_user),
+):
+    """Compute a drift-based rebalance plan that would be sent to the broker."""
+    details = PortfolioService.get_portfolio_details(portfolio_id, current_user["id"])
+    if details is None:
+        raise HTTPException(404, "Portfolio not found")
+
+    positions = details["positions"]
+    actives = [p for p in positions if p.get("status") == "active"]
+
+    # Fetch current prices
+    current_prices: dict[str, float] = {}
+    for p in actives:
+        try:
+            info = StockDataService.get_stock_info(p["symbol"])
+            current_prices[p["symbol"]] = float(info.get("current_price") or 0)
+        except Exception:
+            current_prices[p["symbol"]] = 0.0
+
+    legs, portfolio_value = _compute_rebalance_legs(positions, current_prices)
+    total_drift = sum(l["estimated_value"] for l in legs)
+
+    if not legs:
+        notes = "Portfolio is within tolerance — no rebalance recommended (drift < 1.5pp on every holding)."
+    else:
+        notes = f"{len(legs)} drift-based order(s) proposed. Estimated total turnover: {total_drift:,.2f}."
+
+    return _RebalancePlan(
+        portfolio_id=portfolio_id,
+        portfolio_value=round(portfolio_value, 2),
+        total_drift_value=round(total_drift, 2),
+        legs=[_RebalanceLeg(**l) for l in legs],
+        notes=notes,
+        sim=True,
+    )
+
+
+@router.post("/{portfolio_id}/execute-rebalance")
+async def execute_rebalance(
+    portfolio_id: int,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Compute the rebalance plan and place each leg via the broker.
+
+    Reuses the broker /orders flow under the hood by invoking the same
+    IBKRClient + persistence helpers.
+    """
+    from core.database import (
+        BrokerCredentialService,
+        BrokerOrderService,
+        AIAuditService,
+        PortfolioService as _PS,
+    )
+    from core.ibkr_client import IBKRClient
+
+    from core.ibkr_client import ExecutionPolicyError, assert_execution_allowed
+
+    creds = BrokerCredentialService.get_decrypted(current_user["id"])
+    if creds is None:
+        raise HTTPException(400, "Broker not connected. Connect IBKR in Brokerage Settings first.")
+
+    plan = await get_rebalance_plan(portfolio_id, current_user)
+    if not plan.legs:
+        return {"placed": [], "message": plan.notes}
+
+    client = IBKRClient(creds)
+    account = client.get_account_summary()
+
+    # Server-side safety gate (paper_only) — refuse to route to live broker
+    try:
+        assert_execution_allowed(current_user["id"], account.environment)
+    except ExecutionPolicyError as e:
+        raise HTTPException(403, str(e))
+
+    placed = []
+    failed = []
+    for leg in plan.legs:
+        try:
+            order = client.place_order(
+                account_id=account.account_id,
+                symbol=leg.symbol,
+                side=leg.side,
+                quantity=leg.quantity,
+                order_type="MKT",
+            )
+            saved = BrokerOrderService.insert(
+                user_id=current_user["id"],
+                order=order,
+                account_id=account.account_id,
+                portfolio_id=portfolio_id,
+            )
+            # Mirror fill into portfolio positions
+            if order.status == "Filled" and order.filled_qty > 0 and order.avg_fill_price:
+                _PS.execute_trade(
+                    portfolio_id=portfolio_id,
+                    user_id=current_user["id"],
+                    symbol=leg.symbol,
+                    txn_type="buy" if leg.side == "BUY" else "sell",
+                    quantity=float(order.filled_qty),
+                    price=float(order.avg_fill_price),
+                    notes=f"Rebalance via IBKR (sim) order {order.order_id}",
+                )
+            placed.append(saved)
+            AIAuditService.log(
+                user_id=current_user["id"],
+                event_type="rebalance_order",
+                portfolio_id=portfolio_id,
+                order_id=saved["id"],
+                payload={
+                    "symbol": leg.symbol,
+                    "side": leg.side,
+                    "quantity": leg.quantity,
+                    "drift_pct": leg.drift_pct,
+                },
+            )
+        except Exception as e:
+            failed.append({"symbol": leg.symbol, "error": str(e)})
+
+    return {
+        "placed": placed,
+        "failed": failed,
+        "message": f"Rebalance complete: {len(placed)} order(s) placed, {len(failed)} failed.",
+    }

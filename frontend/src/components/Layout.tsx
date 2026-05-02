@@ -14,7 +14,9 @@ import {
   Settings,
   Moon,
   Sun,
-  HelpCircle
+  HelpCircle,
+  Sparkles,
+  ShieldCheck
 } from 'lucide-react'
 import { useState } from 'react'
 import HelpModal from './HelpModal'
@@ -26,6 +28,12 @@ const navItems = [
   { path: '/capm-builder', label: 'CAPM Builder', icon: Activity },
   { path: '/portfolios', label: 'My Portfolios', icon: Briefcase },
   { path: '/analysis', label: 'Stock Analysis', icon: LineChart },
+  { path: '/ai-inbox', label: 'AI Trading', icon: Sparkles },
+]
+
+const tradingNavItems = [
+  { path: '/brokerage', label: 'Brokerage', icon: ShieldCheck },
+  { path: '/ai-trading', label: 'AI Settings', icon: Sparkles },
 ]
 
 export default function Layout() {
@@ -122,6 +130,25 @@ export default function Layout() {
           </div>
           
           <div className="space-y-1">
+            {tradingNavItems.map((item) => (
+              <NavLink
+                key={item.path}
+                to={item.path}
+                className={({ isActive }) =>
+                  `flex items-center gap-3 px-4 py-2.5 w-full rounded-xl transition-all duration-300 ${
+                    isActive
+                      ? 'bg-gradient-to-r from-sky-500/20 to-indigo-500/20 text-sky-500'
+                      : isDark
+                        ? 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200'
+                        : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                  }`
+                }
+              >
+                <item.icon className="w-5 h-5" />
+                {item.label}
+              </NavLink>
+            ))}
+
             <NavLink
               to="/settings"
               className={({ isActive }) =>
@@ -235,6 +262,26 @@ export default function Layout() {
               <HelpCircle className="w-5 h-5" />
               Help & Glossary
             </button>
+
+            {tradingNavItems.map((item) => (
+              <NavLink
+                key={item.path}
+                to={item.path}
+                onClick={() => setMobileMenuOpen(false)}
+                className={({ isActive }) =>
+                  `flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-300 ${
+                    isActive
+                      ? 'bg-gradient-to-r from-sky-500/20 to-indigo-500/20 text-sky-500'
+                      : isDark
+                        ? 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200'
+                        : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                  }`
+                }
+              >
+                <item.icon className="w-5 h-5" />
+                {item.label}
+              </NavLink>
+            ))}
 
             <NavLink
               to="/settings"

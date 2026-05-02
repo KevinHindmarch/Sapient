@@ -11,6 +11,9 @@ import Portfolios from './pages/Portfolios'
 import PortfolioDetail from './pages/PortfolioDetail'
 import StockAnalysis from './pages/StockAnalysis'
 import Settings from './pages/Settings'
+import BrokerageSettings from './pages/BrokerageSettings'
+import AITradingSettings from './pages/AITradingSettings'
+import AITradingInbox from './pages/AITradingInbox'
 import Layout from './components/Layout'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -52,6 +55,9 @@ function App() {
         <Route path="portfolios" element={<Portfolios />} />
         <Route path="portfolios/:id" element={<PortfolioDetail />} />
         <Route path="analysis" element={<StockAnalysis />} />
+        <Route path="ai-inbox" element={<AITradingInbox />} />
+        <Route path="ai-trading" element={<AITradingSettings />} />
+        <Route path="brokerage" element={<BrokerageSettings />} />
         <Route path="settings" element={<Settings />} />
       </Route>
     </Routes>

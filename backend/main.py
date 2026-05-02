@@ -11,7 +11,7 @@ import os
 
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from backend.routers import auth, stocks, portfolio, indicators
+from backend.routers import auth, stocks, portfolio, indicators, broker, ai_trading
 from core.database import init_database
 
 
@@ -44,6 +44,8 @@ app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(stocks.router, prefix="/api/stocks", tags=["Stocks"])
 app.include_router(portfolio.router, prefix="/api/portfolio", tags=["Portfolio"])
 app.include_router(indicators.router, prefix="/api/indicators", tags=["Technical Indicators"])
+app.include_router(broker.router, prefix="/api/broker", tags=["Brokerage"])
+app.include_router(ai_trading.router, prefix="/api/ai", tags=["AI Trading"])
 
 
 @app.get("/api/health")
