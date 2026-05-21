@@ -825,7 +825,7 @@ export default function PortfolioDetail() {
                       <td className={`py-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>${currentPrice.toFixed(2)}</td>
                       <td className={`py-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>${marketValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
                       <td className={`py-3 font-medium ${pl >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ textShadow: pl >= 0 ? '0 0 10px rgba(52, 211, 153, 0.3)' : '0 0 10px rgba(248, 113, 113, 0.3)' }}>
-                        {pl >= 0 ? '+' : ''}{plPct.toFixed(1)}%
+                        {pl >= 0 ? '+' : ''}{plPct.toFixed(2)}%
                       </td>
                       <td className="py-3 text-right">
                         <div className="flex items-center justify-end gap-1">

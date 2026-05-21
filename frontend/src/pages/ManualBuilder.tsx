@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -88,8 +89,27 @@ export default function ManualBuilder() {
   const { theme } = useTheme()
   const isDark = theme === 'dark'
 
-  const [market, setMarket] = useState<Market>('ASX')
-  const [selectedStocks, setSelectedStocks] = useState<string[]>([])
+  const location = useLocation()
+  const navState = (location.state ?? null) as
+    | { preselectedSymbols?: string[]; market?: Market; source?: string }
+    | null
+
+  const [market, setMarket] = useState<Market>(navState?.market ?? 'ASX')
+  const [selectedStocks, setSelectedStocks] = useState<string[]>(
+    navState?.preselectedSymbols ?? []
+  )
+
+  useEffect(() => {
+    if (navState?.preselectedSymbols && navState.preselectedSymbols.length > 0) {
+      const label =
+        navState.source === 'rsi-scanner' ? 'RSI scanner' : 'previous selection'
+      toast.success(
+        `Loaded ${navState.preselectedSymbols.length} stock${navState.preselectedSymbols.length === 1 ? '' : 's'} from ${label}`
+      )
+      window.history.replaceState({}, '')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<{ symbol: string; name: string }[]>([])
   const [optimizing, setOptimizing] = useState(false)

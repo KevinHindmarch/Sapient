@@ -1,8 +1,9 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { indicatorsApi, stocksApi } from '../lib/api'
 import { TechnicalAnalysis, RsiScreenerResult } from '../types'
 import { toast } from 'sonner'
-import { Search, TrendingUp, TrendingDown, Activity, AlertCircle, BarChart3, Loader2, X, ExternalLink, Users, Globe, Building2 } from 'lucide-react'
+import { Search, TrendingUp, TrendingDown, Activity, AlertCircle, BarChart3, Loader2, X, ExternalLink, Users, Globe, Building2, Sparkles } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, CartesianGrid } from 'recharts'
 import { useTheme } from '../lib/theme'
 import HelpTooltip from '../components/HelpTooltip'
@@ -28,6 +29,7 @@ interface StockDetailInfo {
 export default function StockAnalysis() {
   const { theme } = useTheme()
   const isDark = theme === 'dark'
+  const navigate = useNavigate()
   const [symbol, setSymbol] = useState('')
   const [market, setMarket] = useState<Market>('asx')
   const [loading, setLoading] = useState(false)
@@ -39,6 +41,39 @@ export default function StockAnalysis() {
   const [screenerResults, setScreenerResults] = useState<RsiScreenerResult[]>([])
   const [screenerSignal, setScreenerSignal] = useState<'buy' | 'sell' | 'hold' | 'all'>('buy')
   const [screenerStats, setScreenerStats] = useState<{total_scanned: number, signals_found: number} | null>(null)
+  const [selectedScannerSymbols, setSelectedScannerSymbols] = useState<Set<string>>(new Set())
+
+  const toggleScannerSymbol = (symbol: string) => {
+    setSelectedScannerSymbols((prev) => {
+      const next = new Set(prev)
+      if (next.has(symbol)) next.delete(symbol)
+      else next.add(symbol)
+      return next
+    })
+  }
+
+  const toggleScannerSelectAll = () => {
+    setSelectedScannerSymbols((prev) =>
+      prev.size === screenerResults.length
+        ? new Set()
+        : new Set(screenerResults.map((r) => r.symbol))
+    )
+  }
+
+  const buildPortfolioFromSelected = () => {
+    if (selectedScannerSymbols.size < 2) {
+      toast.error('Select at least 2 stocks to build a portfolio')
+      return
+    }
+    const symbols = Array.from(selectedScannerSymbols)
+    navigate('/manual-builder', {
+      state: {
+        preselectedSymbols: symbols,
+        market: market === 'asx' ? 'ASX' : 'US',
+        source: 'rsi-scanner',
+      },
+    })
+  }
 
   // Stock detail modal
   const [detailStock, setDetailStock] = useState<StockDetailInfo | null>(null)
@@ -93,6 +128,7 @@ export default function StockAnalysis() {
       const res = await indicatorsApi.rsiScreener(market, screenerSignal)
       setScreenerResults(res.data.results)
       setScreenerStats({ total_scanned: res.data.total_scanned, signals_found: res.data.signals_found })
+      setSelectedScannerSymbols(new Set())
       toast.success(`Scan complete! Found ${res.data.signals_found} signals`)
     } catch (error: unknown) {
       const err = error as { response?: { data?: { detail?: string } } }
@@ -341,10 +377,45 @@ export default function StockAnalysis() {
                 </div>
               ) : (
                 <div className={`card ${isDark ? 'bg-slate-900/60 border-slate-700/50' : 'bg-white border-slate-300'} overflow-hidden`}>
+                  {selectedScannerSymbols.size > 0 && (
+                    <div className={`flex items-center justify-between px-4 py-3 border-b ${isDark ? 'border-slate-700/50 bg-slate-800/40' : 'border-slate-200 bg-sky-50'}`}>
+                      <div className={`text-sm ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
+                        <strong>{selectedScannerSymbols.size}</strong> stock{selectedScannerSymbols.size === 1 ? '' : 's'} selected
+                        {selectedScannerSymbols.size < 2 && (
+                          <span className={`ml-2 text-xs ${isDark ? 'text-amber-300' : 'text-amber-600'}`}>(need at least 2)</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setSelectedScannerSymbols(new Set())}
+                          className={`text-xs px-3 py-1.5 rounded transition-colors ${isDark ? 'text-slate-300 hover:bg-slate-700/50' : 'text-slate-600 hover:bg-slate-200'}`}
+                        >
+                          Clear
+                        </button>
+                        <button
+                          onClick={buildPortfolioFromSelected}
+                          disabled={selectedScannerSymbols.size < 2}
+                          className="btn-primary flex items-center gap-2 text-sm py-1.5 px-3 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          <Sparkles className="w-4 h-4" />
+                          Build Portfolio ({selectedScannerSymbols.size})
+                        </button>
+                      </div>
+                    </div>
+                  )}
                   <div className="overflow-x-auto">
                     <table className="w-full">
                       <thead>
                         <tr className={`border-b ${isDark ? 'border-slate-700/50' : 'border-slate-200'}`}>
+                          <th className={`px-3 py-3 w-10 text-center`}>
+                            <input
+                              type="checkbox"
+                              aria-label="Select all"
+                              checked={screenerResults.length > 0 && selectedScannerSymbols.size === screenerResults.length}
+                              onChange={toggleScannerSelectAll}
+                              className="cursor-pointer accent-sky-500"
+                            />
+                          </th>
                           <th className={`text-left px-4 py-3 text-sm font-medium ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Symbol</th>
                           <th className={`text-left px-4 py-3 text-sm font-medium ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Name</th>
                           <th className={`text-right px-4 py-3 text-sm font-medium ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Price</th>
@@ -357,9 +428,22 @@ export default function StockAnalysis() {
                         {screenerResults.map((r) => (
                           <tr
                             key={r.symbol}
-                            className={`border-b last:border-b-0 ${isDark ? 'border-slate-700/30 hover:bg-slate-800/50' : 'border-slate-100 hover:bg-slate-50'} cursor-pointer transition-colors`}
+                            className={`border-b last:border-b-0 ${isDark ? 'border-slate-700/30 hover:bg-slate-800/50' : 'border-slate-100 hover:bg-slate-50'} cursor-pointer transition-colors ${selectedScannerSymbols.has(r.symbol) ? (isDark ? 'bg-sky-900/20' : 'bg-sky-50/60') : ''}`}
                             onClick={() => openStockDetail(r)}
                           >
+                            <td
+                              className="px-3 py-3 text-center"
+                              onClick={(e) => { e.stopPropagation(); toggleScannerSymbol(r.symbol) }}
+                            >
+                              <input
+                                type="checkbox"
+                                aria-label={`Select ${r.symbol}`}
+                                checked={selectedScannerSymbols.has(r.symbol)}
+                                onChange={(e) => { e.stopPropagation(); toggleScannerSymbol(r.symbol) }}
+                                onClick={(e) => e.stopPropagation()}
+                                className="cursor-pointer accent-sky-500"
+                              />
+                            </td>
                             <td className={`px-4 py-3 font-medium ${isDark ? 'text-sky-400' : 'text-sky-600'}`}>
                               {r.symbol.replace('.AX', '')}
                             </td>
