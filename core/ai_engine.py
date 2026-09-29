@@ -251,101 +251,15 @@ def _maybe_autonomous_execute(
     portfolio_id: int,
     persisted_signals: list[dict],
 ) -> list[dict]:
-    """
-    If both the user-level and portfolio-level modes are 'autonomous' AND
-    the user has saved broker credentials AND the paper_only safety gate
-    allows it, place each signal directly through the broker.
-
-    Returns a list of audit dicts describing what happened. Errors are
-    logged to ai_audit_log but never raised — autonomous execution is
-    best-effort and visible in the audit trail.
-    """
-    from core.ibkr_client import (
-        ExecutionPolicyError,
-        IBKRClient,
-        assert_execution_allowed,
-    )
-
-    creds = BrokerCredentialService.get_decrypted(user_id)
-    if creds is None:
-        AIAuditService.log(
-            user_id=user_id,
-            event_type="autonomous_skipped",
-            portfolio_id=portfolio_id,
-            payload={"reason": "no_broker_credentials", "signals": len(persisted_signals)},
-        )
-        return []
-
-    try:
-        client = IBKRClient(creds)
-        account = client.get_account_summary()
-    except Exception as e:
-        AIAuditService.log(
-            user_id=user_id,
-            event_type="autonomous_skipped",
-            portfolio_id=portfolio_id,
-            payload={"reason": f"account_lookup_failed: {e}", "signals": len(persisted_signals)},
-        )
-        return []
-
-    try:
-        assert_execution_allowed(user_id, account.environment)
-    except ExecutionPolicyError as e:
-        AIAuditService.log(
-            user_id=user_id,
-            event_type="autonomous_skipped",
-            portfolio_id=portfolio_id,
-            payload={"reason": f"policy_block: {e}", "signals": len(persisted_signals)},
-        )
-        return []
-
+    """Admit durable proposals only; central policy applies to every signal."""
+    from core.execution_safety import IntentService, signal_request
+    service = IntentService()
     results: list[dict] = []
     for sig in persisted_signals:
         try:
-            order = client.place_order(
-                account_id=account.account_id,
-                symbol=sig["symbol"],
-                side=sig["action"],
-                quantity=float(sig["quantity"]),
-                order_type="MKT",
-            )
-            saved = BrokerOrderService.insert(
-                user_id=user_id,
-                order=order,
-                account_id=account.account_id,
-                portfolio_id=portfolio_id,
-                signal_id=sig["id"],
-            )
-            if order.status == "Filled" and order.filled_qty and order.avg_fill_price:
-                PortfolioService.execute_trade(
-                    portfolio_id=portfolio_id,
-                    user_id=user_id,
-                    symbol=sig["symbol"],
-                    txn_type="buy" if sig["action"] == "BUY" else "sell",
-                    quantity=float(order.filled_qty),
-                    price=float(order.avg_fill_price),
-                    notes=f"Autonomous AI signal #{sig['id']}",
-                )
-            AISignalService.update_status(
-                user_id=user_id,
-                signal_id=sig["id"],
-                status="executed",
-                decided_by="autonomous",
-                executed_order_id=saved["id"],
-            )
-            AIAuditService.log(
-                user_id=user_id,
-                event_type="autonomous_executed",
-                portfolio_id=portfolio_id,
-                signal_id=sig["id"],
-                order_id=saved["id"],
-                payload={
-                    "symbol": sig["symbol"],
-                    "action": sig["action"],
-                    "quantity": float(sig["quantity"]),
-                },
-            )
-            results.append({"signal_id": sig["id"], "order_id": saved["id"], "status": "executed"})
+            intent = service.admit(user_id, signal_request(user_id, sig, origin="ai_autonomous"))
+            results.append({"signal_id": sig["id"], "intent_id": intent["id"],
+                            "status": intent["state"], "execution_enabled": False})
         except Exception as e:
             AIAuditService.log(
                 user_id=user_id,

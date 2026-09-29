@@ -6,15 +6,12 @@ SIMULATION NOTICE
 ================================================================================
 This module ships with `IBKR_SIMULATION_MODE = True`, meaning every HTTP-bound
 method returns realistic synthetic responses instead of contacting IBKR. The
-OAuth-RSA signing helpers (`build_oauth_header`, `_rsa_sign_sha256`,
-`_canonical_params`) are real and follow RFC 5849 + IBKR's published spec, so
-flipping the switch and replacing the `_request()` body with a real HTTP call
-(e.g. `httpx.request(...)`) is a one-file change.
+OAuth helpers remain for historical compatibility. Neither an environment flag
+nor saved paper/live credentials authorizes execution.
 
 Why simulated: the development environment cannot reach IBKR's gateway and
-cannot test against a real account. All downstream behaviour (order persistence,
-position updates, kill-switch, audit logging) is real and uses these
-simulated responses end-to-end.
+cannot test against a real account. Direct placement/cancellation is refused.
+Durable simulation intents are not fills and never change model holdings.
 ================================================================================
 """
 
@@ -51,28 +48,11 @@ class ExecutionPolicyError(RuntimeError):
 
 
 def assert_execution_allowed(user_id: int, environment: str | None) -> None:
-    """
-    Server-side gate every code path that places a real broker order MUST call.
-
-    Today this enforces the per-user `paper_only` setting: if the user has
-    `paper_only=True` (default), only orders against a `paper` IBKR account
-    may be placed. We deliberately keep the check here (in the broker layer)
-    rather than per-router so it cannot be forgotten.
-
-    Future hooks: kill-switch cooldown, breaker triggered, market hours, etc.
-    """
-    # Local import to avoid circular import at module load time
-    from core.database import AITradingSettingsService
-
-    settings = AITradingSettingsService.get(user_id) or {}
-    paper_only = bool(settings.get("paper_only", True))
-    env = (environment or "paper").lower()
-    if paper_only and env != "paper":
-        raise ExecutionPolicyError(
-            "paper_only is enabled in your AI Trading settings — "
-            "orders may only be sent to a paper IBKR account. "
-            "Disable paper_only in /ai-trading to route to a live account."
-        )
+    """Compatibility guard: direct and real execution remain refused."""
+    raise ExecutionPolicyError(
+        "Direct execution is disabled. Submit a durable simulation intent through "
+        "IntentService. Paper/live execution is not authorized."
+    )
 
 
 IBKR_API_BASE_PAPER = "https://api.ibkr.com/v1/api"
@@ -234,12 +214,13 @@ class IBKRClient:
     constant to wire to real HTTP.
     """
 
-    def __init__(self, credentials: IBKRCredentials):
+    def __init__(self, credentials: IBKRCredentials, user_id: int | None = None):
         self.creds = credentials
+        self.user_id = user_id
         self.base_url = (
             IBKR_API_BASE_LIVE if credentials.environment == "live" else IBKR_API_BASE_PAPER
         )
-        self._sim = IBKR_SIMULATION_MODE and os.environ.get("IBKR_LIVE_API") != "1"
+        self._sim = True  # Environment switches cannot authorize real transport.
 
     # ---- Real signing exercised even in sim mode (so we know it works) ----
     def _sign_dryrun(self, path: str, method: str = "GET") -> dict[str, str]:
@@ -258,7 +239,7 @@ class IBKRClient:
             return {
                 "ok": True,
                 "message": "Connection simulated successfully (BROKER SIM MODE)",
-                "environment": self.creds.environment,
+                "environment": "simulation",
                 "server_time": _now_iso(),
                 "sim": True,
             }
@@ -269,12 +250,12 @@ class IBKRClient:
         if self._sim:
             self._sign_dryrun("/portfolio/accounts")
             return IBKRConnectionInfo(
-                account_id="DU1234567" if self.creds.environment == "paper" else "U1234567",
-                account_alias="Sapient Trading Account",
+                account_id=f"SIM:{self.user_id}" if self.user_id is not None else "SIM:UNBOUND",
+                account_alias="Sapient simulation (not an IBKR account)",
                 currency="AUD",
-                environment=self.creds.environment,
+                environment="simulation",
                 server_time=_now_iso(),
-                is_paper=self.creds.environment == "paper",
+                is_paper=False,
                 cash=125_430.50,
                 buying_power=250_861.00,
                 nav=487_215.75,
@@ -315,72 +296,16 @@ class IBKRClient:
         limit_price: float | None = None,
         time_in_force: str = "DAY",
     ) -> IBKROrder:
-        side = side.upper()
-        order_type = order_type.upper()
-        if side not in ("BUY", "SELL"):
-            raise ValueError(f"Invalid side: {side}")
-        if order_type not in ("MKT", "LMT"):
-            raise ValueError(f"Invalid order_type: {order_type}")
-        if order_type == "LMT" and limit_price is None:
-            raise ValueError("LMT order requires limit_price")
-        if quantity <= 0:
-            raise ValueError("Quantity must be positive")
-
-        if self._sim:
-            self._sign_dryrun(f"/iserver/account/{account_id}/orders", method="POST")
-            # Simulate immediate fill at limit_price (or a synthetic mark for MKT)
-            mark = limit_price if limit_price is not None else _simulated_mark_price(symbol)
-            return IBKROrder(
-                order_id=f"SIM-{uuid.uuid4().hex[:10].upper()}",
-                symbol=symbol,
-                side=side,
-                quantity=quantity,
-                order_type=order_type,
-                limit_price=limit_price,
-                status="Filled",
-                filled_qty=quantity,
-                avg_fill_price=round(mark, 4),
-                submitted_at=_now_iso(),
-                fees=round(max(1.0, quantity * mark * 0.0008), 2),  # ~8bps with $1 floor
-                sim=True,
-            )
-        # Real path (not exercised)
-        body = {
-            "orders": [
-                {
-                    "conid": _conid_for_symbol(symbol),
-                    "orderType": order_type,
-                    "price": limit_price,
-                    "side": side,
-                    "tif": time_in_force,
-                    "quantity": quantity,
-                }
-            ]
-        }
-        resp = self._request("POST", f"/iserver/account/{account_id}/orders", json=body)  # pragma: no cover
-        first = resp[0] if isinstance(resp, list) and resp else {}
-        return IBKROrder(
-            order_id=str(first.get("order_id", "")),
-            symbol=symbol,
-            side=side,
-            quantity=quantity,
-            order_type=order_type,
-            limit_price=limit_price,
-            status=first.get("status", "Submitted"),
-            filled_qty=float(first.get("filled_qty", 0)),
-            avg_fill_price=first.get("avg_price"),
-            submitted_at=_now_iso(),
-            fees=0,
-            sim=False,
+        raise ExecutionPolicyError(
+            "Direct placement disabled; use IntentService.admit. Queued simulation "
+            "intents are not broker fills. Real execution remains refused."
         )
 
     def cancel_order(self, account_id: str, order_id: str) -> dict[str, Any]:
-        if self._sim:
-            self._sign_dryrun(
-                f"/iserver/account/{account_id}/order/{order_id}", method="DELETE"
-            )
-            return {"order_id": order_id, "status": "Cancelled", "sim": True}
-        return self._request("DELETE", f"/iserver/account/{account_id}/order/{order_id}")  # pragma: no cover
+        raise ExecutionPolicyError(
+            "No broker cancellation transport is installed. Cancellation cannot "
+            "be confirmed; use TWS/IBKR for existing broker orders."
+        )
 
     # ---- Internal HTTP layer (only called when sim mode is OFF) -----------
 

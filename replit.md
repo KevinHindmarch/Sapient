@@ -17,8 +17,11 @@ Preferred communication style: Simple, everyday language.
 The user will run TWS locally with a separate local execution worker. The hosted
 app is the control plane; it must not connect to its own localhost expecting the
 user's TWS. See `docs/ibkr-architecture.md`, `docs/ibkr-roadmap.md` and
-`docs/ibkr-spec-review.md`. This target is not implemented. Historical notes
-below describe simulation, not live readiness.
+`docs/ibkr-spec-review.md`. The phase-one software admission boundary is
+implemented; the local worker and broker execution are not. Historical notes
+below describe the previous simulation implementation, not live readiness.
+Current controls and verification limits are documented in
+`docs/ibkr-phase-one.md`; those supersede historical direct-placement claims.
 
 ### New Architecture (January 2025)
 

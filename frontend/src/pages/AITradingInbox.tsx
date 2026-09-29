@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState, ReactNode } from 'react'
 import { Link } from 'react-router-dom'
-import { aiApi } from '../lib/api'
+import { aiApi, apiErrorMessage } from '../lib/api'
 import { useTheme } from '../lib/theme'
 import { toast } from 'sonner'
 import {
@@ -21,7 +21,7 @@ import {
   Inbox,
 } from 'lucide-react'
 
-type SignalStatus = 'pending' | 'approved' | 'rejected' | 'snoozed' | 'executed' | 'expired'
+type SignalStatus = 'pending' | 'approved' | 'rejected' | 'snoozed' | 'executed' | 'expired' | 'claimed'
 type SignalAction = 'BUY' | 'SELL'
 
 interface Rationale {
@@ -65,6 +65,7 @@ interface AuditEntry {
 
 const TABS: { key: SignalStatus | 'all'; label: string }[] = [
   { key: 'pending', label: 'Pending' },
+  { key: 'claimed', label: 'Queued' },
   { key: 'approved', label: 'Approved' },
   { key: 'rejected', label: 'Rejected' },
   { key: 'all', label: 'All' },
@@ -114,11 +115,14 @@ export default function AITradingInbox() {
     setActioningId(signal.id)
     try {
       const res = await aiApi.approveSignal(signal.id)
-      toast.success(res.data?.message || `Approved ${signal.action} ${signal.symbol}`)
+      if (res.data.intent?.state === 'QUEUED') {
+        toast.success(`${signal.action} ${signal.symbol} simulation intent queued. No order was placed or filled.`)
+      } else {
+        toast.error(`Intent is ${res.data.intent?.state || 'not queued'}; no broker order was placed.`)
+      }
       await loadAll()
     } catch (err) {
-      const e = err as { response?: { data?: { detail?: string } } }
-      toast.error(e.response?.data?.detail || 'Failed to approve signal')
+      toast.error(apiErrorMessage(err, 'Intent admission refused'))
     } finally {
       setActioningId(null)
     }
@@ -385,7 +389,7 @@ const SignalCard: React.FC<SignalCardProps> = ({
           </h4>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Quantity" value={`${formatNumber(signal.quantity)} shares`} />
-            <Field label="Order Type" value="Market" />
+            <Field label="Proposed order type" value="Limit (DAY); whole shares only" />
             <Field label="Price at signal" value={fmtCcy(signal.price_at_signal, signal.market)} />
             <Field
               label={isBuy ? 'Estimated Cost' : 'Estimated Value'}
@@ -439,7 +443,7 @@ const SignalCard: React.FC<SignalCardProps> = ({
         isDark ? 'border-slate-700/50' : 'border-slate-200'
       }`}>
         <span className="text-xs theme-text-muted">
-          Status: <span className="font-medium theme-text">{signal.status}</span>
+          Status: <span className="font-medium theme-text">{signal.status === 'claimed' ? 'intent queued (not executed)' : signal.status}</span>
           {signal.decided_at && ` · decided ${new Date(signal.decided_at).toLocaleString()}`}
         </span>
         {isPending ? (

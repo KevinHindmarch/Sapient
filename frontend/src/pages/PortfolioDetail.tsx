@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
-import { portfolioApi, stocksApi, brokerApi, aiApi } from '../lib/api'
+import { portfolioApi, stocksApi, brokerApi, aiApi, IntentBatchRequest, apiErrorMessage } from '../lib/api'
 import { Portfolio, Position, Transaction } from '../types'
 import { toast } from 'sonner'
 import { ArrowLeft, TrendingUp, TrendingDown, DollarSign, Pencil, Trash2, Plus, X, Search, RefreshCw, Sparkles, Send, Zap, Activity, Link2 } from 'lucide-react'
@@ -81,6 +81,7 @@ export default function PortfolioDetail() {
     notes: string
   } | null>(null)
   const [executingRebalance, setExecutingRebalance] = useState(false)
+  const [rebalanceRequest, setRebalanceRequest] = useState<IntentBatchRequest | null>(null)
 
   const [showAddModal, setShowAddModal] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -155,13 +156,40 @@ export default function PortfolioDetail() {
     setShowRebalanceDrawer(true)
     setRebalanceLoading(true)
     setRebalancePlan(null)
+    setRebalanceRequest(null)
     try {
       const res = await portfolioApi.getRebalancePlan(Number(id))
+      // Freeze the reviewed payload and its retry keys. Never recompute prices or expiry on retry.
+      const legs: RebalanceLeg[] = (res.data.legs || []).filter((leg: RebalanceLeg) =>
+        Number.isFinite(leg.quantity) && Math.floor(leg.quantity) >= 1 &&
+        Number.isFinite(leg.price) && leg.price > 0
+      ).map((leg: RebalanceLeg) => ({
+        ...leg,
+        quantity: Math.floor(leg.quantity),
+        estimated_value: Math.floor(leg.quantity) * leg.price,
+      }))
+      const expires_at = new Date(Date.now() + 15 * 60 * 1000).toISOString()
+      setRebalanceRequest({
+        environment: 'simulation',
+        idempotency_key: crypto.randomUUID(),
+        orders: legs.map((leg) => ({
+          symbol: leg.symbol,
+          side: leg.side,
+          quantity: leg.quantity,
+          order_type: 'LMT',
+          limit_price: leg.price,
+          idempotency_key: crypto.randomUUID(),
+          expires_at,
+          portfolio_id: Number(id),
+        })),
+      })
       setRebalancePlan({
-        legs: res.data.legs || [],
+        legs,
         portfolio_value: res.data.portfolio_value || 0,
-        total_drift_value: res.data.total_drift_value || 0,
-        notes: res.data.notes || '',
+        total_drift_value: legs.reduce((sum, leg) => sum + leg.estimated_value, 0),
+        notes: legs.length < (res.data.legs || []).length
+          ? 'Some proposed legs were excluded because whole shares or a valid limit price were unavailable.'
+          : res.data.notes || '',
       })
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } }
@@ -173,27 +201,25 @@ export default function PortfolioDetail() {
   }
 
   const handleExecuteRebalance = async () => {
-    if (!id) return
-    if (!brokerConnected) {
-      toast.error('Connect IBKR in Brokerage Settings first')
-      return
-    }
+    if (!id || !rebalanceRequest?.orders.length) return
     setExecutingRebalance(true)
     try {
-      const res = await portfolioApi.executeRebalance(Number(id))
-      const placed = res.data.placed?.length || 0
+      const res = await portfolioApi.executeRebalance(Number(id), rebalanceRequest)
+      const queued = res.data.intents?.filter((intent) => intent.state === 'QUEUED').length || 0
       const failed = res.data.failed?.length || 0
-      if (placed > 0) {
-        toast.success(`${placed} order(s) placed via IBKR${brokerSimMode ? ' (sim)' : ''}`)
+      if (!queued && !failed) {
+        toast.error('No intents queued. Review the current safety state before retrying.')
+        return
+      }
+      if (queued > 0) {
+        toast.success(`${queued} simulation intent(s) queued. No broker orders placed or filled.`)
       }
       if (failed > 0) {
-        toast.error(`${failed} order(s) failed to place`)
+        toast.error(`${failed} intent(s) refused`)
       }
-      setShowRebalanceDrawer(false)
-      loadPortfolio()
+      if (queued && !failed) setShowRebalanceDrawer(false)
     } catch (e: unknown) {
-      const err = e as { response?: { data?: { detail?: string } } }
-      toast.error(err.response?.data?.detail || 'Rebalance failed')
+      toast.error(apiErrorMessage(e, 'Intent admission refused'))
     } finally {
       setExecutingRebalance(false)
     }
@@ -593,7 +619,7 @@ export default function PortfolioDetail() {
             <p className={`text-xs mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
               {aiMode === 'off' && 'AI engine ignores this portfolio.'}
               {aiMode === 'suggestions' && 'AI sends signals to your inbox; you approve every trade.'}
-              {aiMode === 'autonomous' && 'AI places orders within your guardrails (paper-only by default).'}
+              {aiMode === 'autonomous' && 'AI can propose simulation intents within your guardrails; broker execution is disabled.'}
             </p>
           </div>
         </div>
@@ -1175,9 +1201,9 @@ export default function PortfolioDetail() {
                   <Send className="w-5 h-5" />
                 </div>
                 <div>
-                  <h2 className={`text-lg font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Pending Broker Sync</h2>
+                  <h2 className={`text-lg font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Review Rebalance Intents</h2>
                   <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                    Drift-based orders {brokerSimMode ? '(simulated execution)' : `(live · ${brokerEnv})`}
+                    Simulation intent review · LMT DAY · whole shares · no broker execution
                   </p>
                 </div>
               </div>
@@ -1198,7 +1224,9 @@ export default function PortfolioDetail() {
                   <div className={`inline-flex p-3 rounded-full mb-3 ${isDark ? 'bg-emerald-500/15 text-emerald-300' : 'bg-emerald-100 text-emerald-600'}`}>
                     <Zap className="w-6 h-6" />
                   </div>
-                  <p className={`font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Portfolio is in balance</p>
+                  <p className={`font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+                    {rebalancePlan.notes.includes('excluded') ? 'No eligible whole-share limit legs' : 'Portfolio is in balance'}
+                  </p>
                   <p className={`text-sm mt-1 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>{rebalancePlan.notes}</p>
                 </div>
               )}
@@ -1242,7 +1270,7 @@ export default function PortfolioDetail() {
                             <p className={`font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
                               {leg.symbol.replace('.AX', '')}
                               <span className={`ml-2 text-xs font-normal ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                                {leg.quantity} @ ${leg.price.toFixed(2)}
+                                {leg.quantity} whole shares · LMT DAY @ ${leg.price.toFixed(4)}
                               </span>
                             </p>
                             <p className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
@@ -1257,11 +1285,10 @@ export default function PortfolioDetail() {
                     ))}
                   </div>
 
-                  {!brokerConnected && (
-                    <div className={`mt-4 p-3 rounded-xl text-xs ${isDark ? 'bg-amber-500/10 text-amber-300 border border-amber-500/30' : 'bg-amber-50 text-amber-700 border border-amber-200'}`}>
-                      Connect IBKR in Brokerage Settings to enable execution.
-                    </div>
-                  )}
+                  <p className="text-xs theme-text-muted mt-4">
+                    Admission requires current safety checks. Queuing does not place an IBKR order or change holdings.
+                    Paper and live execution remain blocked.
+                  </p>
                 </>
               )}
             </div>
@@ -1276,18 +1303,18 @@ export default function PortfolioDetail() {
               </button>
               <button
                 onClick={handleExecuteRebalance}
-                disabled={executingRebalance || !brokerConnected || !rebalancePlan || rebalancePlan.legs.length === 0}
+                disabled={executingRebalance || !rebalanceRequest?.orders.length}
                 className="btn-primary flex-1 flex items-center justify-center gap-2 disabled:opacity-50"
               >
                 {executingRebalance ? (
                   <>
                     <RefreshCw className="w-4 h-4 animate-spin" />
-                    Sending…
+                    Queueing…
                   </>
                 ) : (
                   <>
                     <Send className="w-4 h-4" />
-                    Execute {rebalancePlan?.legs.length || 0} order(s)
+                    Queue {rebalanceRequest?.orders.length || 0} simulation intent(s)
                   </>
                 )}
               </button>

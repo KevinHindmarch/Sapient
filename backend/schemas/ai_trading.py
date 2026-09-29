@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 
 AIMode = Literal["off", "suggestions", "autonomous"]
-SignalStatus = Literal["pending", "approved", "rejected", "snoozed", "executed", "expired"]
+SignalStatus = Literal["pending", "approved", "rejected", "snoozed", "executed", "expired", "claimed"]
 SignalAction = Literal["BUY", "SELL"]
 
 

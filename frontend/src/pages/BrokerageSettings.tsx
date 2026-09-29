@@ -7,7 +7,6 @@ import {
   Lock,
   ExternalLink,
   AlertTriangle,
-  Check,
   RefreshCw,
   CheckCircle2,
   Loader2,
@@ -41,8 +40,6 @@ interface AccountSummary {
   unrealized_pnl?: number
   [key: string]: unknown
 }
-
-const PERMISSIONS = ['Read Positions', 'Read Orders', 'Place Orders', 'Cancel Orders']
 
 export default function BrokerageSettings() {
   const { theme } = useTheme()
@@ -186,26 +183,24 @@ export default function BrokerageSettings() {
           <div>
             <h1 className="page-title">Brokerage</h1>
             <p className="page-subtitle">
-              Bring your own Interactive Brokers API keys to enable real-money execution.
+              Manage your Interactive Brokers credentials. Live and paper order execution are disabled.
             </p>
           </div>
         </div>
       </div>
 
-      {status?.sim_mode && (
-        <div className={`flex items-start gap-3 px-4 py-3 rounded-xl border ${
+      <div className={`flex items-start gap-3 px-4 py-3 rounded-xl border ${
           isDark
             ? 'bg-amber-500/10 border-amber-500/30 text-amber-200'
             : 'bg-amber-50 border-amber-200 text-amber-700'
         }`}>
           <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
           <p className="text-sm">
-            <span className="font-medium">Simulated mode active.</span>{' '}
-            Order placement is simulated end-to-end. The OAuth-RSA signing layer is real and ready
-            to flip to live IBKR with a single switch.
+            <span className="font-medium">Execution disabled.</span>{' '}
+            Eligible simulation requests may be queued as intents, not placed or filled. Paper and live
+            broker orders are blocked regardless of the selected environment.
           </p>
-        </div>
-      )}
+      </div>
 
       {connected && (
         <div className="card p-0 overflow-hidden">
@@ -225,7 +220,7 @@ export default function BrokerageSettings() {
                   </h3>
                   <span className="badge badge-emerald flex items-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                    Connected
+                    Credentials saved
                   </span>
                 </div>
                 <div className={`flex items-center gap-2 mt-1 text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
@@ -289,16 +284,9 @@ export default function BrokerageSettings() {
             isDark ? 'border-slate-700/50 bg-slate-800/20' : 'border-slate-200 bg-slate-50/50'
           }`}>
             <span className={`text-xs font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-              API Permissions:
+              Execution policy:
             </span>
-            <div className="flex flex-wrap gap-2">
-              {PERMISSIONS.map((perm) => (
-                <span key={perm} className="badge badge-sky flex items-center gap-1">
-                  <Check className="w-3 h-3" />
-                  {perm}
-                </span>
-              ))}
-            </div>
+            <span className="text-xs theme-text-muted">Broker order placement disabled; historical broker data remains available.</span>
           </div>
 
           <div className={`p-5 border-t flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 ${
@@ -311,8 +299,8 @@ export default function BrokerageSettings() {
             }`}>
               <AlertTriangle className="w-3.5 h-3.5" />
               {status?.environment === 'live'
-                ? 'Live trading is active. Real money orders will be placed.'
-                : 'Paper trading active — switch to live in IBKR Client Portal once you’re ready.'}
+                ? 'Live credentials selected; live orders remain blocked. No real-money execution is enabled.'
+                : 'Paper credentials selected; paper orders remain blocked. Simulation intents are not broker orders.'}
             </p>
             <button
               onClick={handleDisconnect}
@@ -417,7 +405,7 @@ export default function BrokerageSettings() {
                   <span className="badge badge-sky">Sandbox</span>
                 </div>
                 <p className="text-xs theme-text-muted">
-                  Recommended while you validate signal flows. No real money.
+                  Credential environment only. Paper broker orders remain blocked.
                 </p>
               </button>
 
@@ -438,11 +426,11 @@ export default function BrokerageSettings() {
                   </span>
                   <span className="badge badge-amber flex items-center gap-1">
                     <AlertTriangle className="w-3 h-3" />
-                    Real Money
+                    Blocked
                   </span>
                 </div>
                 <p className="text-xs theme-text-muted">
-                  Execute real trades with your own capital. Use with caution.
+                  Live credentials do not enable real-money order execution.
                 </p>
               </button>
             </div>

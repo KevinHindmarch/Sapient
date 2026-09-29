@@ -46,6 +46,9 @@ remain blockers. Requires access to the user's machine, not available here.
 ## Phase 1 — durable control plane and unified safety rules
 
 Dependencies: phase 0 contracts.
+Application-path implementation and bounded PostgreSQL evidence are recorded in
+[phase-one safety](ibkr-phase-one.md). Execution remains disabled; the baseline
+table above describes the pre-migration audit, not the current order paths.
 - Add versioned additive migrations for the architecture data model.
 - Add central intent/policy service and account-level locking/reservations.
 - Route all four broker origins through it; enforce referenced-resource ownership.

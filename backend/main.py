@@ -11,17 +11,13 @@ import os
 
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from backend.routers import auth, stocks, portfolio, indicators, broker, ai_trading
-from core.database import init_database
+from backend.routers import auth, stocks, portfolio, indicators, broker, ai_trading, execution
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    try:
-        init_database()
-        print("Database initialized successfully")
-    except Exception as e:
-        print(f"Database initialization warning: {e}")
+    # Schema changes require an explicit reviewed provisioning operation.
+    # In particular startup must never mutate a production financial database.
     yield
 
 
@@ -34,7 +30,8 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[origin.strip() for origin in os.environ.get("CORS_ORIGINS", "").split(",")
+                   if origin.strip() and origin.strip() != "*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -46,6 +43,7 @@ app.include_router(portfolio.router, prefix="/api/portfolio", tags=["Portfolio"]
 app.include_router(indicators.router, prefix="/api/indicators", tags=["Technical Indicators"])
 app.include_router(broker.router, prefix="/api/broker", tags=["Brokerage"])
 app.include_router(ai_trading.router, prefix="/api/ai", tags=["AI Trading"])
+app.include_router(execution.router, prefix="/api/execution", tags=["Execution safety"])
 
 
 @app.get("/api/health")

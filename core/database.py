@@ -892,6 +892,16 @@ class AITradingSettingsService:
         sets.append("updated_at = CURRENT_TIMESTAMP")
         params.append(user_id)
         with get_db_cursor() as (cur, conn):
+            # Match admission's account -> settings lock order. Policy changes
+            # never leave old queued authority or reservations usable.
+            cur.execute("SELECT to_regclass('safety_accounts') AS safety_table")
+            if cur.fetchone()["safety_table"]:
+                cur.execute("SELECT user_id FROM safety_accounts WHERE user_id=%s FOR UPDATE", (user_id,))
+                if cur.fetchone():
+                    from core.execution_safety import IntentService
+                    IntentService()._invalidate(cur, user_id)
+                    cur.execute("""UPDATE safety_accounts SET halted=TRUE,recovery_required=TRUE,
+                        policy_revision=policy_revision+1 WHERE user_id=%s""", (user_id,))
             cur.execute(f"""
                 UPDATE ai_trading_settings SET {', '.join(sets)}
                 WHERE user_id = %s
@@ -901,40 +911,9 @@ class AITradingSettingsService:
 
     @staticmethod
     def kill_switch(user_id: int) -> dict:
-        """Set mode to off, expire all pending signals, mark broker_orders cancelled."""
-        with get_db_cursor() as (cur, conn):
-            AITradingSettingsService.get(user_id)  # ensure row exists
-            cur.execute("""
-                UPDATE ai_trading_settings
-                SET mode = 'off', last_kill_switch_at = CURRENT_TIMESTAMP,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE user_id = %s
-            """, (user_id,))
-            cur.execute("""
-                UPDATE ai_signals SET status = 'expired',
-                    decided_at = CURRENT_TIMESTAMP, decided_by = 'kill_switch'
-                WHERE user_id = %s AND status = 'pending'
-                RETURNING id
-            """, (user_id,))
-            cancelled_signals = len(cur.fetchall())
-            cur.execute("""
-                UPDATE broker_orders SET status = 'Cancelled', updated_at = CURRENT_TIMESTAMP
-                WHERE user_id = %s AND status IN ('Submitted','PendingSubmit','PreSubmitted')
-                RETURNING id
-            """, (user_id,))
-            cancelled_orders = len(cur.fetchall())
-            cur.execute("""
-                UPDATE portfolios SET ai_mode = 'off' WHERE user_id = %s
-            """, (user_id,))
-            cur.execute("""
-                INSERT INTO ai_audit_log (user_id, event_type, payload)
-                VALUES (%s, 'kill_switch', %s)
-            """, (user_id, '{}'))
-            conn.commit()
-            return {
-                'cancelled_signals': cancelled_signals,
-                'cancelled_orders': cancelled_orders,
-            }
+        """Persist a halt; never fabricate broker cancellation evidence."""
+        from core.execution_safety import IntentService
+        return IntentService().halt(user_id)
 
 
 class AISignalService:
@@ -1030,7 +1009,7 @@ class AISignalService:
             params.extend([signal_id, user_id])
             cur.execute(f"""
                 UPDATE ai_signals SET {', '.join(sets)}
-                WHERE id = %s AND user_id = %s
+                WHERE id = %s AND user_id = %s AND status IN ('pending','snoozed')
                 RETURNING id
             """, params)
             row = cur.fetchone()

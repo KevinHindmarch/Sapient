@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 # ---- Credentials -----------------------------------------------------------
@@ -66,17 +66,23 @@ class BrokerTestResponse(BaseModel):
 
 
 class OrderRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     symbol: str
     side: Literal["BUY", "SELL"]
-    quantity: float = Field(..., gt=0)
-    order_type: Literal["MKT", "LMT"] = "MKT"
-    limit_price: float | None = None
+    quantity: float = Field(..., gt=0, allow_inf_nan=False)
+    order_type: Literal["LMT"] = "LMT"
+    limit_price: float = Field(..., gt=0, allow_inf_nan=False)
+    idempotency_key: str = Field(..., min_length=1, max_length=128)
+    expires_at: datetime
     portfolio_id: int | None = None
     signal_id: int | None = None
 
 
 class PlaceOrdersRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     orders: list[OrderRequest]
+    idempotency_key: str = Field(..., min_length=1, max_length=128)
+    environment: Literal["simulation"] = "simulation"
 
 
 class BrokerOrderResponse(BaseModel):

@@ -27,6 +27,15 @@ api.interceptors.response.use(
   }
 )
 
+export function apiErrorMessage(error: unknown, fallback: string): string {
+  const detail = (error as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+  if (typeof detail === 'string') return detail
+  if (detail && typeof detail === 'object' && 'message' in detail && typeof detail.message === 'string') {
+    return detail.message
+  }
+  return fallback
+}
+
 export const authApi = {
   login: (email: string, password: string) =>
     api.post('/auth/login', { email, password }),
@@ -82,8 +91,8 @@ export const portfolioApi = {
     api.get(`/portfolio/capm/scan?top_n=${top_n}`),
   getRebalancePlan: (portfolioId: number) =>
     api.get(`/portfolio/${portfolioId}/rebalance-plan`),
-  executeRebalance: (portfolioId: number) =>
-    api.post(`/portfolio/${portfolioId}/execute-rebalance`),
+  executeRebalance: (portfolioId: number, request: IntentBatchRequest) =>
+    api.post<IntentQueueResponse>(`/portfolio/${portfolioId}/execute-rebalance`, request),
 }
 
 export const indicatorsApi = {
@@ -107,10 +116,34 @@ export interface BrokerOrderPayload {
   symbol: string
   side: 'BUY' | 'SELL'
   quantity: number
-  order_type?: 'MKT' | 'LMT'
-  limit_price?: number | null
+  order_type: 'LMT'
+  limit_price: number
+  idempotency_key: string
+  expires_at: string
   portfolio_id?: number | null
   signal_id?: number | null
+}
+
+export interface IntentBatchRequest {
+  orders: BrokerOrderPayload[]
+  idempotency_key: string
+  environment: 'simulation'
+}
+
+export interface QueuedIntent {
+  id: string
+  state: string
+  symbol: string
+  side: 'BUY' | 'SELL'
+  quantity: string | number
+  limit_price: string | number
+}
+
+export interface IntentQueueResponse {
+  intents: QueuedIntent[]
+  execution_enabled: false
+  message: string
+  failed?: { symbol: string; error: string }[]
 }
 
 export const brokerApi = {
@@ -120,8 +153,8 @@ export const brokerApi = {
   deleteCredentials: () => api.delete('/broker/credentials'),
   account: () => api.get('/broker/account'),
   test: () => api.post('/broker/test'),
-  placeOrders: (orders: BrokerOrderPayload[]) =>
-    api.post('/broker/orders', { orders }),
+  placeOrders: (orders: BrokerOrderPayload[], idempotency_key: string) =>
+    api.post<IntentQueueResponse>('/broker/orders', { orders, idempotency_key, environment: 'simulation' }),
   recentOrders: (limit: number = 25) =>
     api.get(`/broker/orders/recent?limit=${limit}`),
 }
@@ -146,7 +179,7 @@ export const aiApi = {
   killSwitch: () => api.post('/ai/kill-switch'),
   listSignals: (status: string = 'pending') =>
     api.get(`/ai/signals?status=${status}`),
-  approveSignal: (id: number) => api.post(`/ai/signals/${id}/approve`),
+  approveSignal: (id: number) => api.post<{ intent: QueuedIntent; execution_enabled: false; message: string }>(`/ai/signals/${id}/approve`),
   rejectSignal: (id: number) => api.post(`/ai/signals/${id}/reject`),
   snoozeSignal: (id: number, snooze_minutes: number = 60) =>
     api.post(`/ai/signals/${id}/snooze`, { snooze_minutes }),

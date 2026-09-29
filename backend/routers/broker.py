@@ -50,7 +50,7 @@ def _build_client(user_id: int) -> IBKRClient:
     creds = BrokerCredentialService.get_decrypted(user_id)
     if creds is None:
         raise HTTPException(status_code=400, detail="No broker credentials saved")
-    return IBKRClient(creds)
+    return IBKRClient(creds, user_id=user_id)
 
 
 def _order_to_response(row: dict) -> BrokerOrderResponse:
@@ -70,29 +70,6 @@ def _order_to_response(row: dict) -> BrokerOrderResponse:
         portfolio_id=row.get("portfolio_id"),
         signal_id=row.get("signal_id"),
         sim=bool(row.get("sim", True)),
-    )
-
-
-def _apply_fill_to_portfolio(
-    user_id: int,
-    portfolio_id: int | None,
-    symbol: str,
-    side: str,
-    filled_qty: float,
-    avg_price: float | None,
-) -> None:
-    """Mirror simulated broker fills back into the user's portfolio positions."""
-    if not portfolio_id or filled_qty <= 0 or not avg_price:
-        return
-    txn_type = "buy" if side.upper() == "BUY" else "sell"
-    PortfolioService.execute_trade(
-        portfolio_id=portfolio_id,
-        user_id=user_id,
-        symbol=symbol,
-        txn_type=txn_type,
-        quantity=float(filled_qty),
-        price=float(avg_price),
-        notes=f"IBKR{' (sim)' if IBKR_SIMULATION_MODE else ''} fill",
     )
 
 
@@ -208,7 +185,7 @@ async def get_account(current_user: dict = Depends(get_current_user)):
 # ---------------------------------------------------------------------------
 
 
-@router.post("/orders", response_model=PlaceOrdersResponse)
+@router.post("/orders", status_code=202)
 async def place_orders(
     payload: PlaceOrdersRequest,
     current_user: dict = Depends(get_current_user),
@@ -216,81 +193,22 @@ async def place_orders(
     if not payload.orders:
         raise HTTPException(status_code=400, detail="No orders provided")
 
-    client = _build_client(current_user["id"])
-    try:
-        account_info = client.get_account_summary()
-        account_id = account_info.account_id
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Could not resolve account: {e}")
-
-    # Server-side safety gate — refuse to route to a live IBKR account when
-    # paper_only is enabled in the user's AI trading settings.
-    try:
-        assert_execution_allowed(current_user["id"], account_info.environment)
-    except ExecutionPolicyError as e:
-        raise HTTPException(status_code=403, detail=str(e))
-
-    placed: List[BrokerOrderResponse] = []
-    failed: list[dict] = []
-
+    from core.execution_safety import IntentService, SafetyError
+    requests = []
     for order in payload.orders:
-        try:
-            ibkr_order = client.place_order(
-                account_id=account_id,
-                symbol=order.symbol,
-                side=order.side,
-                quantity=order.quantity,
-                order_type=order.order_type,
-                limit_price=order.limit_price,
-            )
-            persisted = BrokerOrderService.insert(
-                user_id=current_user["id"],
-                order=ibkr_order,
-                account_id=account_id,
-                portfolio_id=order.portfolio_id,
-                signal_id=order.signal_id,
-            )
-            _apply_fill_to_portfolio(
-                user_id=current_user["id"],
-                portfolio_id=order.portfolio_id,
-                symbol=order.symbol,
-                side=order.side,
-                filled_qty=ibkr_order.filled_qty,
-                avg_price=ibkr_order.avg_fill_price,
-            )
-            AIAuditService.log(
-                user_id=current_user["id"],
-                event_type="broker_order_placed",
-                portfolio_id=order.portfolio_id,
-                signal_id=order.signal_id,
-                order_id=persisted["id"],
-                payload={
-                    "symbol": order.symbol,
-                    "side": order.side,
-                    "quantity": order.quantity,
-                    "order_type": order.order_type,
-                    "limit_price": order.limit_price,
-                    "sim": IBKR_SIMULATION_MODE,
-                },
-            )
-            if order.signal_id is not None:
-                AISignalService.update_status(
-                    user_id=current_user["id"],
-                    signal_id=order.signal_id,
-                    status="executed",
-                    decided_by="user",
-                    executed_order_id=persisted["id"],
-                )
-            placed.append(_order_to_response(persisted))
-        except Exception as e:
-            failed.append({
-                "symbol": order.symbol,
-                "side": order.side,
-                "quantity": order.quantity,
-                "error": str(e),
-            })
-
-    return PlaceOrdersResponse(placed=placed, failed=failed)
+        requests.append({
+            **order.model_dump(),
+            "origin": "manual",
+            "environment": payload.environment,
+            "account_id": f"SIM:{current_user['id']}",
+            "expires_at": order.expires_at.isoformat(),
+        })
+    try:
+        intents = IntentService().admit_batch(current_user["id"], payload.idempotency_key, requests)
+    except SafetyError as exc:
+        raise HTTPException(409, detail={"code": exc.code, "message": str(exc)})
+    return {"intents": intents, "placed": [], "execution_enabled": False,
+            "message": "Simulation intents queued, not broker orders or fills."}
 
 
 @router.get("/orders/recent", response_model=list[BrokerOrderResponse])

@@ -1,5 +1,5 @@
 import { useEffect, useState, ReactNode } from 'react'
-import { aiApi, AISettingsUpdate } from '../lib/api'
+import { aiApi, AISettingsUpdate, apiErrorMessage } from '../lib/api'
 import { useTheme } from '../lib/theme'
 import { toast } from 'sonner'
 import {
@@ -115,16 +115,12 @@ export default function AITradingSettings() {
   const handleKillSwitch = async () => {
     setKilling(true)
     try {
-      const res = await aiApi.killSwitch()
-      toast.success(
-        res.data?.message ||
-          `Kill switch triggered. Cancelled ${res.data?.cancelled_signals || 0} signals.`
-      )
+      await aiApi.killSwitch()
+      toast.success('Halt recorded. Queued intents are blocked; broker cancellation is not confirmed.')
       setShowKillModal(false)
       await load()
     } catch (err) {
-      const e = err as { response?: { data?: { detail?: string } } }
-      toast.error(e.response?.data?.detail || 'Kill switch failed')
+      toast.error(apiErrorMessage(err, 'Halt request failed'))
     } finally {
       setKilling(false)
     }
@@ -148,14 +144,13 @@ export default function AITradingSettings() {
           <div>
             <h1 className="page-title">AI Trading</h1>
             <p className="page-subtitle">
-              Configure how Sapient's AI engine proposes and executes trades on your behalf.
+              Configure AI trade proposals. Order execution is disabled in this phase.
             </p>
           </div>
         </div>
       </div>
 
-      {settings.paper_only && (
-        <div className={`flex items-start gap-3 px-4 py-3 rounded-xl border ${
+      <div className={`flex items-start gap-3 px-4 py-3 rounded-xl border ${
           isDark
             ? 'bg-amber-500/10 border-amber-500/30 text-amber-200'
             : 'bg-amber-50 border-amber-200 text-amber-700'
@@ -163,11 +158,10 @@ export default function AITradingSettings() {
           <Shield className="w-5 h-5 shrink-0 mt-0.5" />
           <div className="flex-1">
             <p className="text-sm font-medium">
-              Paper-trading required. Toggle off below once you're ready for live trading.
+              Live and paper broker execution are blocked regardless of this setting. Simulation intents may be queued but are not orders or fills.
             </p>
           </div>
-        </div>
-      )}
+      </div>
 
       {/* Trading Mode */}
       <section className="card space-y-4">
@@ -194,7 +188,7 @@ export default function AITradingSettings() {
             onClick={() => update('mode', 'suggestions')}
             icon={<Lightbulb className="w-5 h-5" />}
             title="Suggestions"
-            description="AI proposes trades. You approve each one in the inbox before execution."
+            description="AI proposes trades. Approval may queue an intent; it does not place or fill an order."
             tone="sky"
             isDark={isDark}
           />
@@ -203,9 +197,9 @@ export default function AITradingSettings() {
             onClick={() => update('mode', 'autonomous')}
             icon={<Bot className="w-5 h-5" />}
             title="Autonomous"
-            description="AI executes approved-rule trades automatically through IBKR. Use with caution."
+            description="AI may propose simulation intents under guardrails; broker execution is disabled."
             tone="purple"
-            badge="Live only"
+            badge="No execution"
             isDark={isDark}
           />
         </div>
@@ -246,7 +240,7 @@ export default function AITradingSettings() {
         <div className={`pt-4 border-t ${isDark ? 'border-slate-700/50' : 'border-slate-200'}`}>
           <ToggleRow
             label="Paper trading only"
-            description="Block any orders from being routed to the live IBKR environment."
+            description="Preference only. Live execution is blocked regardless of this toggle."
             checked={settings.paper_only}
             onChange={(v) => update('paper_only', v)}
           />
@@ -394,8 +388,8 @@ export default function AITradingSettings() {
               Emergency Kill Switch
             </h2>
             <p className="text-sm theme-text-muted mt-1.5 max-w-xl">
-              Immediately cancel all open AI orders and disable AI trading across every portfolio.
-              Manual trading remains available.
+              Halt new intent admission and block queued intents. A halt request does not confirm broker-side cancellation;
+              inspect broker state separately for any historical orders.
             </p>
             <p className="text-xs theme-text-muted mt-2">
               Last triggered:{' '}
@@ -459,9 +453,8 @@ export default function AITradingSettings() {
               </button>
             </div>
             <p className="text-sm theme-text-secondary mb-6">
-              All pending AI signals will be rejected and any open AI-placed orders will be cancelled.
-              The AI engine will be set to <span className="font-semibold">Off</span>. This action is
-              logged for your audit trail.
+              New intent admission will be halted and queued intents blocked. Broker-side cancellation
+              is not confirmed by this action. Check the broker independently for any historical orders.
             </p>
             <div className="flex justify-end gap-3">
               <button

@@ -109,18 +109,13 @@ async def update_settings(
     return AITradingSettings(**s)
 
 
-@router.post("/kill-switch", response_model=KillSwitchResponse)
+@router.post("/kill-switch")
 async def kill_switch(current_user: dict = Depends(get_current_user)):
-    summary = AITradingSettingsService.kill_switch(current_user["id"])
-    return KillSwitchResponse(
-        triggered_at=datetime.now(timezone.utc),
-        cancelled_signals=summary["cancelled_signals"],
-        cancelled_orders=summary["cancelled_orders"],
-        message=(
-            f"Kill switch engaged. Cancelled {summary['cancelled_signals']} pending signals "
-            f"and {summary['cancelled_orders']} open broker orders. AI mode set to off."
-        ),
-    )
+    from core.execution_safety import SafetyError
+    try:
+        return AITradingSettingsService.kill_switch(current_user["id"])
+    except SafetyError as exc:
+        raise HTTPException(409, detail={"code": exc.code, "message": str(exc)})
 
 
 # ---------------------------------------------------------------------------
@@ -140,7 +135,7 @@ async def list_signals(
     return [_signal_to_schema(s) for s in signals]
 
 
-@router.post("/signals/{signal_id}/approve", response_model=SignalDecisionResponse)
+@router.post("/signals/{signal_id}/approve", status_code=202)
 async def approve_signal(
     signal_id: int,
     current_user: dict = Depends(get_current_user),
@@ -148,86 +143,14 @@ async def approve_signal(
     signal = AISignalService.get(current_user["id"], signal_id)
     if signal is None:
         raise HTTPException(status_code=404, detail="Signal not found")
-    # A snoozed signal is just a deferred pending — let the user act on it.
-    if signal["status"] not in ("pending", "snoozed"):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Signal is {signal['status']}, must be pending or snoozed",
-        )
-
-    client = _build_client_or_400(current_user["id"])
+    from core.execution_safety import IntentService, SafetyError, signal_request
     try:
-        account_info = client.get_account_summary()
-        account_id = account_info.account_id
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Could not resolve broker account: {e}")
-
-    # Server-side safety gate (paper_only)
-    from core.ibkr_client import ExecutionPolicyError, assert_execution_allowed
-    try:
-        assert_execution_allowed(current_user["id"], account_info.environment)
-    except ExecutionPolicyError as e:
-        raise HTTPException(status_code=403, detail=str(e))
-
-    try:
-        ibkr_order = client.place_order(
-            account_id=account_id,
-            symbol=signal["symbol"],
-            side=signal["action"],
-            quantity=float(signal["quantity"]),
-            order_type="MKT",
-        )
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Order placement failed: {e}")
-
-    persisted = BrokerOrderService.insert(
-        user_id=current_user["id"],
-        order=ibkr_order,
-        account_id=account_id,
-        portfolio_id=signal.get("portfolio_id"),
-        signal_id=signal["id"],
-    )
-
-    # Mirror simulated fills into portfolio bookkeeping
-    if signal.get("portfolio_id") and ibkr_order.filled_qty and ibkr_order.avg_fill_price:
-        from core.database import PortfolioService
-        PortfolioService.execute_trade(
-            portfolio_id=signal["portfolio_id"],
-            user_id=current_user["id"],
-            symbol=signal["symbol"],
-            txn_type="buy" if signal["action"] == "BUY" else "sell",
-            quantity=float(ibkr_order.filled_qty),
-            price=float(ibkr_order.avg_fill_price),
-            notes=f"AI signal #{signal['id']} approved",
-        )
-
-    updated = AISignalService.update_status(
-        user_id=current_user["id"],
-        signal_id=signal_id,
-        status="executed",
-        decided_by="user",
-        executed_order_id=persisted["id"],
-    )
-
-    AIAuditService.log(
-        user_id=current_user["id"],
-        event_type="ai_signal_approved",
-        portfolio_id=signal.get("portfolio_id"),
-        signal_id=signal_id,
-        order_id=persisted["id"],
-        payload={
-            "symbol": signal["symbol"],
-            "action": signal["action"],
-            "quantity": float(signal["quantity"]),
-            "sim": IBKR_SIMULATION_MODE,
-        },
-    )
-
-    return SignalDecisionResponse(
-        signal=_signal_to_schema(updated),
-        order=persisted,
-        message="Signal approved and order submitted",
-    )
+        intent = IntentService().admit(current_user["id"], signal_request(
+            current_user["id"], signal, origin="ai_approval"))
+    except SafetyError as exc:
+        raise HTTPException(409, detail={"code": exc.code, "message": str(exc)})
+    return {"intent": intent, "execution_enabled": False,
+            "message": "Signal claimed and simulation intent queued; no broker order submitted."}
 
 
 @router.post("/signals/{signal_id}/reject", response_model=SignalDecisionResponse)

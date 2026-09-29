@@ -26,6 +26,7 @@ from core.database import PortfolioService
 from core.fundamentals import FundamentalsService
 from core.capm import CAPMService
 from backend.auth_utils import get_current_user
+from backend.schemas.broker import PlaceOrdersRequest
 
 router = APIRouter()
 
@@ -760,90 +761,26 @@ async def get_rebalance_plan(
     )
 
 
-@router.post("/{portfolio_id}/execute-rebalance")
+@router.post("/{portfolio_id}/execute-rebalance", status_code=202)
 async def execute_rebalance(
     portfolio_id: int,
+    payload: PlaceOrdersRequest,
     current_user: dict = Depends(get_current_user),
 ):
-    """
-    Compute the rebalance plan and place each leg via the broker.
-
-    Reuses the broker /orders flow under the hood by invoking the same
-    IBKRClient + persistence helpers.
-    """
-    from core.database import (
-        BrokerCredentialService,
-        BrokerOrderService,
-        AIAuditService,
-        PortfolioService as _PS,
-    )
-    from core.ibkr_client import IBKRClient
-
-    from core.ibkr_client import ExecutionPolicyError, assert_execution_allowed
-
-    creds = BrokerCredentialService.get_decrypted(current_user["id"])
-    if creds is None:
-        raise HTTPException(400, "Broker not connected. Connect IBKR in Brokerage Settings first.")
-
-    plan = await get_rebalance_plan(portfolio_id, current_user)
-    if not plan.legs:
-        return {"placed": [], "message": plan.notes}
-
-    client = IBKRClient(creds)
-    account = client.get_account_summary()
-
-    # Server-side safety gate (paper_only) — refuse to route to live broker
+    """Admit an explicit reviewed batch atomically, never recompute on retry."""
+    from core.execution_safety import IntentService, SafetyError
+    requests = []
+    for leg in payload.orders:
+        if leg.portfolio_id not in (None, portfolio_id) or leg.signal_id is not None:
+            raise HTTPException(400, "Rebalance leg reference mismatch")
+        requests.append({**leg.model_dump(), "origin": "rebalance",
+                         "environment": payload.environment,
+                         "account_id": f"SIM:{current_user['id']}",
+                         "portfolio_id": portfolio_id,
+                         "expires_at": leg.expires_at.isoformat()})
     try:
-        assert_execution_allowed(current_user["id"], account.environment)
-    except ExecutionPolicyError as e:
-        raise HTTPException(403, str(e))
-
-    placed = []
-    failed = []
-    for leg in plan.legs:
-        try:
-            order = client.place_order(
-                account_id=account.account_id,
-                symbol=leg.symbol,
-                side=leg.side,
-                quantity=leg.quantity,
-                order_type="MKT",
-            )
-            saved = BrokerOrderService.insert(
-                user_id=current_user["id"],
-                order=order,
-                account_id=account.account_id,
-                portfolio_id=portfolio_id,
-            )
-            # Mirror fill into portfolio positions
-            if order.status == "Filled" and order.filled_qty > 0 and order.avg_fill_price:
-                _PS.execute_trade(
-                    portfolio_id=portfolio_id,
-                    user_id=current_user["id"],
-                    symbol=leg.symbol,
-                    txn_type="buy" if leg.side == "BUY" else "sell",
-                    quantity=float(order.filled_qty),
-                    price=float(order.avg_fill_price),
-                    notes=f"Rebalance via IBKR (sim) order {order.order_id}",
-                )
-            placed.append(saved)
-            AIAuditService.log(
-                user_id=current_user["id"],
-                event_type="rebalance_order",
-                portfolio_id=portfolio_id,
-                order_id=saved["id"],
-                payload={
-                    "symbol": leg.symbol,
-                    "side": leg.side,
-                    "quantity": leg.quantity,
-                    "drift_pct": leg.drift_pct,
-                },
-            )
-        except Exception as e:
-            failed.append({"symbol": leg.symbol, "error": str(e)})
-
-    return {
-        "placed": placed,
-        "failed": failed,
-        "message": f"Rebalance complete: {len(placed)} order(s) placed, {len(failed)} failed.",
-    }
+        intents = IntentService().admit_batch(current_user["id"], payload.idempotency_key, requests)
+    except SafetyError as exc:
+        raise HTTPException(409, detail={"code": exc.code, "message": str(exc)})
+    return {"intents": intents, "placed": [], "execution_enabled": False,
+            "message": "Batch reserved atomically. No broker orders submitted; no sell proceeds credited."}

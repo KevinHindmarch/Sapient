@@ -12,7 +12,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from core.database import UserService, get_db_cursor
 
-SECRET_KEY = os.environ.get("SESSION_SECRET", "sapient-secret-key-change-in-production")
+SECRET_KEY = os.environ.get("SESSION_SECRET")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_HOURS = 24
 
@@ -31,6 +31,8 @@ def verify_password(password: str, hashed: str) -> bool:
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     """Create a JWT access token."""
+    if not SECRET_KEY or len(SECRET_KEY) < 32:
+        raise HTTPException(503, "Authentication secret is not securely configured")
     to_encode = data.copy()
     expire = datetime.utcnow() + (expires_delta or timedelta(hours=ACCESS_TOKEN_EXPIRE_HOURS))
     to_encode.update({"exp": expire})
@@ -39,6 +41,8 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
 
 def decode_token(token: str) -> Optional[dict]:
     """Decode and validate a JWT token."""
+    if not SECRET_KEY or len(SECRET_KEY) < 32:
+        return None
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         return payload
@@ -62,7 +66,10 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     if user_id is None:
         raise credentials_exception
     
-    user = UserService.get_user_by_id(int(user_id))
+    try:
+        user = UserService.get_user_by_id(int(user_id))
+    except (TypeError, ValueError):
+        raise credentials_exception
     
     if user is None:
         raise credentials_exception
