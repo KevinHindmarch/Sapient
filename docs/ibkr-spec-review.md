@@ -37,6 +37,11 @@ Neither Reddit nor assumptions about an unapproved OAuth account are evidence.
 
 These are specification-derived acceptance cases, NOT executed runtime tests.
 
+Update: the software-only reference model now has executable evidence for the
+bounded cases listed in [software safety](ibkr-software-safety.md). The table
+below remains the full target matrix, not a claim that all cases or the running
+application have been qualified.
+
 | ID | Adversarial input | Required result |
 |---|---|---|
 | S01 | Same approval concurrently from two browsers | One claimed signal and one intent; at most one send |
@@ -109,6 +114,11 @@ document corrections:
 These are resolved specification omissions, not implemented runtime fixes.
 S01–S36 remain unexecuted implementation acceptance cases. Source/document
 review cannot certify eventual code or guarantee absence of trading losses.
+
+The preceding status describes the original document review. For subsequent
+reference-model test results and explicit exclusions, see
+[checks actually executed](ibkr-software-safety.md#checks-actually-executed--2026-09-29).
+No TWS runtime acceptance or broker qualification is implied.
 
 The independent follow-up review confirmed all three critical gaps were closed
 at specification level and found no additional critical contradiction. It also

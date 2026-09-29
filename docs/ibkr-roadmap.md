@@ -29,6 +29,9 @@ Earlier “complete/live with one switch” claims are incorrect.
 ## Phase 0 — executable safety specification and compatibility spike
 
 Dependencies: none. No orders.
+- Software-only reference contracts and deterministic acceptance model:
+  [implemented evidence and remaining boundaries](ibkr-software-safety.md).
+  This does not satisfy the local compatibility exit gate below.
 - Fix supported protocol/schema and formal state/transition fixtures.
 - Select exact official Python SDK and TWS builds; verify callback signatures,
   installation, license, supported OS and paper/live identification procedure.
