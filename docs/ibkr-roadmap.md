@@ -32,6 +32,10 @@ Dependencies: none. No orders.
 - Software-only reference contracts and deterministic acceptance model:
   [implemented evidence and remaining boundaries](ibkr-software-safety.md).
   This does not satisfy the local compatibility exit gate below.
+- An operator-run [read-only compatibility kit](tws-readonly-check.md) is
+  available for later local execution. It is not a worker or real compatibility
+  evidence. TWS 10.51.1a is user-reported; OS/SDK pins and local results remain
+  pending. Building the kit does not complete this phase.
 - Fix supported protocol/schema and formal state/transition fixtures.
 - Select exact official Python SDK and TWS builds; verify callback signatures,
   installation, license, supported OS and paper/live identification procedure.
