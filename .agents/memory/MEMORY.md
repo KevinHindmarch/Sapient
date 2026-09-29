@@ -1,0 +1,1 @@
+- [IBKR connection direction](ibkr-connection-decision.md) — User confirmed local TWS; earlier direct Web API OAuth assumptions are not the agreed connection route.
