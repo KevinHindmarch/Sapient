@@ -12,6 +12,14 @@ Preferred communication style: Simple, everyday language.
 
 ## System Architecture
 
+### Agreed IBKR target (September 29, 2026)
+
+The user will run TWS locally with a separate local execution worker. The hosted
+app is the control plane; it must not connect to its own localhost expecting the
+user's TWS. See `docs/ibkr-architecture.md`, `docs/ibkr-roadmap.md` and
+`docs/ibkr-spec-review.md`. This target is not implemented. Historical notes
+below describe simulation, not live readiness.
+
 ### New Architecture (January 2025)
 
 The application has been rewritten from Streamlit to a modern **React + FastAPI** architecture for improved scalability and user experience.
@@ -208,8 +216,9 @@ The application uses a premium theme with luxury aesthetics, supporting both lig
   + IBKR spec) and a `IBKR_SIMULATION_MODE = True` switch. While the switch is
   on, `test_connection`, `get_account_summary`, and `place_order` return
   realistic stubs (paper account `DU1234567`, deterministic fills from a price
-  table). Flipping the switch to `False` and implementing `_request()` is the
-  only thing needed to go live.
+  table). This does not establish live readiness. Local TWS execution requires
+  the worker, durable order lifecycle, risk controls and qualification gates
+  documented in `docs/ibkr-roadmap.md`.
 - AI signal engine in `core/ai_engine.py` reuses `TechnicalIndicatorService`
   (RSI primary, MACD confirmation), enforces "most-restrictive wins" mode
   semantics (skip if EITHER global OR per-portfolio AI mode is `off`), and

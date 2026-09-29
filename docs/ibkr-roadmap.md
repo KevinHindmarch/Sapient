@@ -1,411 +1,138 @@
-# Sapient × IBKR — Go-Live Roadmap & Design
+# Local TWS migration — implementation roadmap
 
-Status: **simulation mode** (`IBKR_SIMULATION_MODE = True`).
-This document is the design we will implement before flipping that switch.
-It is intentionally opinionated — when we disagree later, we change this file
-first, then the code.
+2026-09-29. Documentation only. Supersedes the CPAPI/OAuth plan and its estimates.
+Normative target: [architecture](ibkr-architecture.md). Verification:
+[spec review](ibkr-spec-review.md). No phase is complete merely because a mock passes.
 
----
+## Current code baseline and blockers
 
-## 1. Connection topology — what "the gateway" actually is
-
-There are three ways an app can reach IBKR. We've already picked one; this
-section exists so we stop confusing ourselves.
-
-| Path | Process model | Auth | Latency | Per-user isolation | Our choice? |
-|---|---|---|---|---|---|
-| **TWS API** (Java TWS / IB Gateway) | A long-lived JVM process per logged-in account | username + password + 2FA at process start | low (LAN socket) | one process per account → not feasible for a hosted SaaS | ❌ |
-| **Client Portal Gateway** (small Java jar) | Long-lived JVM per user, browser-based auth on the same machine | manual browser login | medium | also one process per user | ❌ |
-| **CPAPI v1 over OAuth 1.0a-RSA** | Stateless HTTPS from our backend, signed per-request with the user's RSA private key | user provisions consumer key + access token + secret + RSA key in IBKR's Self-Service Portal **once** | medium | naturally per-user (just different keys) | ✅ |
-
-So "gateway" in our codebase is a misleading word. We are **not** running an
-IBKR Java process. `core/ibkr_client.py` is a per-request OAuth-RSA HTTP
-client; the "gateway" in our UI/copy means "the encrypted IBKR connection on
-behalf of one user." Where the word "gateway" appears in user-facing copy,
-prefer **"IBKR connection"**.
-
-### What we send per request
-```
-Authorization: OAuth oauth_consumer_key="...",
-                     oauth_token="...",
-                     oauth_signature_method="RSA-SHA256",
-                     oauth_timestamp="...",
-                     oauth_nonce="...",
-                     oauth_signature="<RSA-signed base string>"
-```
-
-### Why this is the right pick for Sapient
-- No per-user daemon to babysit
-- Survives our own container restarts cleanly
-- Horizontal scalability is just "more backend pods"
-- Failure mode of one user's credentials doesn't affect anyone else
-- Users keep custody of the private key (we only ever hold the Fernet-encrypted
-  copy in `broker_credentials`)
-
-### What we give up
-- No native socket — every order is one HTTPS round trip (~150–300ms)
-- We're a polite second-class citizen vs websocket consumers for fill latency
-- IBKR's per-account rate limit (~10 r/s on `/iserver/*`) caps how fast a single
-  user's bot can trade — fine for our use case (RSI rebalances, not HFT)
-
----
-
-## 2. Session lifecycle — the silent killer
-
-CPAPI sessions are stateful even though OAuth-RSA is per-request. After
-authenticating once, the session lives in IBKR's edge with these rules:
-
-- **Idle timeout: ~6 minutes.** No request for 6 min → next request 401s.
-- **Max session lifetime: 24h.** Then full re-auth required.
-- **Tickle endpoint:** `POST /tickle` extends the session and returns
-  connection status.
-- **Re-auth endpoint:** `POST /iserver/reauthenticate` (cheap), and
-  `POST /iserver/auth/status` to inspect state.
-
-### Design: the Session Warden
-
-A single in-process async loop per backend pod that keeps every active user's
-session warm. Sketch:
-
-```
-core/session_warden.py
-─────────────────────────────────────────────────────────────
-class SessionWarden:
-    """One background task per pod. Tracks (user_id → last_seen)."""
-
-    TICKLE_INTERVAL = 90s   # well under the 6min cliff
-    REAUTH_INTERVAL = 20h   # well under the 24h cliff
-    ACTIVE_WINDOW   = 1h    # only warm users who used the bot recently
-
-    async def run():
-        while True:
-            for user_id in active_users_in_last_hour():
-                try:
-                    client = IBKRClient.for_user(user_id)
-                    client.tickle()
-                    if needs_reauth(user_id):
-                        client.reauthenticate()
-                except SessionDeadError:
-                    mark_disconnected(user_id)   # UI shows reconnect prompt
-                except Exception as e:
-                    audit("session_refresh_failed", user_id, error=str(e))
-            await asyncio.sleep(TICKLE_INTERVAL)
-```
-
-### Per-request guard
-Even with the warden, individual order paths get a one-shot retry:
-
-```
-def ensure_session(self) -> None:
-    if self._session_known_dead:
-        self.reauthenticate()
-    # else assume warden has it; if not, the 401 retry below catches it
-
-def _request(self, method, path, **kw):
-    for attempt in (1, 2):
-        resp = self._raw_request(method, path, **kw)
-        if resp.status_code == 401 and attempt == 1:
-            self.reauthenticate()
-            continue
-        return resp
-```
-
-### What the user sees
-- Sticky banner on `/brokerage` and `/ai-trading`:
-  `🟢 Connected to IBKR (paper · DU1234567)` or
-  `🔴 IBKR session expired — click to reconnect`
-- The autonomous engine refuses to scan when status is red, and writes an
-  `autonomous_skipped` audit event with `reason: session_dead`.
-
-### What we do NOT do
-- We do **not** auto-reconnect from inside a `place_order` call. If the
-  session is dead at order time, we 503 the request, mark the user
-  disconnected, and let the warden recover on its own cadence. Auto-reconnecting
-  inside the order path creates "did my order go in or not?" ambiguity.
-
----
-
-## 3. Timeouts — three layers
-
-Single-number "timeout" is a footgun. We layer them:
-
-| Layer | Limit | Why |
+| Area | Observed implementation | Required change |
 |---|---|---|
-| **TCP connect timeout** | 5s | If we can't even open the socket in 5s, IBKR is having a bad day |
-| **Read timeout** | 15s for `/iserver/*`, 30s for `/portfolio/*`, 60s for `/scanner/*` | iserver order ops are fast; portfolio/scanner can be slow |
-| **End-to-end deadline** | 45s on a `place_order` call (covers reply loop), 5s on a `tickle` | Wraps the whole conversation including reply replies |
-| **Background job timeout** | 2 min on a scan; 30s on reconcile | So the worker doesn't wedge |
+| `core/ibkr_client.py:40,221-242,268-400` | Simulation; synthetic accounts/orders; live `_request` unimplemented | Keep explicit simulation adapter; add separate local TWS execution boundary |
+| `backend/routers/broker.py:211-283` | Submit, persist, immediately mirror fill; accepts portfolio/signal references | Owned references, async intent contract, central policies |
+| `backend/routers/ai_trading.py:143-229` | Approval status check then placement, no atomic claim | Claim once, check expiry and all execution rules |
+| `core/ai_engine.py:249-460` | Scans may execute synchronously; HTTP-triggered, no autonomous scheduler | Produce intents; later durable scheduler with unique scan windows |
+| `backend/routers/portfolio.py:763-843` | Rebalance executes each leg directly | Explicit batch plan, per-leg reservations/status; no atomic batch claim |
+| `core/database.py:903-937` | Kill marks local orders Cancelled without broker request; pending only | Halt latch, invalidate snoozed too, cancellation confirmation |
+| `core/database.py:1043-1085` | Insert/list broker orders, no durable execution lifecycle | Intent/event/mapping/execution models and constraints |
+| `core/database.py:322-405,466-550` | Saved model holdings; legacy buy changes initial investment | Separate real broker allocation/accounting |
+| `core/ai_engine.py:59-155` | Cost-based valuation; signal counts; possible signal/order turnover double count | Fresh account risk and transactional reservations |
+| `backend/main.py:18-41` / auth utilities | Startup DDL, no worker; broad CORS; fallback JWT secret in code | Versioned migrations, fail-closed configuration, origin/device boundaries |
+| Frontend brokerage/AI/portfolio pages | Real UI over mocked broker, OAuth wizard, optimistic results | Pairing and event-driven order/recovery states |
 
-httpx supports this cleanly:
-```python
-httpx.AsyncClient(timeout=httpx.Timeout(15.0, connect=5.0))
-```
+Scanners/optimizers remain research services using yfinance, not IBKR execution
+quotes. `models.py` is legacy duplicate persistence, not the FastAPI source of
+truth. The mockup sandbox is not production UI. No project-owned automated
+trading test suite or migration framework was found in the audited paths.
+Earlier “complete/live with one switch” claims are incorrect.
 
-### Retry policy
+## Phase 0 — executable safety specification and compatibility spike
 
-Only retry on **idempotent or pre-state-change** operations:
+Dependencies: none. No orders.
+- Fix supported protocol/schema and formal state/transition fixtures.
+- Select exact official Python SDK and TWS builds; verify callback signatures,
+  installation, license, supported OS and paper/live identification procedure.
+- Observe account, positions, contract details, market-data type and recovery
+  with TWS read-only enabled. Capture sanitized fixtures.
+- Establish operator evidence for paper account identity; port alone is insufficient.
+- Validate statement/history recovery availability; block if an outage cannot be
+  reconciled. Confirm market-data permissions and account/currency constraints.
+Exit: verified read-only connection and approved fixtures; unanswered local facts
+remain blockers. Requires access to the user's machine, not available here.
 
-| Operation | Retry? | Backoff |
-|---|---|---|
-| GET (account, positions, order list) | yes, 3x | 0.5s · 1s · 2s + jitter |
-| Tickle, reauth | yes, 2x | 1s · 3s |
-| `POST /iserver/.../orders` | **only if** we sent a `cOID` (then IBKR dedupes) | 1s · 4s |
-| `POST /iserver/reply/{id}` | **never** | — |
-| `DELETE /iserver/.../order/{id}` | yes, 2x | 1s · 3s (cancel is idempotent) |
-| Anything that returned 4xx | never (except 429) | — |
-| 429 | yes, respect `Retry-After` header, max 3x | — |
+## Phase 1 — durable control plane and unified safety rules
 
-### Idempotency: cOID is mandatory
-Every order body includes `cOID = f"sapient-{signal_id}-{attempt}"` where
-`signal_id` is the `ai_signals.id` (or a generated UUID for ad-hoc orders).
-IBKR refuses duplicate cOIDs, which is exactly the property we want.
+Dependencies: phase 0 contracts.
+- Add versioned additive migrations for the architecture data model.
+- Add central intent/policy service and account-level locking/reservations.
+- Route all four broker origins through it; enforce referenced-resource ownership.
+- Atomic signal claim, expiry, stable idempotency, outbox and audit.
+- Fix kill-switch semantics without claiming unconfirmed broker cancellations.
+- Retain simulation under explicit separate identity; preserve historical rows.
+- Build device pairing/revocation, narrow auth scopes and execution leases.
+Exit: authorization, concurrent duplicate approvals, halt races, daily limits,
+schema migration/restore tests pass; every old direct placement path is removed
+or refuses execution. No real orders yet.
 
-### Dead-man's switch
-The Session Warden also writes a heartbeat row to `system_heartbeat` every
-loop. If the autonomous engine sees no heartbeat in 5 min, it refuses to
-generate signals — we'd rather miss a trade than place orders we can't monitor.
+## Phase 2 — local worker and read-only synchronization
 
----
+Dependencies: phase 1.
+- Separate local package/launcher; OS secret store, journal WAL, process lock.
+- Stable client ID, nextValidId readiness, qualified contracts and snapshot end
+  markers. Implement connection/IB-server health distinction.
+- Outbound command/event protocol, ordered acknowledgements, offline queue
+  bounds, lease expiry, clock/sleep recovery and device replacement fencing.
+- Desktop preflight/runbook plus UI connection status and pairing.
+- Implement minimum local/account halt, durable resume latch, unknown-outcome
+  lock and startup/reconnect reconciliation now, before any paper send.
+Exit: restart, disconnect, account mismatch, wrong port, duplicate worker,
+expired device and journal failure tests pass without any order submission.
 
-## 4. Order state machine
+## Phase 3 — paper order lifecycle and accounting
 
-Real CPAPI orders evolve. We treat `broker_orders` as a slow-moving copy of
-IBKR's truth, never as the truth itself.
+Dependencies: phase 2.
+- No-paper-send gate: working local and remote stop, halt persistence, startup/
+  reconnect reconciliation, explicit resume and uncertain-outcome lock must pass
+  deterministic failure tests before disabling TWS read-only.
+- Submit protocol with persisted mapping before send, explicit LMT/DAY defaults.
+- Callback normalization, execution deduplication, commissions/corrections.
+- Separate broker-backed ledger and account-to-portfolio allocation workflow.
+- Cancel owned orders; unknown outcomes and recovery lock; no blind retry.
+- Rebalance batches preview limits and partial completion. Do not presume sell
+  proceeds are spendable; revalidate each buy after confirmed available cash.
+- Update schemas/TypeScript APIs and pages to 202 intent tracking.
+Exit: deterministic fault-injection suite and explicitly authorized paper tests
+cover partial fill/cancel races, crash windows and portfolio/cash projections.
 
-```
-   ┌──────────────┐
-   │ DRAFT (ours) │  signal approved, not yet sent
-   └──────┬───────┘
-          │ POST /iserver/account/.../orders
-          ▼
-   ┌──────────────┐   reply needed?
-   │  REPLY_WAIT  │ ─────yes────┐
-   └──────┬───────┘             │  POST /iserver/reply/{id} {confirmed:true}
-          │ no                   ▼
-          │              (back to REPLY_WAIT if more, else proceed)
-          ▼
-   ┌──────────────┐
-   │   SUBMITTED  │  IBKR returned orderId
-   └──────┬───────┘
-          │ poller / WS updates
-          ├─► PRE_SUBMITTED  (queued, market closed)
-          ├─► PART_FILLED    (filled_qty < quantity)
-          ├─► FILLED         (terminal ✓)
-          ├─► CANCELLED      (terminal ✓ — user or system)
-          └─► REJECTED       (terminal ✓ — broker said no)
-```
+## Phase 4 — stop/recovery and supervised strategy scheduling
 
-### Reply loop
-Place response shape (CPAPI):
-```json
-[
-  { "id": "<messageId>",
-    "message": [ "Order outside RTH..." ],
-    "isSuppressed": false,
-    "messageIds": ["o10001"] }
-]
-```
-If `id` looks like a message id (not an order id), we POST
-`/iserver/reply/{id}` with `{"confirmed": true}`. We loop until we get an
-object whose top-level `order_id` / `order_status` field appears (or until we
-hit a max of 3 reply rounds — IBKR has rejected this kind of degenerate
-loop in practice).
+Dependencies: phase 3.
+- Extend already-working account halt/local stop with operational alerts and
+  residual exposure UI; do not defer essential stop behavior to this phase.
+- Extend startup/reconnect reconciliation with bounded periodic checks and
+  long-outage operational recovery.
+- Explicit resume after cooldown/review; lost event/history recovery procedure.
+- Durable scan scheduler (unique portfolio/window keys), no trading while
+  disconnected. Market calendars, data freshness and unified account budgets.
+- Every execution origin blocked when any enabled protection lacks reliable inputs.
+Exit: entire failure matrix passes and no control route bypasses policy.
 
-### Status updates: poll first, websocket later
-- **Phase 1 (poll):** every 5s for any non-terminal order in `broker_orders`,
-  `GET /iserver/account/orders` and reconcile.
-- **Phase 2 (WS):** subscribe to `sor` topic on the CPAPI websocket; poll
-  becomes a fallback after WS disconnect.
+## Phase 5 — operational paper qualification
 
-Position mirror now runs *only* on transitions into a Fill state (PART_FILLED
-delta or FILLED total), keyed by `broker_orders.id` + cumulative `filled_qty`
-so duplicate notifications don't double-apply.
+Dependencies: phase 4. No live authorization implied.
+- Paper soak spanning at least five trading days plus planned restart and
+  weekly-authentication scenarios (extend calendar duration as needed).
+- Exercise both supported markets/currencies where permissions allow.
+- Verify observed orders/fills/cash against TWS; archive sanitized evidence.
+- Rehearse machine sleep, internet loss, cloud loss, recovery after history gap,
+  device revoke/replacement, disk failure, backup restore and kill switch.
+- Confirm app UI cannot mistake simulation for paper or paper for live.
+Exit: no unexplained exposure/duplicates; all unresolved discrepancies closed;
+documented supported versions/OS, operator runbook and recovery timings.
 
----
+## Phase 6 — separately authorized constrained live pilot
 
-## 5. Kill switch — must reach the broker
+Dependencies: all prior gates and explicit user consent.
+- Separate verified live account binding, reauthentication, low absolute limits,
+  manual approval only initially; no automatic migration of queued paper intents.
+- Observe real commissions, market-data quality, execution and settlement.
+- Stop immediately on unknown outcomes or reconciliation discrepancies.
+- Enable autonomy only after separate review; paper fills do not prove live quality.
+Rollback: disable intent admission, request owned-order cancels where reachable,
+reconcile residuals, retain journals and audit. A code rollback never cancels
+orders already at IBKR. Do not drop financial records during rollback.
 
-Today: flips global mode to off, cancels local pending signals, sets cooldown.
-Missing: **cancel all open orders at IBKR.**
+## Verification ownership and scope
 
-New flow (`POST /api/ai/kill-switch`):
+Unit tests: policy/state machine, identity, decimal accounting, correction logic.
+Contract tests: frontend/backend/worker versioned messages and adapter fixtures.
+Integration tests: disposable PostgreSQL + SQLite, transactional outbox/inbox,
+migrations, concurrent requests, leases and process restarts.
+Fault injection: deterministic fake TWS transport at every persistence/send/ack
+boundary. It must model delayed/duplicate/missing/out-of-order callbacks.
+Paper tests: actual local TWS, explicitly authorized, bounded orders only.
+Live tests: never implicit in CI, never run by this planning request.
 
-```
-1. UPDATE ai_trading_settings SET mode='off', last_kill_switch_at=NOW()
-2. UPDATE ai_signals SET status='cancelled' WHERE status IN ('pending','snoozed')
-3. For each non-terminal row in broker_orders for this user:
-     try: DELETE /iserver/account/{acct}/order/{ord}
-     audit: kill_switch_cancel { order_id, ok, error? }
-4. Audit: kill_switch_tripped { signals_cancelled, orders_attempted, orders_cancelled }
-5. Push UI banner: "Kill switch active. 24h cooldown until <ts>."
-```
-
-Failure semantics: step 3 is best-effort and per-order. We never throw out of
-the kill switch — even a half-finished cancel pass is better than nothing.
-The reconcile job (next section) will catch stragglers within 5 minutes.
-
----
-
-## 6. Reconciliation — drift is inevitable
-
-A scheduled job runs every 5 minutes per active-broker user:
-
-1. `GET /portfolio/{acctId}/positions` → broker truth
-2. Compare with our `positions` table for that user's portfolios
-3. For each delta:
-   - Quantity off → emit `reconcile_drift` audit event with both numbers
-   - Position exists at broker but not in our DB → emit `unknown_position` event
-   - Position in our DB but flat at broker → mark as `status='closed'` after manual review
-4. Same loop for non-terminal `broker_orders` vs `/iserver/account/orders`
-5. If a kill switch is active, also re-cancel any non-terminal orders that
-   slipped through
-
-Reconcile **never** silently mutates user data. It writes events; a UI banner
-("3 positions out of sync — review") asks the user to resolve. We may
-auto-apply trivial deltas (e.g. partial fill we missed) in a later iteration.
-
----
-
-## 7. Event sourcing — promoting `ai_audit_log`
-
-Current state: `ai_audit_log` is a sparse log of "interesting things".
-Target state: it's the authoritative event stream and `ai_signals`,
-`broker_orders`, `positions` are derived views.
-
-Concrete schema upgrade:
-
-```sql
-ALTER TABLE ai_audit_log
-  ADD COLUMN event_seq BIGSERIAL,         -- total order across all users
-  ADD COLUMN aggregate_type TEXT,         -- 'signal' | 'order' | 'portfolio' | 'session'
-  ADD COLUMN aggregate_id BIGINT,
-  ADD COLUMN schema_version INT DEFAULT 1;
-
-CREATE INDEX ai_audit_agg ON ai_audit_log(aggregate_type, aggregate_id, event_seq);
-```
-
-Standard event types (small, fixed vocabulary):
-
-- `session.refreshed`, `session.expired`
-- `signal.generated`, `signal.approved`, `signal.rejected`, `signal.snoozed`,
-  `signal.expired`, `signal.cancelled_by_kill_switch`
-- `order.draft`, `order.submitted`, `order.reply_required`, `order.replied`,
-  `order.partial_filled`, `order.filled`, `order.cancelled`, `order.rejected`
-- `policy.blocked` (paper_only, guardrail, kill switch)
-- `reconcile.drift_detected`, `reconcile.applied`
-- `kill_switch.tripped`, `kill_switch.cooldown_cleared`
-
-Every event has a JSONB `payload` with the deltas needed to replay state.
-We don't need a full event-sourcing framework — a discipline of "every state
-change is a row, written in the same transaction as the table update" is 90%
-of the value.
-
-Replay tooling lives in `scripts/replay_audit.py` and answers
-"what did the bot do for user X today" by SELECT-ordering events.
-
----
-
-## 8. Rate limiting
-
-IBKR doesn't publish exact CPAPI per-endpoint limits, but the practical
-budget per user is roughly:
-
-| Endpoint group | Budget |
-|---|---|
-| `/iserver/account/orders` (place) | ~5 r/s |
-| `/iserver/account/orders` (read) | ~10 r/s |
-| `/portfolio/*` | ~5 r/s |
-| `/tickle`, `/sso/validate` | unrestricted in practice |
-| `/iserver/scanner/run` | ~1 r/s |
-| `/md/snapshot` | ~10 r/s |
-
-A token-bucket per (user, endpoint-group) in process memory is enough. If we
-ever go multi-pod, move it to Redis. Wire 429 handling to *also* refill the
-bucket from `Retry-After`.
-
----
-
-## 9. UX — what the brokerage page must say up front
-
-Today the wizard happily collects keys from any user. We add a pre-flight
-panel listing the IBKR account prerequisites with green/red ticks where we
-can detect them:
-
-- ✅/❓ IBKR **Pro** account (Lite is not supported by CPAPI)
-- ✅/❓ **Funded** account (demo accounts cannot use CPAPI)
-- ✅/❓ Supported **2FA**: IB Key / SMS / DSC+ (Security Code Card is **not** supported)
-- ⚠️ Canadian residents: algorithmic trading of Canadian-listed products is
-  prohibited by CIRO Rule 3200; cross-listings only
-
-Items we can't auto-detect get a "I confirm" checkbox the user must tick
-before keys are accepted.
-
----
-
-## 10. Out of scope (parked)
-
-| Idea | Why parked |
-|---|---|
-| Native TWS API via `stoqey/ib` | Requires a JVM-per-user; incompatible with our hosted model |
-| Hosting our own IB Gateway sidecar | Operational burden + per-user instance; revisit only if execution latency becomes a complaint |
-| OAuth 2.0 for CPAPI | Newer flow, no operational benefit over 1.0a-RSA, weaker docs |
-| IBKR-side market scanners | Our local RSI scan is portfolio-aware and matches our indicator stack; no need to switch |
-| Multi-leg / spread orders | We're equities-only; revisit if we add options |
-| Margin / portfolio margin handling | Out of scope for an MVP rebalance bot |
-
----
-
-## 11. Phased rollout (smallest to biggest)
-
-Each phase is independently shippable; sim mode stays on until **Phase 4**.
-
-### Phase 0 — done ✅
-- Encrypted credential vault, OAuth-RSA signing helpers, AI engine, guardrails,
-  paper-only gate, 4 frontend pages.
-
-### Phase 1 — Foundations (~1–2 days)
-- **cOID** on every `place_order` call
-- Three-layer timeouts in `IBKRClient._request`
-- Retry policy table from §3 implemented
-- 429 backoff + token-bucket rate limiter
-- New `ai_audit_log` columns + standard event vocabulary
-- Brokerage wizard pre-flight panel (§9)
-- **No** behavior change in sim mode — same UX, harder backend
-
-### Phase 2 — Session warden + kill-switch reach (~2 days)
-- `core/session_warden.py` background task, started by `backend/main.py`
-- `system_heartbeat` table, dead-man's-switch check in autonomous engine
-- `ensure_session()` + one-shot 401 retry in `_request`
-- Kill-switch fan-out to broker DELETE endpoint
-- UI: connection status banner; kill-switch confirmation modal shows
-  "N open orders will be cancelled"
-
-### Phase 3 — Order state machine + reconciliation (~3 days)
-- Reply loop in `place_order`
-- `broker_orders.status` extended; order status poller every 5s for
-  non-terminal orders
-- Position mirror keyed on (order_id, cumulative filled_qty)
-- 5-minute reconciliation job; UI banner for unresolved drift
-- All transitions emit standard audit events
-
-### Phase 4 — Flip the switch (~1 day + soak)
-- Implement `_request()` real HTTP path; remove sim returns
-- One internal user runs a paper account for 1 week with
-  `paper_only=True` enforced
-- Daily audit-log review until no surprises
-
-### Phase 5 — Websocket (~2 days, optional)
-- Subscribe to `sor` topic for live fill notifications
-- Status poller becomes WS-disconnect fallback only
-
----
-
-## 12. Operational hooks (post-Phase 4)
-
-- Prometheus counters: `ibkr_request_total{path, status}`,
-  `ibkr_retry_total{path, reason}`, `ai_signal_generated_total{action}`,
-  `ai_autonomous_executed_total{outcome}`
-- Daily digest email per user with active broker: signals generated,
-  orders placed, fills, drift events
-- Alert on: session_dead > 10 min, reconcile_drift > 5% of NAV,
-  kill_switch_tripped (page on call)
+Implementation estimates intentionally deferred until phase 0 establishes the
+desktop packaging and API compatibility facts. Implementation may parallelize
+pure UI/contracts and tests, but cannot skip the dependency gates above.
