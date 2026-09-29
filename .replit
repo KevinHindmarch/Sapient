@@ -50,3 +50,7 @@ integrations = ["github:1.0.0"]
 
 [userenv.shared]
 BROKER_ENCRYPTION_KEY = "3VNJIPn3mJikxYwaXX1zRlJtojmLl26OjlX2tx6Yfgc="
+
+[postMerge]
+path = "scripts/post-merge.sh"
+timeoutMs = 180000
