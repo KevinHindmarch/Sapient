@@ -193,6 +193,13 @@ calls could not be exercised from the build sandbox.
 
 Exit: API runs as a standalone local process; all pages work with no login.
 
+**Done (2026-10-09):** items 1–3, 5, 6, plus the Yahoo cache from item 4
+(`core/yahoo.py`). The Dashboard N+1 batch endpoint is deferred. Also done early
+from Phase D item 2: `HashRouter`, relative `base`, logo import, token/API base
+from `window.sapient`. The frontend no longer needs the backend to serve it.
+Verified in headless Chromium against the dev stack (no login, Brokerage guide,
+Settings data folder) with no console errors.
+
 ### Phase D — Electron shell and Windows installer (≈1–1.5 weeks)
 
 1. Scaffold `desktop/` with electron-vite; renderer = existing `frontend/src`.

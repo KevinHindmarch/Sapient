@@ -1,56 +1,22 @@
 """
-Brokerage (IBKR) router for Sapient API.
+Brokerage router for Sapient API.
 
-Wraps BrokerCredentialService + IBKRClient. The IBKR layer ships in simulation
-mode; every endpoint here is real (auth, persistence, audit) and works against
-the simulated broker so the rest of the stack can be exercised end-to-end.
+There is no broker transport yet: /status reports that truthfully, and /orders
+admits durable simulation intents through the safety boundary (never fills).
+The local TWS worker arrives in a later migration phase.
 """
 
 from __future__ import annotations
 
-from datetime import datetime
-from typing import List
-
 from fastapi import APIRouter, Depends, HTTPException
 
-from backend.auth_utils import get_current_user
-from backend.schemas.broker import (
-    BrokerAccountSummary,
-    BrokerCredentialsCreate,
-    BrokerCredentialsStatus,
-    BrokerOrderResponse,
-    BrokerTestResponse,
-    PlaceOrdersRequest,
-    PlaceOrdersResponse,
-)
-from core.database import (
-    AIAuditService,
-    AISignalService,
-    BrokerCredentialService,
-    BrokerOrderService,
-    PortfolioService,
-)
-from core.ibkr_client import (
-    IBKR_SIMULATION_MODE,
-    ExecutionPolicyError,
-    IBKRClient,
-    assert_execution_allowed,
-)
+from backend.security import get_current_user
+from backend.schemas.broker import BrokerOrderResponse, PlaceOrdersRequest
+from core.database import BrokerOrderService
+from core.ibkr_client import connection_status
 
 
 router = APIRouter()
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _build_client(user_id: int) -> IBKRClient:
-    creds = BrokerCredentialService.get_decrypted(user_id)
-    if creds is None:
-        raise HTTPException(status_code=400, detail="No broker credentials saved")
-    return IBKRClient(creds, user_id=user_id)
 
 
 def _order_to_response(row: dict) -> BrokerOrderResponse:
@@ -73,111 +39,9 @@ def _order_to_response(row: dict) -> BrokerOrderResponse:
     )
 
 
-# ---------------------------------------------------------------------------
-# Credentials
-# ---------------------------------------------------------------------------
-
-
-@router.post("/credentials", response_model=BrokerCredentialsStatus)
-async def save_credentials(
-    payload: BrokerCredentialsCreate,
-    current_user: dict = Depends(get_current_user),
-):
-    result = BrokerCredentialService.upsert(
-        user_id=current_user["id"],
-        consumer_key=payload.consumer_key,
-        access_token=payload.access_token,
-        access_token_secret=payload.access_token_secret,
-        private_key_pem=payload.private_key_pem,
-        environment=payload.environment,
-    )
-    if not result.get("success"):
-        raise HTTPException(status_code=400, detail=result.get("error", "Failed to save credentials"))
-
-    AIAuditService.log(
-        user_id=current_user["id"],
-        event_type="broker_credentials_saved",
-        payload={"environment": payload.environment},
-    )
-    status = BrokerCredentialService.get_status(current_user["id"])
-    return BrokerCredentialsStatus(
-        connected=status.get("connected", False),
-        environment=status.get("environment"),
-        consumer_key_masked=status.get("consumer_key_masked"),
-        connected_at=status.get("connected_at"),
-        last_test_at=status.get("last_test_at"),
-        last_test_ok=status.get("last_test_ok"),
-        sim_mode=IBKR_SIMULATION_MODE,
-    )
-
-
-@router.get("/credentials", response_model=BrokerCredentialsStatus)
-async def get_credentials_status(current_user: dict = Depends(get_current_user)):
-    status = BrokerCredentialService.get_status(current_user["id"])
-    return BrokerCredentialsStatus(
-        connected=status.get("connected", False),
-        environment=status.get("environment"),
-        consumer_key_masked=status.get("consumer_key_masked"),
-        connected_at=status.get("connected_at"),
-        last_test_at=status.get("last_test_at"),
-        last_test_ok=status.get("last_test_ok"),
-        sim_mode=IBKR_SIMULATION_MODE,
-    )
-
-
-@router.delete("/credentials")
-async def delete_credentials(current_user: dict = Depends(get_current_user)):
-    result = BrokerCredentialService.delete(current_user["id"])
-    AIAuditService.log(
-        user_id=current_user["id"],
-        event_type="broker_credentials_deleted",
-        payload={},
-    )
-    return result
-
-
-# ---------------------------------------------------------------------------
-# Connection / account
-# ---------------------------------------------------------------------------
-
-
-@router.post("/test", response_model=BrokerTestResponse)
-async def test_connection(current_user: dict = Depends(get_current_user)):
-    client = _build_client(current_user["id"])
-    try:
-        result = client.test_connection()
-        ok = bool(result.get("ok"))
-        BrokerCredentialService.record_test(current_user["id"], ok)
-        return BrokerTestResponse(
-            ok=ok,
-            message=result.get("message", "OK" if ok else "Failed"),
-            environment=result.get("environment"),
-            sim=bool(result.get("sim", IBKR_SIMULATION_MODE)),
-        )
-    except Exception as e:
-        BrokerCredentialService.record_test(current_user["id"], False)
-        raise HTTPException(status_code=400, detail=f"Broker test failed: {e}")
-
-
-@router.get("/account", response_model=BrokerAccountSummary)
-async def get_account(current_user: dict = Depends(get_current_user)):
-    client = _build_client(current_user["id"])
-    try:
-        info = client.get_account_summary()
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Broker account fetch failed: {e}")
-    return BrokerAccountSummary(
-        account_id=info.account_id,
-        account_alias=info.account_alias,
-        currency=info.currency,
-        environment=info.environment,
-        server_time=info.server_time,
-        is_paper=info.is_paper,
-        cash=info.cash,
-        buying_power=info.buying_power,
-        nav=info.nav,
-        sim=IBKR_SIMULATION_MODE,
-    )
+@router.get("/status")
+async def broker_status(current_user: dict = Depends(get_current_user)):
+    return connection_status()
 
 
 # ---------------------------------------------------------------------------

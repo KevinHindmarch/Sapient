@@ -1,17 +1,20 @@
 """
-Sapient API - FastAPI Backend for Australian Stock Portfolio Optimizer
+Sapient local API (FastAPI). Runs on 127.0.0.1 inside the desktop app.
+
+Start it with ``backend/desktop_main.py`` (Electron does this) or
+``run_dev.py`` during development.
 """
 
-from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, Response
 from contextlib import asynccontextmanager
 import os
-
 import sys
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from backend.routers import auth, stocks, portfolio, indicators, broker, ai_trading, execution
+from backend.routers import stocks, portfolio, indicators, broker, ai_trading, execution
+from backend.security import LocalAccessMiddleware
 
 
 @asynccontextmanager
@@ -20,27 +23,31 @@ async def lifespan(app: FastAPI):
     # backs up an existing database first and refuses unknown/changed schemas.
     if os.environ.get("SAPIENT_SKIP_MIGRATIONS") != "1":
         from core.migrations import migrate
+        from core.database import UserService
         migrate()
+        UserService.ensure_local_user()
     yield
 
 
 app = FastAPI(
     title="Sapient API",
-    description="Australian Stock Portfolio Optimizer API",
+    description="Local portfolio research and trading-safety API",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
+# Order matters: the last middleware added runs first. CORS must answer
+# preflight requests before the token check sees them.
+app.add_middleware(LocalAccessMiddleware)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[origin.strip() for origin in os.environ.get("CORS_ORIGINS", "").split(",")
+    allow_origins=[origin.strip() for origin in os.environ.get("SAPIENT_ALLOWED_ORIGINS", "").split(",")
                    if origin.strip() and origin.strip() != "*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
-app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(stocks.router, prefix="/api/stocks", tags=["Stocks"])
 app.include_router(portfolio.router, prefix="/api/portfolio", tags=["Portfolio"])
 app.include_router(indicators.router, prefix="/api/indicators", tags=["Technical Indicators"])
@@ -54,34 +61,9 @@ async def health_check():
     return {"status": "healthy", "service": "Sapient API"}
 
 
-FRONTEND_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend", "dist")
-
-def no_cache_html_response(path: str) -> FileResponse:
-    """Serve HTML with no-cache headers so browsers always get the latest version."""
-    return FileResponse(
-        path,
-        headers={
-            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-            "Pragma": "no-cache",
-            "Expires": "0",
-        }
-    )
-
-
-if os.path.exists(FRONTEND_DIR):
-    @app.get("/")
-    async def serve_index():
-        return no_cache_html_response(os.path.join(FRONTEND_DIR, "index.html"))
-    
-    app.mount("/assets", StaticFiles(directory=os.path.join(FRONTEND_DIR, "assets")), name="assets")
-
-    @app.get("/{full_path:path}")
-    async def serve_frontend(request: Request, full_path: str):
-        if full_path.startswith("api"):
-            return {"error": "Not found"}
-        
-        file_path = os.path.join(FRONTEND_DIR, full_path)
-        if os.path.isfile(file_path):
-            return FileResponse(file_path)
-        
-        return no_cache_html_response(os.path.join(FRONTEND_DIR, "index.html"))
+@app.get("/api/profile")
+async def profile():
+    from core.database import UserService
+    from core.db import data_dir
+    user = UserService.get_local_user() or {}
+    return {"display_name": user.get("display_name"), "data_dir": str(data_dir())}

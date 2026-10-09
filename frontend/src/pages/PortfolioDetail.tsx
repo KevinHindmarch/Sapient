@@ -102,14 +102,9 @@ export default function PortfolioDetail() {
     try {
       const res = await brokerApi.getStatus()
       const s = res.data
-      if (s?.connected) {
-        setBrokerConnected(true)
-        setBrokerEnv(s.environment || 'paper')
-        setBrokerSimMode(s.sim_mode !== false)
-      } else {
-        setBrokerConnected(false)
-        setBrokerSimMode(s?.sim_mode !== false)
-      }
+      setBrokerConnected(!!s?.tws_configured)
+      setBrokerEnv(s?.mode === 'tws_live' ? 'live' : s?.mode === 'tws_paper' ? 'paper' : null)
+      setBrokerSimMode(s?.mode !== 'tws_paper' && s?.mode !== 'tws_live')
     } catch {
       setBrokerConnected(false)
     }
@@ -117,21 +112,15 @@ export default function PortfolioDetail() {
 
   const handleSyncBroker = async () => {
     if (!brokerConnected) {
-      toast.error('Connect IBKR in Brokerage Settings first')
+      toast.error('Set up the Interactive Brokers TWS connection first')
       navigate('/brokerage')
       return
     }
+    // Account sync is provided by the local TWS connector (coming next); never show invented balances.
     setSyncingBroker(true)
-    try {
-      const res = await brokerApi.account()
-      setAccountSummary(res.data)
-      toast.success(`Synced ${res.data.account_id || 'account'} with IBKR${brokerSimMode ? ' (sim)' : ''}`)
-    } catch (e: unknown) {
-      const err = e as { response?: { data?: { detail?: string } } }
-      toast.error(err.response?.data?.detail || 'Sync failed')
-    } finally {
-      setSyncingBroker(false)
-    }
+    setAccountSummary(null)
+    toast.info('Account sync becomes available with the TWS connector.')
+    setSyncingBroker(false)
   }
 
   const handleAiModeChange = async (mode: 'off' | 'suggestions' | 'autonomous') => {

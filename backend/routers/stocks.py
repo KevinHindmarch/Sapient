@@ -22,7 +22,7 @@ router = APIRouter()
 def _live_ticker_lookup(ticker_upper: str, market: str) -> dict | None:
     """Try to validate a ticker live via yfinance. Returns {symbol, name} or None."""
     try:
-        import yfinance as yf
+        from core import yahoo as yf
         if market.upper() == "US":
             symbol = ticker_upper
         else:

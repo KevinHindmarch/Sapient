@@ -1,10 +1,15 @@
+import { useEffect, useState } from 'react'
 import { useTheme } from '../lib/theme'
-import { useAuth } from '../lib/auth'
+import { profileApi } from '../lib/api'
 import { Moon, Sun, User, Palette } from 'lucide-react'
 
 export default function Settings() {
   const { theme, setTheme } = useTheme()
-  const { user } = useAuth()
+  const [dataDir, setDataDir] = useState<string>('')
+
+  useEffect(() => {
+    profileApi.get().then((res) => setDataDir(res.data.data_dir)).catch(() => setDataDir(''))
+  }, [])
 
   return (
     <div className="max-w-2xl mx-auto space-y-6 animate-fade-in">
@@ -19,8 +24,11 @@ export default function Settings() {
             <User className="w-6 h-6 text-sky-500" />
           </div>
           <div>
-            <h2 className="text-lg font-semibold theme-text">Profile</h2>
-            <p className="text-sm theme-text-secondary">{user?.email}</p>
+            <h2 className="text-lg font-semibold theme-text">Local profile</h2>
+            <p className="text-sm theme-text-secondary">
+              Your data is stored only on this PC{dataDir ? ':' : '.'}
+            </p>
+            {dataDir && <p className="text-xs font-mono theme-text-secondary break-all mt-1">{dataDir}</p>}
           </div>
         </div>
 

@@ -12,7 +12,8 @@ Mode semantics (most-restrictive wins):
   - In `suggestions` mode, signals are persisted as `pending` for the user to
     approve in /ai-inbox.
   - In `autonomous` mode (both scopes set to autonomous), signals are
-    immediately routed through the broker via IBKRClient.place_order.
+    submitted to the safety admission (IntentService) as simulation intents;
+    nothing is sent to a broker.
 
 Guardrails enforced on every candidate signal:
   - max_trade_pct       — single-trade size cap as % of portfolio
@@ -26,13 +27,12 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-import yfinance as yf
+from core import yahoo as yf
 
 from core.database import (
     AIAuditService,
     AISignalService,
     AITradingSettingsService,
-    BrokerCredentialService,
     BrokerOrderService,
     PortfolioService,
     get_db_cursor,

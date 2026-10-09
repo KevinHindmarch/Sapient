@@ -21,9 +21,10 @@ are genuinely theirs (trading authorisation, money, licences, accounts).
 
 - Runs today as **React SPA + FastAPI + a local SQLite file**. It was built on
   Replit with PostgreSQL; Replit, Streamlit (Phase A) and PostgreSQL (Phase B)
-  are gone. Target: a self-contained **Electron + React/Tailwind desktop app on
-  Windows** talking to Yahoo Finance and a locally installed **IBKR Trader
-  Workstation (TWS)**. Phases C onward of the migration plan are not yet done.
+  are gone, and it is single-user with no login (Phase C). Target: a
+  self-contained **Electron + React/Tailwind desktop app on Windows** talking to
+  Yahoo Finance and a locally installed **IBKR Trader Workstation (TWS)**.
+  Phases D onward of the migration plan are not yet done.
 - **No real broker orders are possible.** `core/ibkr_client.py` is a simulation stub
   (`place_order`/`cancel_order` always raise). All order paths go through the
   durable "safety admission" in `core/execution_safety.py`, which only records
@@ -55,28 +56,38 @@ are genuinely theirs (trading authorisation, money, licences, accounts).
 
 ```text
 frontend/            React 19 + TS + Vite 7 + Tailwind v4 SPA (the real UI)
-  src/main.tsx       BrowserRouter > ThemeProvider > AuthProvider > App
-  src/App.tsx        routes; ProtectedRoute (localStorage user) around <Layout/>
-  src/lib/api.ts     axios baseURL '/api', JWT from localStorage, 401 → /login
-  src/lib/auth.tsx   login/register, stores `token` + `user` in localStorage
+  src/main.tsx       HashRouter > ThemeProvider > App (no login; works from file/app://)
+  src/App.tsx        routes, all under <Layout/>
+  src/lib/runtime.ts API base + per-launch token from window.sapient (Electron
+                     preload) or Vite env VITE_SAPIENT_API_TOKEN (run_dev.py)
+  src/lib/api.ts     axios client; 401/403 → "restart Sapient" toast
   src/lib/theme.tsx  light/dark, localStorage `sapient-theme`
   src/pages/         Dashboard, Manual/Auto/CAPM builders, Portfolios,
                      PortfolioDetail (largest), StockAnalysis, AITradingInbox,
-                     AITradingSettings, BrokerageSettings (OAuth wizard, obsolete),
-                     Settings, Login, Register. FundamentalsBuilder.tsx is unrouted.
+                     AITradingSettings, BrokerageSettings (TWS status + setup
+                     guide), Settings (theme, data folder)
   src/components/    Layout (sidebar/nav), HelpModal, HelpTooltip, WeightEditor
-backend/             FastAPI app (thin HTTP layer)
-  main.py            routers under /api/*, /api/health, serves frontend/dist + SPA fallback
-  auth_utils.py      HS256 JWT (SESSION_SECRET ≥32 chars), bcrypt via UserService
-  routers/           auth, stocks, portfolio, indicators, broker, ai_trading, execution
+backend/             FastAPI app (thin HTTP layer), 127.0.0.1 only
+  main.py            routers under /api/*, /api/health, /api/profile; startup
+                     migrate() + ensure local user; CORS from SAPIENT_ALLOWED_ORIGINS
+  security.py        LocalAccessMiddleware: loopback Host only + Bearer
+                     SAPIENT_API_TOKEN on every /api route except /api/health;
+                     get_current_user() = the single local profile (users.id=1)
+  desktop_main.py    entrypoint for Electron/PyInstaller: token on stdin, prints
+                     {"event":"ready","port":N}, exits when stdin closes
+  routers/           stocks, portfolio, indicators, broker (status + simulation
+                     orders), ai_trading, execution (intents/halt/resume)
   schemas/           pydantic request/response models
 core/                Service layer (all business logic)
   db.py              SQLite connection layer (WAL, FULL sync, BEGIN IMMEDIATE,
                      %s→? placeholders, Sapient-specific column-type converters)
   migrations.py      versioned checksummed schema (1 core, 2 safety); migrate()
                      runs at API startup after backing up the DB
-  database.py        User/Portfolio/BrokerCredential/AITradingSettings/AISignal/
+  database.py        User (local profile)/Portfolio/AITradingSettings/AISignal/
                      BrokerOrder/AIAudit services (SQL via core.db)
+  yahoo.py           cached drop-in for yfinance (`from core import yahoo as yf`):
+                     Ticker.history/.info/.income_stmt + download, TTL cache in
+                     <data>/market_cache.db, max 8 concurrent Yahoo requests
   stocks.py          StockDataService + static ASX200 (~299) and S&P 500 (~149) lists
   optimizer.py       PortfolioOptimizerService (scipy max-Sharpe, backtest, compare)
   fundamentals.py    FundamentalsService (yfinance .info/financials, threadpool scan)
@@ -84,33 +95,35 @@ core/                Service layer (all business logic)
   indicators.py      TechnicalIndicatorService (RSI/MACD/BB/SMA/EMA/Stoch, RSI screener)
   ai_engine.py       scan_portfolio → signals; autonomous → IntentService.admit
   execution_safety.py IntentService: the single order admission boundary
-  ibkr_client.py     simulation-only client + unused OAuth1 signing helpers
-  crypto.py          Fernet with BROKER_ENCRYPTION_KEY
+  ibkr_client.py     placeholder: connection_status() + IBKRClient that refuses
+                     every direct place/cancel (OAuth/credential vault removed)
 safety_spec/         stdlib-only SQLite reference model of the TWS worker protocol
 scripts/tws_readonly_check.py  operator-run read-only TWS probe (official ibapi)
 tests/               unittest suites (see Commands)
 docs/                IBKR architecture/roadmap/safety docs + this repo's references
 scripts/check.py     fast checks used locally and by CI (.github/workflows/ci.yml)
-server.py / run_dev.py  temporary launchers (127.0.0.1) until the Electron shell lands
+run_dev.py           dev launcher: generates a token, runs uvicorn :8000 + Vite :5000
 ```
 
 ## How the pieces connect
 
 ```text
-Browser (React SPA) --axios /api + Bearer JWT--> FastAPI routers
-   routers --> core services --> yfinance (Yahoo HTTP, no caching)
+React UI --axios + Bearer <per-launch token>--> FastAPI on 127.0.0.1 (one local user)
+   routers --> core services --> core.yahoo (TTL cache) --> yfinance --> Yahoo HTTPS
                              --> SQLite file via core.db (new connection per call)
    order-like routes (broker/orders, ai approve, rebalance, autonomous engine)
         --> core/execution_safety.IntentService.admit[_batch]
         --> safety_* tables (intents, reservations, outbox, audit) — never a broker
-   /api/execution/worker/* (device-token auth) = future local-worker protocol stub
+   TWS worker (not built yet) will talk to the same SQLite outbox locally
 ```
 
-- Public (no auth): `/api/stocks/*`, `/api/indicators/*`, optimise/backtest/
-  fundamentals/CAPM under `/api/portfolio/*`. Everything user-owned needs JWT.
-- Env vars read: `SAPIENT_DATA_DIR` (default %APPDATA%\Sapient /
-  ~/.local/share/sapient), `SAPIENT_DB_PATH`, `SAPIENT_SKIP_MIGRATIONS`,
-  `SESSION_SECRET`, `CORS_ORIGINS`, `BROKER_ENCRYPTION_KEY`, `PORT`.
+- Every /api route except /api/health needs the launch token; there are no
+  user accounts, passwords or JWTs. Device pairing/lease HTTP routes were
+  removed (IntentService still has the methods, covered by tests).
+- Env vars read: `SAPIENT_API_TOKEN` (≥32 chars, required), `SAPIENT_DATA_DIR`
+  (default %APPDATA%\Sapient / ~/.local/share/sapient), `SAPIENT_DB_PATH`,
+  `SAPIENT_SKIP_MIGRATIONS`, `SAPIENT_ALLOWED_ORIGINS`; frontend dev:
+  `VITE_SAPIENT_API_TOKEN`.
 - API startup runs `core.migrations.migrate()`: backup to `<data>/backups/`
   before upgrading, refuses changed checksums or a newer schema.
 - Database rules: money/quantities in safety tables are exact decimal strings
@@ -126,14 +139,15 @@ cd frontend && npm ci        # frontend deps (frontend/package-lock.json)
 uv run python scripts/check.py   # what CI runs: tests + compileall + frontend build
 # Backend (dev, port 8000) + frontend (Vite, port 5000, proxies /api → 8000)
 uv run python run_dev.py
-# Production-style single server (FastAPI serves frontend/dist on $PORT, default 5000)
-cd frontend && npm run build && cd .. && python server.py
+# Desktop-style API (what Electron runs): token on stdin, prints ready JSON
+echo <32+ char token> | uv run python backend/desktop_main.py --data-dir /tmp/sapient
 
 # Tests (unittest, no pytest config)
 python -m unittest discover -s tests -p 'test_safety_spec.py' -v          # SQLite model, fast
 python -m unittest discover -s tests -p 'test_tws_readonly_check.py' -v   # mocked ibapi
 python -m unittest discover -s tests -p 'test_execution_safety_unit.py' -v
 python -m unittest discover -s tests -p 'test_execution_safety_sqlite.py' -v  # admission on real SQLite
+python -m unittest discover -s tests -p 'test_local_api.py' -v   # token/Host checks, desktop entrypoint, Yahoo cache
 python -m compileall -q core backend
 cd frontend && npm run build && npm run lint
 ```

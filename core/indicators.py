@@ -5,7 +5,7 @@ Core technical indicators
 import numpy as np
 import pandas as pd
 from typing import Tuple, Dict, List, Optional
-import yfinance as yf
+from core import yahoo as yf
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 

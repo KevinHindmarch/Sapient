@@ -16,6 +16,7 @@ TEST_PATTERNS = (
     "test_tws_readonly_check.py",
     "test_execution_safety_unit.py",
     "test_execution_safety_sqlite.py",
+    "test_local_api.py",
 )
 
 

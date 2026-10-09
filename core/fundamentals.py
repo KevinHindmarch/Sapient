@@ -4,7 +4,7 @@ Core fundamentals service - fetches and analyzes fundamental data for stocks
 
 import numpy as np
 import pandas as pd
-import yfinance as yf
+from core import yahoo as yf
 from typing import Dict, List, Optional, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
