@@ -33,12 +33,34 @@ export type EngineState =
 const READY_TIMEOUT_MS = 90_000 // first launch unpacks scipy/pandas and migrates the database
 const MAX_RESTARTS = 3
 const RESTART_WINDOW_MS = 60_000
+const WORKER_RETRY_MS = 5 * 60_000 // a failed TWS connector tries again on its own every 5 minutes
+
+/** Emergency stop without the API (`sapient-api --halt`): returns how many orders it asked TWS to cancel. */
+export function haltOffline(engine: EngineCommand, dataDir: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(engine.command, [...engine.args, '--data-dir', dataDir, '--halt'],
+      { cwd: engine.cwd, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
+    let result: { event?: string; working_orders?: number; message?: string } = {}
+    readline.createInterface({ input: child.stdout }).on('line', (line) => {
+      try { result = JSON.parse(line) } catch { /* not ours */ }
+    })
+    const timer = setTimeout(() => { child.kill(); reject(new Error('the stop took too long')) }, 60_000)
+    child.on('error', (error) => { clearTimeout(timer); reject(error) })
+    child.on('exit', () => {
+      clearTimeout(timer)
+      if (result.event === 'halted') resolve(result.working_orders ?? 0)
+      else reject(new Error(result.message ?? 'the stop could not be written'))
+    })
+  })
+}
 
 export class EngineSupervisor extends EventEmitter {
   private child: ChildProcessWithoutNullStreams | null = null
   private state: EngineState = { kind: 'stopped' }
   private restarts: number[] = []
   private stopping = false
+  private generation = 0
+  private retryTimer: NodeJS.Timeout | null = null
 
   constructor(
     private readonly engine: EngineCommand,
@@ -60,12 +82,24 @@ export class EngineSupervisor extends EventEmitter {
   start(): void {
     this.stopping = false
     this.restarts = []
+    if (this.retryTimer) clearTimeout(this.retryTimer)
+    this.retryTimer = null
+    const old = this.child
+    this.generation += 1  // an older process (e.g. one that never got ready) can no longer restart itself
+    this.child = null
+    old?.stdin.end()
+    old?.kill()
     this.launch(1)
   }
 
   private setState(state: EngineState): void {
     this.state = state
     this.emit('state', state)
+    if (state.kind === 'failed' && this.role === 'worker' && !this.stopping) {
+      // The TWS connector keeps trying on its own (the app shows and notifies the failure meanwhile).
+      if (this.retryTimer) clearTimeout(this.retryTimer)
+      this.retryTimer = setTimeout(() => { if (!this.stopping) this.start() }, WORKER_RETRY_MS)
+    }
   }
 
   private log(line: string): void {
@@ -89,10 +123,11 @@ export class EngineSupervisor extends EventEmitter {
       env: { ...process.env, PYTHONUNBUFFERED: '1', SAPIENT_DATA_DIR: this.dataDir },
     })
     this.child = child
+    const generation = this.generation
     let settled = false
 
     const timer = setTimeout(() => {
-      if (!settled) {
+      if (!settled && generation === this.generation) {
         settled = true
         this.log('engine did not become ready in time')
         child.kill()
@@ -110,7 +145,7 @@ export class EngineSupervisor extends EventEmitter {
         this.log(`engine: ${line}`)
         return
       }
-      if (settled) return
+      if (settled || generation !== this.generation) return
       if (event.event === 'ready' && (this.role === 'worker' || typeof event.port === 'number')) {
         settled = true
         clearTimeout(timer)
@@ -138,6 +173,7 @@ export class EngineSupervisor extends EventEmitter {
       clearTimeout(timer)
       this.log(`engine exited (code ${code}, signal ${signal})`)
       if (this.child === child) this.child = null
+      if (generation !== this.generation) return  // replaced by a newer start()
       if (this.stopping) {
         this.setState({ kind: 'stopped' })
         return
@@ -157,6 +193,7 @@ export class EngineSupervisor extends EventEmitter {
   /** Close stdin (the engine exits by itself), then force-kill if it lingers. */
   async stop(): Promise<void> {
     this.stopping = true
+    if (this.retryTimer) clearTimeout(this.retryTimer)
     const child = this.child
     if (!child) return
     await new Promise<void>((resolve) => {

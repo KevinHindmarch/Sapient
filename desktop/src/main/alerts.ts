@@ -62,6 +62,8 @@ export class Alerts {
     private readonly showWindow: () => void,
     private readonly settingsFile: string,
     private readonly iconFile: string,
+    /** Emergency stop straight in the database when the engine is not answering. */
+    private readonly haltOffline: () => Promise<number>,
   ) {
     this.settings = this.loadSettings()
   }
@@ -79,6 +81,14 @@ export class Alerts {
     if (this.timer) clearInterval(this.timer)
     this.tray?.destroy()
     this.tray = null
+  }
+
+  /** A problem the user must know about even with the window closed (e.g. a TWS connector stopped). */
+  warn(title: string, body: string): void {
+    if (!Notification.isSupported()) return
+    const note = new Notification({ title, body })
+    note.on('click', () => this.showWindow())
+    note.show()
   }
 
   /** Called when the window is hidden instead of closed. */
@@ -172,11 +182,9 @@ export class Alerts {
     this.refreshTray()
     const fresh = proposals.filter((p) => !this.seen.has(p.id))
     proposals.forEach((p) => this.seen.add(p.id))
-    if (!this.seeded) {  // what was already waiting at launch is shown in the app, not as a burst of toasts
-      this.seeded = true
-      return
-    }
-    if (fresh.length && Notification.isSupported()) this.notify(fresh)
+    // What was already waiting at launch is shown in the app, not as a burst of toasts.
+    if (this.seeded && fresh.length && Notification.isSupported()) this.notify(fresh)
+    this.seeded = true
     await this.pollOrders()
   }
 
@@ -191,7 +199,12 @@ export class Alerts {
     for (const order of orders) {
       const before = this.orderStates.get(order.id)
       this.orderStates.set(order.id, order.state)
-      if (!this.ordersSeeded || before === order.state) continue
+      if (!this.ordersSeeded) {
+        // At launch only orders that need the user now are announced (e.g. crash recovery marked them unknown).
+        if (order.state === 'UNKNOWN') notices.push({ title: ORDER_NOTICES.UNKNOWN(order), body: order.detail ?? '' })
+        continue
+      }
+      if (before === order.state) continue
       if (before === undefined && order.origin === 'ai_autonomous') {
         notices.push({ title: `Sapient is placing a ${kind(order).toLowerCase()} ${order.side.toLowerCase()}: ${Number(order.quantity)} ${order.symbol}`,
           body: `Automatic (fully automatic mode, ${order.environment === 'live' ? 'REAL MONEY' : 'paper account'}). `
@@ -223,7 +236,7 @@ export class Alerts {
       ? `Sapient proposes: ${first.action} ${first.quantity} ${first.symbol}`
       : `Sapient: ${fresh.length} new trade proposals`
     const body = fresh.length === 1
-      ? `${first.rule_summary}${answerBy}. Simulation only — nothing is sent to your broker.`
+      ? `${first.rule_summary}${answerBy}. Open the AI Inbox to approve or reject it; nothing is sent until you approve.`
       : `${fresh.map((p) => `${p.action} ${p.symbol}`).join(', ')}. Open the AI Inbox to review.`
     const note = new Notification({ title, body })
     note.on('click', () => this.openInbox())
@@ -246,19 +259,27 @@ export class Alerts {
       if (choice.response !== 0) return { ok: false, message: 'Cancelled' }
     }
     try {
-      const result = await this.call<{ cancelled_signals: number; paper_orders_cancel_requested?: number }>(
-        '/ai/kill-switch', 'POST')
+      let result: { cancelled_signals?: number; paper_orders_cancel_requested?: number }
+      try {
+        result = await this.call('/ai/kill-switch', 'POST')
+      } catch {
+        // The engine isn't answering: record the stop directly in Sapient's database instead.
+        result = { paper_orders_cancel_requested: await this.haltOffline() }
+      }
       const paperOrders = result.paper_orders_cancel_requested ?? 0
-      const message = `Stopped. AI Trading, paper and real-money trading are off and ${result.cancelled_signals} waiting proposal(s) were expired. `
+      const expired = result.cancelled_signals === undefined ? 'all' : String(result.cancelled_signals)
+      const message = `Stopped. AI Trading, paper and real-money trading are off and ${expired} waiting proposal(s) were expired. `
         + (paperOrders
           ? `Cancel requested for ${paperOrders} working order(s); TWS confirms each one on the Orders page. `
             + 'An order can still fill before its cancel arrives. Check TWS if in doubt.'
           : 'Sapient had no working orders at Interactive Brokers. Orders you placed yourself in TWS are not touched.')
-      await this.poll()
+      await this.poll().catch(() => undefined)
       if (confirm) await dialog.showMessageBox({ type: 'info', title: 'Emergency stop', message: 'AI trading stopped', detail: message })
       return { ok: true, message }
     } catch (error) {
-      const message = `The stop could not be recorded (${(error as Error).message}). Close Sapient to stop it completely.`
+      const message = `The stop could not be recorded (${(error as Error).message}). Quit Sapient (tray → Quit) `
+        + 'to stop it completely, and check TWS for working orders.'
+
       if (confirm) await dialog.showMessageBox({ type: 'error', title: 'Emergency stop', message: 'Stop failed', detail: message })
       return { ok: false, message }
     }

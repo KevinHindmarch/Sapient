@@ -78,13 +78,13 @@ def _signal_to_schema(d: dict) -> AISignal:
 
 
 @router.get("/settings", response_model=AITradingSettings)
-async def get_settings(current_user: dict = Depends(get_current_user)):
+def get_settings(current_user: dict = Depends(get_current_user)):
     s = AITradingSettingsService.get(current_user["id"])
     return AITradingSettings(**s)
 
 
 @router.put("/settings", response_model=AITradingSettings)
-async def update_settings(
+def update_settings(
     payload: AITradingSettingsUpdate,
     current_user: dict = Depends(get_current_user),
 ):
@@ -101,7 +101,7 @@ async def update_settings(
 
 
 @router.post("/kill-switch")
-async def kill_switch(current_user: dict = Depends(get_current_user)):
+def kill_switch(current_user: dict = Depends(get_current_user)):
     from core.execution_safety import SafetyError
     try:
         return AITradingSettingsService.kill_switch(current_user["id"])
@@ -115,7 +115,7 @@ async def kill_switch(current_user: dict = Depends(get_current_user)):
 
 
 @router.get("/signals", response_model=List[AISignal])
-async def list_signals(
+def list_signals(
     status: Optional[str] = "pending",
     limit: int = 100,
     current_user: dict = Depends(get_current_user),
@@ -127,7 +127,7 @@ async def list_signals(
 
 
 @router.post("/signals/{signal_id}/approve", status_code=202)
-async def approve_signal(
+def approve_signal(
     signal_id: int,
     current_user: dict = Depends(get_current_user),
 ):
@@ -159,7 +159,7 @@ async def approve_signal(
 
 
 @router.post("/signals/{signal_id}/reject", response_model=SignalDecisionResponse)
-async def reject_signal(
+def reject_signal(
     signal_id: int,
     current_user: dict = Depends(get_current_user),
 ):
@@ -194,7 +194,7 @@ async def reject_signal(
 
 
 @router.post("/signals/{signal_id}/snooze", response_model=SignalDecisionResponse)
-async def snooze_signal(
+def snooze_signal(
     signal_id: int,
     payload: SnoozeRequest = SnoozeRequest(),
     current_user: dict = Depends(get_current_user),
@@ -233,7 +233,7 @@ async def snooze_signal(
 
 
 @router.post("/scan/{portfolio_id}", response_model=ScanResponse)
-async def scan(
+def scan(
     portfolio_id: int,
     current_user: dict = Depends(get_current_user),
 ):
@@ -269,7 +269,7 @@ async def scan(
 
 
 @router.get("/audit", response_model=List[AuditEntry])
-async def list_audit(
+def list_audit(
     limit: int = 100,
     current_user: dict = Depends(get_current_user),
 ):
@@ -295,7 +295,7 @@ async def list_audit(
 
 
 @router.get("/scheduler")
-async def scheduler_status(current_user: dict = Depends(get_current_user)):
+def scheduler_status(current_user: dict = Depends(get_current_user)):
     """What the automatic checks are doing, market hours, and the latest runs."""
     from core import db
     from core.strategy import calendar

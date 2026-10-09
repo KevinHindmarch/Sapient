@@ -29,53 +29,55 @@ def make_router(profile: str) -> APIRouter:
     router = APIRouter()
 
     @router.get("/settings")
-    async def get_settings(user=Depends(get_current_user)):
+    def get_settings(user=Depends(get_current_user)):
         return store.get_settings(profile)
 
     @router.put("/settings")
-    async def update_settings(body: TwsSettingsUpdate, user=Depends(get_current_user)):
+    def update_settings(body: TwsSettingsUpdate, user=Depends(get_current_user)):
         changes = body.model_dump(exclude_none=True)
         if "paper_confirmed" in changes:
             changes["account_confirmed"] = changes.pop("paper_confirmed")
         if "expected_account" in changes:
             changes["expected_account"] = changes["expected_account"].upper() or None
             changes.setdefault("account_confirmed", False)  # a new account must be confirmed again
-        if profile == "live" and changes.get("account_confirmed") and \
-                (changes.get("expected_account") or store.get_settings("live").get("expected_account") or "").startswith("DU"):
-            raise HTTPException(409, detail={"code": "paper_account_on_live",
-                                             "message": "DU accounts are paper accounts; set them up on the Paper tab."})
+        if changes.get("account_confirmed"):
+            from core.tws.paper import account_kind_problem
+            problem = account_kind_problem(profile, changes.get("expected_account")
+                                           or store.get_settings(profile).get("expected_account"))
+            if problem:
+                raise HTTPException(409, detail={"code": problem[0], "message": problem[1]})
         if "sdk_folder" in changes:
             changes["sdk_folder"] = changes["sdk_folder"].strip() or None
         return store.save_settings(changes, profile)
 
     @router.get("/sdk")
-    async def sdk_status(user=Depends(get_current_user)):
+    def sdk_status(user=Depends(get_current_user)):
         sdk = find_sdk(store.get_settings(profile).get("sdk_folder"))
         return {"found": sdk is not None, "folder": sdk.folder if sdk else None, "version": sdk.version if sdk else None}
 
     @router.get("/status")
-    async def status(user=Depends(get_current_user)):
+    def status(user=Depends(get_current_user)):
         return store.get_status(profile)
 
     @router.post("/test", status_code=202)
-    async def start_test(user=Depends(get_current_user)):
+    def start_test(user=Depends(get_current_user)):
         if not store.get_status(profile)["worker_running"]:
             raise HTTPException(503, "The TWS connector is not running. Restart Sapient and try again.")
         return {"id": store.enqueue_command("test_connection", profile)}
 
     @router.get("/test/{command_id}")
-    async def test_result(command_id: int, user=Depends(get_current_user)):
+    def test_result(command_id: int, user=Depends(get_current_user)):
         command = store.get_command(command_id, profile)
         if command is None or command["kind"] != "test_connection":
             raise HTTPException(404, "Unknown test")
         return command
 
     @router.post("/reconnect", status_code=202)
-    async def reconnect(user=Depends(get_current_user)):
+    def reconnect(user=Depends(get_current_user)):
         return {"id": store.enqueue_command("reconnect", profile)}
 
     @router.get("/account")
-    async def account(user=Depends(get_current_user)):
+    def account(user=Depends(get_current_user)):
         """Latest read-only snapshots from TWS (summary, positions, open orders, executions)."""
         current = store.get_status(profile)
         return {"state": current["state"], "account": current["account"], "snapshots": store.snapshots(profile)}
@@ -88,7 +90,7 @@ live_router = make_router("live")
 
 
 @router.get("/compare/{portfolio_id}")
-async def compare_with_broker(portfolio_id: int, user=Depends(get_current_user)):
+def compare_with_broker(portfolio_id: int, user=Depends(get_current_user)):
     """Model holdings of one portfolio next to the latest TWS positions (read-only)."""
     from core.database import PortfolioService
     from core.tws.compare import compare

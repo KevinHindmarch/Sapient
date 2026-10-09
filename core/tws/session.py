@@ -21,10 +21,13 @@ from core.tws.transport import Transport
 
 INFORMATIONAL_CODES = {2104, 2106, 2107, 2108, 2119, 2158}
 DATA_FARM_BROKEN = {2103, 2105, 2157}
+# Market-data refusals that mean no prices will come (10167 "showing delayed data" is not one).
+NO_MARKET_DATA = {354, 10089, 10090, 10091, 10168, 10186, 10197}
 SUMMARY_TAGS = "AccountType,NetLiquidation,TotalCashValue,BuyingPower,AvailableFunds,GrossPositionValue"
 
 # Request ids used by Sapient's read-only session (one request of each kind at a time).
-REQ_SUMMARY, REQ_EXECUTIONS, REQ_CONTRACT, REQ_MARKET = 9001, 9002, 9003, 9004
+# Far above any order id TWS or Sapient uses (live order ids start at 1,000,000,001).
+REQ_SUMMARY, REQ_EXECUTIONS, REQ_CONTRACT, REQ_MARKET = 2_100_000_001, 2_100_000_002, 2_100_000_003, 2_100_000_004
 REQUEST_IDS = {REQ_SUMMARY, REQ_EXECUTIONS, REQ_CONTRACT, REQ_MARKET}
 
 # Broker evidence about orders. These are kept for the order projector no matter
@@ -265,8 +268,17 @@ class TwsSession:
                 result["market_data_type"] = fields.get("marketDataType")
             elif name == "tickPrice" and fields.get("reqId") == REQ_MARKET:
                 prices[str(fields.get("tickType"))] = _plain(fields.get("price"))
+        refused = []
+
+        def finished(name, fields):
+            if name == "error" and fields.get("reqId") == REQ_MARKET and _code(fields) in NO_MARKET_DATA:
+                refused.append(_code(fields))
+                return True
+            return name == "tickSnapshotEnd" and fields.get("reqId") == REQ_MARKET
         self.transport.request("reqMarketDataType", data_type)
         self.transport.request("reqMktData", REQ_MARKET, found[0], "", True, False, [])
-        self._wait(lambda n, f: n == "tickSnapshotEnd" and f.get("reqId") == REQ_MARKET, timeout, collect_ticks)
+        self._wait(finished, timeout, collect_ticks)
+        if refused:  # no permission: the caller explains it from health.errors
+            raise TwsTimeout(f"TWS refused market data ({refused[0]})")
         result["prices"] = prices
         return result

@@ -25,6 +25,7 @@ Guardrails enforced on every candidate signal:
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import math
 from typing import Any
 
 from core import yahoo as yf
@@ -125,20 +126,36 @@ def _kill_switch_active(settings: dict) -> bool:
     return datetime.now(timezone.utc) - ks_at < timedelta(hours=KILL_SWITCH_COOLDOWN_HOURS)
 
 
+RISK_EXITS = ("stop_loss", "take_profit")
+VOLATILITY_SPIKE_MULTIPLE = 3.0   # today's move vs the typical daily move of the last 20 days
+
+
+def _floor4(value: float) -> float:
+    """Round DOWN to 4 decimals so a trade sized at a cap never lands a hair above it."""
+    return math.floor(value * 10_000 + 1e-9) / 10_000
+
+
 def _within_guardrails(
     estimated_value: float,
     portfolio_value: float,
     signals_today: int,
     turnover_today: float,
     settings: dict,
+    risk_exit: bool = False,
 ) -> tuple[bool, str | None]:
-    """Apply per-trade and per-day guardrails. Returns (ok, reason_if_skipped)."""
+    """Apply per-trade and per-day guardrails. Returns (ok, reason_if_skipped).
+
+    Stop-loss and take-profit exits reduce risk, so trade-size, trade-count and
+    turnover limits never block them (they still go through the broker limits).
+    """
     if portfolio_value <= 0:
         return False, "portfolio_value_zero"
+    if risk_exit:
+        return True, None
 
     trade_pct = (estimated_value / portfolio_value) * 100.0
     max_trade_pct = float(settings.get("max_trade_pct") or 0)
-    if trade_pct > max_trade_pct:
+    if trade_pct > max_trade_pct + 1e-6:
         return False, f"trade_pct {trade_pct:.2f}% exceeds max_trade_pct {max_trade_pct}%"
 
     max_daily_trades = int(settings.get("max_daily_trades") or 0)
@@ -147,13 +164,70 @@ def _within_guardrails(
 
     max_turnover_pct = float(settings.get("max_daily_turnover_pct") or 0)
     new_turnover_pct = ((turnover_today + estimated_value) / portfolio_value) * 100.0
-    if max_turnover_pct > 0 and new_turnover_pct > max_turnover_pct:
+    if max_turnover_pct > 0 and new_turnover_pct > max_turnover_pct + 1e-6:
         return False, (
             f"daily turnover {new_turnover_pct:.2f}% would exceed "
             f"max_daily_turnover_pct {max_turnover_pct}%"
         )
 
     return True, None
+
+
+def _loss_breaker(analysed: list[tuple[dict, dict]], settings: dict) -> str | None:
+    """Pause new BUYs for the day when the portfolio has fallen this much since yesterday's close."""
+    limit = float(settings.get("breaker_on_loss_pct") or 0)
+    if limit <= 0:
+        return None
+    before = now = 0.0
+    for position, analysis in analysed:
+        qty = float(position.get("quantity") or 0)
+        prev, cur = analysis.get("previous_close"), analysis.get("current_price")
+        if qty > 0 and prev and cur:
+            before += qty * float(prev)
+            now += qty * float(cur)
+    if before <= 0:
+        return None
+    change = (now - before) / before * 100.0
+    if change <= -limit:
+        return (f"loss breaker: the portfolio is down {abs(change):.1f}% today (limit {limit:g}%), "
+                "so no new buys today; sells still run")
+    return None
+
+
+def _sector(symbol: str, cache: dict) -> str | None:
+    if symbol not in cache:
+        try:
+            cache[symbol] = (yf.Ticker(symbol).info or {}).get("sector") or None
+        except Exception:
+            cache[symbol] = None
+    return cache[symbol]
+
+
+def _buy_blocker(candidate: dict, analysis: dict, positions: list[dict], portfolio_value: float,
+                 queued: list[dict], settings: dict, sectors: dict) -> str | None:
+    """Volatility-spike breaker and sector cap for one BUY candidate (None = allowed)."""
+    if settings.get("breaker_on_volatility_spike"):
+        typical, move = analysis.get("daily_volatility"), analysis.get("last_return")
+        if typical and move is not None and abs(move) > VOLATILITY_SPIKE_MULTIPLE * typical:
+            return (f"volatility breaker: today's move ({move * 100:+.1f}%) is more than "
+                    f"{VOLATILITY_SPIKE_MULTIPLE:g}× its usual daily move, so no buy today")
+    cap = float(settings.get("sector_cap_pct") or 0)
+    if cap <= 0 or cap >= 100 or portfolio_value <= 0:
+        return None
+    sector = _sector(candidate["symbol"], sectors)
+    if not sector:
+        return None
+    exposure = candidate["quantity"] * candidate["price_at_signal"]
+    for p in positions:
+        if _sector(p["symbol"], sectors) == sector:
+            exposure += float(p.get("quantity") or 0) * float(p.get("avg_cost") or 0)
+    for s in queued:
+        if s["action"] == "BUY" and _sector(s["symbol"], sectors) == sector:
+            exposure += s["quantity"] * s["price_at_signal"]
+    share = exposure / (portfolio_value + candidate["quantity"] * candidate["price_at_signal"]) * 100.0
+    if share > cap + 1e-6:
+        return f"sector cap: {sector} would be {share:.1f}% of the portfolio (cap {cap:g}%)"
+    return None
 
 
 def _build_signal(
@@ -201,7 +275,7 @@ def _build_signal(
         depth = max(0.0, (rsi_buy - rsi_value) / max(rsi_buy, 1.0))
         confidence = min(0.95, 0.55 + depth * 0.4 + (0.05 if macd_signal in ("buy", "bullish") else 0.0))
         target_value = portfolio_value * (max_trade_pct / 100.0) * decision.fraction
-        quantity = max(round(target_value / current_price, 4), 0.0001)
+        quantity = max(_floor4(target_value / current_price), 0.0001)
         confirm = " + MACD bullish" if macd_signal in ("buy", "bullish") else ""
     else:
         if decision.rule == "rsi_overbought":
@@ -209,8 +283,12 @@ def _build_signal(
             confidence = min(0.95, 0.55 + depth * 0.4 + (0.05 if macd_signal in ("sell", "bearish") else 0.0))
         else:
             confidence = 0.9  # stop-loss / take-profit are rule hits, not estimates
-        max_qty_by_value = portfolio_value * (max_trade_pct / 100.0) / current_price
-        quantity = round(min(qty_held * decision.fraction, max_qty_by_value, qty_held), 4)
+        if decision.rule in RISK_EXITS:
+            # Stop-loss / take-profit sell the whole planned fraction (100%), not a trade-size slice.
+            quantity = _floor4(min(qty_held * decision.fraction, qty_held))
+        else:
+            max_qty_by_value = portfolio_value * (max_trade_pct / 100.0) / current_price
+            quantity = _floor4(min(qty_held * decision.fraction, max_qty_by_value, qty_held))
         if quantity <= 0:
             return None
         confirm = " + MACD bearish" if decision.rule == "rsi_overbought" and macd_signal in ("sell", "bearish") else ""
@@ -343,6 +421,7 @@ def scan_portfolio(user_id: int, portfolio_id: int, expires_at: datetime | None 
     skipped: list[dict] = []
     scanned = 0
 
+    analysed: list[tuple[dict, dict]] = []
     for position in positions:
         symbol = position["symbol"]
         scanned += 1
@@ -357,7 +436,12 @@ def scan_portfolio(user_id: int, portfolio_id: int, expires_at: datetime | None 
         if "error" in analysis:
             skipped.append({"symbol": symbol, "reason": analysis["error"]})
             continue
+        analysed.append((position, analysis))
 
+    loss_breaker = _loss_breaker(analysed, settings)
+    sectors: dict[str, str | None] = {}
+    for position, analysis in analysed:
+        symbol = position["symbol"]
         candidate = _build_signal(
             portfolio_id=portfolio_id,
             portfolio=portfolio,
@@ -370,6 +454,13 @@ def scan_portfolio(user_id: int, portfolio_id: int, expires_at: datetime | None 
         if candidate is None:
             continue
 
+        if candidate["action"] == "BUY":
+            blocked = loss_breaker or _buy_blocker(candidate, analysis, positions, portfolio_value,
+                                                  new_signals_payload, settings, sectors)
+            if blocked:
+                skipped.append({"symbol": symbol, "reason": blocked})
+                continue
+
         estimated_value = candidate["quantity"] * candidate["price_at_signal"]
         ok, reason = _within_guardrails(
             estimated_value=estimated_value,
@@ -378,6 +469,7 @@ def scan_portfolio(user_id: int, portfolio_id: int, expires_at: datetime | None 
             turnover_today=turnover_today_baseline
                 + sum(s["quantity"] * s["price_at_signal"] for s in new_signals_payload),
             settings=settings,
+            risk_exit=candidate["rationale"].get("rule") in RISK_EXITS,
         )
         if not ok:
             skipped.append({"symbol": symbol, "reason": reason})

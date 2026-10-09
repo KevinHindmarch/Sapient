@@ -2,6 +2,8 @@
 
     sapient-api --data-dir DIR [--port 0] [--allowed-origin app://sapient]
     sapient-api --worker --data-dir DIR     (the read-only TWS connector)
+    sapient-api --halt --data-dir DIR       (Emergency stop without the API; used by the
+                                             tray when the API is not answering)
 
 Protocol with the parent process (Electron main):
 - The parent writes the per-launch API token as the first line on stdin.
@@ -75,7 +77,12 @@ def main(argv=None) -> int:
     parser.add_argument("--worker", action="store_true", help="run the TWS connector instead of the API")
     parser.add_argument("--profile", choices=("paper", "live"), default="paper",
                         help="which TWS login the connector serves (live = real money)")
+    parser.add_argument("--halt", action="store_true",
+                        help="Emergency stop straight in the database, then exit (no token needed)")
     args = parser.parse_args(argv)
+
+    if args.halt:
+        return run_halt(args.data_dir)
 
     token = sys.stdin.readline().strip()
     if len(token) < 32:
@@ -113,6 +120,11 @@ def main(argv=None) -> int:
                 return
             time.sleep(0.05)
         emit("ready", port=port)
+        # Market-hours checks (and the automatic orders they may queue) run inside the API
+        # process, so they stop whenever the API - and with it the Emergency stop - is down.
+        from core.strategy.scheduler import run_forever
+        threading.Thread(target=run_forever, args=(lambda: server.should_exit,), name="scheduler",
+                         daemon=True).start()
     threading.Thread(target=announce, name="announce", daemon=True).start()
 
     server.run(sockets=[sock])
@@ -131,14 +143,30 @@ def run_worker(data_dir: Path, profile: str = "paper") -> int:
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
     logging.basicConfig(level=logging.INFO, handlers=[handler])
     emit("ready")
-    # Market-hours RSI checks live in the same background process as the TWS
-    # connector; they only create proposals, never orders.
-    if profile == "paper":  # one scheduler for every portfolio, paper or live
-        import threading
-        from core.strategy.scheduler import run_forever
-        threading.Thread(target=run_forever, args=(lambda: False,), name="scheduler", daemon=True).start()
     TwsWorker(profile=profile).run()
     return 0
+
+
+def run_halt(data_dir: Path) -> int:
+    """Emergency stop when the API is not answering: same effect as the in-app kill switch.
+
+    Switches AI Trading off, halts paper and live order sending and marks
+    Sapient's working orders for cancelling (the connectors send the cancels).
+    """
+    os.environ["SAPIENT_DATA_DIR"] = str(data_dir)
+    os.environ["SAPIENT_SKIP_MIGRATIONS"] = "1"
+    try:
+        from core.database import AITradingSettingsService, UserService
+        user = UserService.get_local_user()
+        if user is None:
+            emit("halted", working_orders=0)
+            return 0
+        result = AITradingSettingsService.kill_switch(user["id"])
+        emit("halted", working_orders=int((result or {}).get("paper_orders_cancel_requested") or 0))
+        return 0
+    except Exception as exc:
+        emit("error", code="halt_failed", message=str(exc))
+        return 4
 
 
 if __name__ == "__main__":

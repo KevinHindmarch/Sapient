@@ -96,3 +96,17 @@ not separately allocated (the account-level long-only check still prevents
 selling more than the account holds); finding new candidates outside a
 portfolio's holdings; rebalance batches to paper; live trading (separate
 explicit authorisation after a paper trial).
+
+## Additions in G1 (October 2026 audit)
+
+- A portfolio may only sell shares that filled for it in that account
+  (`portfolio_shares`); your own manual tickets are checked against the account.
+- DAY orders that TWS no longer lists after the ASX close become EXPIRED (fills
+  kept). If Sapient wasn't connected on the order's own trading day the order
+  becomes UNKNOWN for you to check, because that day's fills are no longer visible.
+- A cancel that TWS no longer lists 30 s later becomes CANCELLED.
+- Emergency stop also cancels orders that were mid-send when it was pressed.
+- A connection drop while waiting for TWS's answer makes the order UNKNOWN.
+- Broker messages for another API client's order id (or another permId) are ignored.
+- Market-data refusals (354, 10089, 10090, 10091, 10168, 10186, 10197) are
+  explained instead of "no price in time".

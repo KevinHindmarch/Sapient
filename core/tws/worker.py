@@ -30,7 +30,7 @@ from typing import Callable
 from core.tws import store
 from core.tws.diagnostics import port_open, run_test
 from core.tws.execution import PaperExecutor
-from core.tws.paper import get_binding
+from core.tws.paper import account_kind_problem, get_binding
 from core.tws.sdk import SdkInfo, SdkUnavailable, find_sdk
 from core.tws.session import TwsSession, TwsTimeout
 from core.tws.transport import IbapiTransport, Transport
@@ -169,7 +169,8 @@ class TwsWorker:
         """Orders only for the account the user authorised and confirmed for this profile."""
         binding = get_binding(env=self.profile)
         return bool(binding["account_id"] and binding["authorised_at"] and settings.get("account_confirmed")
-                    and settings.get("expected_account") == binding["account_id"])
+                    and settings.get("expected_account") == binding["account_id"]
+                    and account_kind_problem(self.profile, binding["account_id"]) is None)
 
     def _watch(self, settings: dict) -> None:
         session = self.session

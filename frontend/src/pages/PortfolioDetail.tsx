@@ -52,7 +52,6 @@ export default function PortfolioDetail() {
 
   const [brokerConnected, setBrokerConnected] = useState(false)
   const [brokerEnv, setBrokerEnv] = useState<'paper' | 'live' | null>(null)
-  const [brokerSimMode, setBrokerSimMode] = useState(true)
   const [accountSummary, setAccountSummary] = useState<{
     account_id?: string
     currency?: string
@@ -105,7 +104,6 @@ export default function PortfolioDetail() {
       const s = res.data
       setBrokerConnected(!!s?.tws_configured)
       setBrokerEnv(s?.mode === 'tws_live' ? 'live' : s?.mode === 'tws_paper' ? 'paper' : null)
-      setBrokerSimMode(s?.mode !== 'tws_paper' && s?.mode !== 'tws_live')
     } catch {
       setBrokerConnected(false)
     }
@@ -600,16 +598,11 @@ export default function PortfolioDetail() {
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <h3 className={`text-sm font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>AI Trading Mode</h3>
-              {brokerSimMode && (
-                <span className={`text-[10px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded-md ${isDark ? 'bg-amber-500/20 text-amber-300' : 'bg-amber-100 text-amber-700'}`}>
-                  Sim
-                </span>
-              )}
             </div>
             <p className={`text-xs mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
               {aiMode === 'off' && 'AI engine ignores this portfolio.'}
               {aiMode === 'suggestions' && 'AI sends signals to your inbox; you approve every trade.'}
-              {aiMode === 'autonomous' && 'AI can propose simulation intents within your guardrails; broker execution is disabled.'}
+              {aiMode === 'autonomous' && 'Fully automatic: once the portfolio is bought on paper or for real (below), Sapient trades it within your limits without asking.'}
             </p>
           </div>
         </div>
