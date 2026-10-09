@@ -31,12 +31,38 @@ def emit(event: str, **fields) -> None:
 
 def watch_parent(stdin) -> None:
     """Exit when the parent closes our stdin."""
-    def run():
-        try:
-            while stdin.readline():
-                pass
-        finally:
-            os._exit(0)
+    if sys.platform == "win32":
+        # A thread blocked in ReadFile on the stdin pipe makes every later
+        # CreateProcess hang on Windows (handle duplication waits for the
+        # pending read; Python's platform module spawns `ver` at startup).
+        # Poll with PeekNamedPipe instead, which never leaves a read pending.
+        import ctypes
+        import msvcrt
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        peek = kernel32.PeekNamedPipe
+        peek.argtypes = [wintypes.HANDLE, wintypes.LPVOID, wintypes.DWORD, wintypes.LPDWORD,
+                         wintypes.LPDWORD, wintypes.LPDWORD]
+        peek.restype = wintypes.BOOL
+        handle = msvcrt.get_osfhandle(stdin.fileno())
+        error_broken_pipe = 109
+
+        def run():
+            available = wintypes.DWORD()
+            while True:
+                if not peek(handle, None, 0, None, ctypes.byref(available), None):
+                    if ctypes.get_last_error() == error_broken_pipe:
+                        os._exit(0)
+                    return  # not a pipe (e.g. started from a console): nothing to watch
+                time.sleep(0.5)
+    else:
+        def run():
+            try:
+                while stdin.readline():
+                    pass
+            finally:
+                os._exit(0)
     threading.Thread(target=run, name="parent-watch", daemon=True).start()
 
 
