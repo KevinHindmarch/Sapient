@@ -3,6 +3,7 @@ Core database module
 """
 
 from datetime import datetime, timezone
+from decimal import Decimal
 
 from core import db
 
@@ -77,6 +78,15 @@ class UserService:
 
 class PortfolioService:
     """Handle portfolio CRUD operations."""
+
+    BROKER_MANAGED = ("This portfolio trades at Interactive Brokers, so its holdings follow your actual fills. "
+                      "Change it with orders (Orders page or the AI Inbox) instead.")
+
+    @staticmethod
+    def _own(cur, portfolio_id: int, user_id: int) -> dict | None:
+        cur.execute("SELECT * FROM portfolios WHERE id = %s AND user_id = %s", (portfolio_id, user_id))
+        row = cur.fetchone()
+        return dict(row) if row else None
     
     @staticmethod
     def save_portfolio(user_id: int, name: str, optimization_results: dict, 
@@ -222,17 +232,22 @@ class PortfolioService:
     @staticmethod
     def execute_trade(portfolio_id: int, user_id: int, symbol: str, 
                       txn_type: str, quantity: float, price: float, notes: str = None) -> dict:
-        """Execute a buy or sell trade."""
+        """Record a buy or sell you made yourself (bookkeeping only, nothing is sent to a broker)."""
+        from core import ledger
+        if txn_type not in ('buy', 'sell'):
+            return {'success': False, 'error': 'Trade type must be buy or sell'}
+        if not quantity or quantity <= 0 or not price or price <= 0:
+            return {'success': False, 'error': 'Quantity and price must be positive'}
         with get_db_cursor() as (cur, conn):
             try:
-                cur.execute("""
-                    SELECT id FROM portfolios WHERE id = %s AND user_id = %s
-                """, (portfolio_id, user_id))
-                
-                if not cur.fetchone():
+                portfolio = PortfolioService._own(cur, portfolio_id, user_id)
+                if portfolio is None:
                     return {'success': False, 'error': 'Portfolio not found'}
+                if portfolio.get('trading_environment'):
+                    return {'success': False, 'error': PortfolioService.BROKER_MANAGED}
                 
                 total_amount = quantity * price
+                realised = None
                 
                 if txn_type == 'sell':
                     cur.execute("""
@@ -246,6 +261,8 @@ class PortfolioService:
                     
                     if float(position['quantity']) < quantity:
                         return {'success': False, 'error': f'Insufficient shares'}
+                    cur.execute("SELECT avg_cost FROM portfolio_positions WHERE id = %s", (position['id'],))
+                    realised = (price - float(cur.fetchone()['avg_cost'])) * quantity
                     
                     new_quantity = float(position['quantity']) - quantity
                     if new_quantity <= 0:
@@ -261,6 +278,7 @@ class PortfolioService:
                     
                     position_id = position['id']
                 else:
+                    ledger.add_money_if_needed(cur, portfolio_id, Decimal(str(total_amount)))
                     cur.execute("""
                         SELECT id, quantity, avg_cost FROM portfolio_positions 
                         WHERE portfolio_id = %s AND symbol = %s AND status = 'active'
@@ -290,17 +308,10 @@ class PortfolioService:
                 cur.execute("""
                     INSERT INTO transactions (
                         portfolio_id, portfolio_position_id, txn_type, symbol, 
-                        quantity, price, total_amount, notes
+                        quantity, price, total_amount, notes, realised_pnl
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                """, (portfolio_id, position_id, txn_type, symbol, quantity, price, total_amount, notes))
-                
-                if txn_type == 'buy':
-                    cur.execute("""
-                        UPDATE portfolios 
-                        SET initial_investment = initial_investment + %s
-                        WHERE id = %s
-                    """, (total_amount, portfolio_id))
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, (portfolio_id, position_id, txn_type, symbol, quantity, price, total_amount, notes, realised))
                 
                 conn.commit()
                 return {'success': True, 'message': f'{txn_type.upper()} order executed'}
@@ -327,6 +338,8 @@ class PortfolioService:
                 position = cur.fetchone()
                 if not position:
                     return {'success': False, 'error': 'Position not found'}
+                if PortfolioService._own(cur, portfolio_id, user_id).get('trading_environment'):
+                    return {'success': False, 'error': PortfolioService.BROKER_MANAGED}
                 
                 old_qty = float(position['quantity'])
                 new_avg_cost = avg_cost if avg_cost is not None else float(position['avg_cost'])
@@ -350,21 +363,18 @@ class PortfolioService:
                     txn_qty = abs(qty_diff) if qty_diff != 0 else 0
                 
                 if txn_qty > 0:
+                    if txn_type == 'buy':
+                        from core import ledger
+                        ledger.cover_negative_cash(cur, portfolio_id)  # the position was already updated
                     cur.execute("""
                         INSERT INTO transactions (
                             portfolio_id, portfolio_position_id, txn_type, symbol, 
-                            quantity, price, total_amount, notes
+                            quantity, price, total_amount, notes, realised_pnl
                         )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """, (portfolio_id, position_id, txn_type, position['symbol'], 
-                          txn_qty, new_avg_cost, txn_qty * new_avg_cost, 'Position adjustment'))
-                    
-                    if txn_type == 'buy':
-                        cur.execute("""
-                            UPDATE portfolios 
-                            SET initial_investment = initial_investment + %s
-                            WHERE id = %s
-                        """, (txn_qty * new_avg_cost, portfolio_id))
+                          txn_qty, new_avg_cost, txn_qty * new_avg_cost,
+                          'Position adjustment (recorded at average cost)', 0 if txn_type == 'sell' else None))
                 
                 conn.commit()
                 return {'success': True, 'message': 'Position updated'}
@@ -385,6 +395,9 @@ class PortfolioService:
                 position = cur.fetchone()
                 if not position:
                     return {'success': False, 'error': 'Position not found'}
+                if PortfolioService._own(cur, portfolio_id, user_id).get('trading_environment') \
+                        and float(position['quantity']) > 0:
+                    return {'success': False, 'error': PortfolioService.BROKER_MANAGED}
                 
                 cur.execute("""
                     UPDATE portfolio_positions 
@@ -394,14 +407,15 @@ class PortfolioService:
                 
                 qty = float(position['quantity'])
                 price = float(position['avg_cost'])
-                cur.execute("""
-                    INSERT INTO transactions (
-                        portfolio_id, portfolio_position_id, txn_type, symbol, 
-                        quantity, price, total_amount, notes
-                    )
-                    VALUES (%s, %s, 'sell', %s, %s, %s, %s, %s)
-                """, (portfolio_id, position_id, position['symbol'], 
-                      qty, price, qty * price, 'Position removed'))
+                if qty > 0:
+                    cur.execute("""
+                        INSERT INTO transactions (
+                            portfolio_id, portfolio_position_id, txn_type, symbol, 
+                            quantity, price, total_amount, notes, realised_pnl
+                        )
+                        VALUES (%s, %s, 'sell', %s, %s, %s, %s, %s, 0)
+                    """, (portfolio_id, position_id, position['symbol'], 
+                          qty, price, qty * price, 'Position removed (recorded at average cost)'))
                 
                 conn.commit()
                 return {'success': True, 'message': 'Position removed'}
@@ -413,17 +427,31 @@ class PortfolioService:
         """Delete a portfolio and all its associated data."""
         with get_db_cursor() as (cur, conn):
             try:
-                cur.execute("""
-                    SELECT id FROM portfolios WHERE id = %s AND user_id = %s
-                """, (portfolio_id, user_id))
-                
-                if not cur.fetchone():
+                portfolio = PortfolioService._own(cur, portfolio_id, user_id)
+                if portfolio is None:
                     return {'success': False, 'error': 'Portfolio not found'}
+                if db.table_exists(cur, 'paper_orders'):
+                    from core.tws.paper import WORKING
+                    working = "','".join(WORKING)
+                    cur.execute(f"""SELECT count(*) AS n FROM paper_orders
+                                    WHERE portfolio_id = %s AND state IN ('{working}')""", (portfolio_id,))
+                    if cur.fetchone()['n']:
+                        return {'success': False, 'error': 'This portfolio has orders working at IBKR. Cancel them '
+                                                           '(Orders page) and wait until TWS confirms, then delete it.'}
+                cur.execute("""SELECT coalesce(sum(CAST(quantity AS REAL)), 0) AS q FROM portfolio_positions
+                               WHERE portfolio_id = %s AND status = 'active'""", (portfolio_id,))
+                held = float(cur.fetchone()['q'])
+                if db.table_exists(cur, 'safety_intents'):  # retired simulation records keep no link
+                    cur.execute("UPDATE safety_intents SET portfolio_id = NULL WHERE portfolio_id = %s", (portfolio_id,))
                 
                 cur.execute("DELETE FROM portfolios WHERE id = %s AND user_id = %s", 
                             (portfolio_id, user_id))
                 conn.commit()
-                return {'success': True, 'message': 'Portfolio deleted'}
+                message = 'Portfolio deleted'
+                if portfolio.get('trading_environment') and held > 0:
+                    message += ('. Its shares are still in your IBKR account; Sapient no longer manages them '
+                                '(sell them in TWS if you want to).')
+                return {'success': True, 'message': message}
             except Exception as e:
                 return {'success': False, 'error': str(e)}
 
@@ -440,12 +468,11 @@ class PortfolioService:
             
         with get_db_cursor() as (cur, conn):
             try:
-                cur.execute("""
-                    SELECT id FROM portfolios WHERE id = %s AND user_id = %s
-                """, (portfolio_id, user_id))
-                
-                if not cur.fetchone():
+                portfolio = PortfolioService._own(cur, portfolio_id, user_id)
+                if portfolio is None:
                     return {'success': False, 'error': 'Portfolio not found'}
+                if portfolio.get('trading_environment'):
+                    return {'success': False, 'error': PortfolioService.BROKER_MANAGED}
                 
                 cur.execute("""
                     SELECT id FROM portfolio_positions 
@@ -454,6 +481,8 @@ class PortfolioService:
                 
                 if cur.fetchone():
                     return {'success': False, 'error': f'{symbol} already exists in portfolio. Use edit to modify.'}
+                from core import ledger
+                ledger.add_money_if_needed(cur, portfolio_id, Decimal(str(quantity * avg_cost)))
                 
                 cur.execute("""
                     INSERT INTO portfolio_positions (portfolio_id, symbol, quantity, avg_cost, allocation_amount, status)

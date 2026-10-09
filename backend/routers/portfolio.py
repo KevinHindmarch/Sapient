@@ -26,7 +26,6 @@ from core.database import PortfolioService
 from core.fundamentals import FundamentalsService
 from core.capm import CAPMService
 from backend.security import get_current_user
-from backend.schemas.broker import PlaceOrdersRequest
 
 router = APIRouter()
 
@@ -172,6 +171,42 @@ def get_portfolios(current_user: dict = Depends(get_current_user)):
     return [PortfolioResponse(**p) for p in portfolios]
 
 
+def _market_of(portfolio_id: int, user_id: int) -> str:
+    details = PortfolioService.get_portfolio_details(portfolio_id, user_id)
+    if details is None:
+        raise HTTPException(status_code=404, detail="Portfolio not found")
+    return (details["portfolio"].get("market") or "ASX").upper()
+
+
+def _summary(details: dict, prices: dict | None = None) -> dict:
+    from core import ledger
+    actives = [p["symbol"] for p in details["positions"] if p.get("status") == "active"]
+    prices = prices if prices is not None else ledger.latest_prices(actives)
+    portfolio = details["portfolio"]
+    return {"name": portfolio.get("name"), "market": portfolio.get("market") or "ASX",
+            **ledger.summarise(portfolio, details["positions"], ledger.totals(portfolio["id"]), prices)}
+
+
+@router.get("/summaries")
+def get_portfolio_summaries(current_user: dict = Depends(get_current_user)):
+    """Value, cash and profit for every portfolio (prices fetched once for all of them)."""
+    from core import ledger
+    details = [PortfolioService.get_portfolio_details(p["id"], current_user["id"])
+               for p in PortfolioService.get_user_portfolios(current_user["id"])]
+    details = [d for d in details if d]
+    prices = ledger.latest_prices([p["symbol"] for d in details for p in d["positions"] if p.get("status") == "active"])
+    return [_summary(d, prices) for d in details]
+
+
+@router.get("/{portfolio_id}/summary")
+def get_portfolio_summary(portfolio_id: int, current_user: dict = Depends(get_current_user)):
+    """Value, cash, realised and unrealised profit for one portfolio (Yahoo prices; gaps are listed)."""
+    details = PortfolioService.get_portfolio_details(portfolio_id, current_user["id"])
+    if details is None:
+        raise HTTPException(status_code=404, detail="Portfolio not found")
+    return _summary(details)
+
+
 @router.get("/{portfolio_id}", response_model=PortfolioDetailResponse)
 def get_portfolio_detail(
     portfolio_id: int,
@@ -200,8 +235,8 @@ def execute_trade(
     trade: TradeRequest,
     current_user: dict = Depends(get_current_user)
 ):
-    """Execute a buy or sell trade."""
-    symbol = StockDataService.format_symbol(trade.symbol)
+    """Record a trade you made yourself (bookkeeping only)."""
+    symbol = StockDataService.format_symbol(trade.symbol, _market_of(portfolio_id, current_user['id']))
     
     result = PortfolioService.execute_trade(
         portfolio_id=portfolio_id,
@@ -284,7 +319,7 @@ def add_stock(
     current_user: dict = Depends(get_current_user)
 ):
     """Add a new stock to an existing portfolio."""
-    symbol = StockDataService.format_symbol(stock.symbol)
+    symbol = StockDataService.format_symbol(stock.symbol, _market_of(portfolio_id, current_user['id']))
     
     result = PortfolioService.add_stock_to_portfolio(
         portfolio_id=portfolio_id,
@@ -625,10 +660,17 @@ class _RebalanceLeg(_BaseModel):
 class _RebalancePlan(_BaseModel):
     portfolio_id: int
     portfolio_value: float
+    cash: float = 0.0
     total_drift_value: float
     legs: list[_RebalanceLeg]
     notes: str
-    sim: bool = True
+    environment: str | None = None   # 'paper' / 'live' when the legs can be placed at IBKR
+    can_execute: bool = False
+
+
+class _RebalanceExecute(_BaseModel):
+    legs: list[_RebalanceLeg]
+    idempotency_key: str
 
 
 @router.put("/{portfolio_id}/ai-mode")
@@ -664,61 +706,54 @@ def set_portfolio_ai_mode(
     return {"portfolio_id": portfolio_id, "ai_mode": body.ai_mode, "previous": previous}
 
 
-def _compute_rebalance_legs(positions: list, current_prices: dict) -> tuple[list[dict], float]:
-    """Compute drift-based BUY/SELL legs to bring positions back to target weights."""
+def _compute_rebalance_legs(positions: list, current_prices: dict, cash: float = 0.0) -> tuple[list[dict], float]:
+    """Whole-share BUY/SELL legs that bring holdings back to their target weights.
+
+    Targets are the weights the portfolio was built with, scaled to the holdings
+    that have one (stocks added later keep their value and are left alone).
+    Sells come first; buys only spend the cash the portfolio has after them.
+    """
     actives = [p for p in positions if p.get("status") == "active"]
-
-    # Current portfolio market value
-    portfolio_value = 0.0
-    pos_values: dict[int, float] = {}
-    for p in actives:
-        price = float(current_prices.get(p["symbol"]) or p.get("avg_cost") or 0)
-        mv = float(p["quantity"]) * price
-        pos_values[p["id"]] = mv
-        portfolio_value += mv
-
-    if portfolio_value <= 0:
-        return [], 0.0
+    priced = {p["symbol"]: float(current_prices.get(p["symbol"]) or 0) for p in actives}
+    targeted = [p for p in actives if float(p.get("weight_at_creation") or 0) > 0 and priced[p["symbol"]] > 0]
+    weight_sum = sum(float(p["weight_at_creation"]) for p in targeted)
+    values = {p["symbol"]: float(p["quantity"]) * priced[p["symbol"]] for p in targeted}
+    base = sum(values.values()) + max(cash, 0.0)
+    if base <= 0 or weight_sum <= 0:
+        return [], base
 
     legs: list[dict] = []
-    total_drift = 0.0
-    for p in actives:
-        target_weight = float(p.get("weight_at_creation") or 0)
-        if target_weight <= 0:
-            continue
-        price = float(current_prices.get(p["symbol"]) or p.get("avg_cost") or 0)
-        if price <= 0:
-            continue
-        current_value = pos_values.get(p["id"], 0.0)
-        current_weight = current_value / portfolio_value if portfolio_value > 0 else 0
-        target_value = target_weight * portfolio_value
-        drift_value = target_value - current_value
+    for p in targeted:
+        symbol, price = p["symbol"], priced[p["symbol"]]
+        target_weight = float(p["weight_at_creation"]) / weight_sum
+        current_weight = values[symbol] / base
         drift_pct = abs(current_weight - target_weight) * 100
-        # Only propose a leg if drift is meaningful (>= 1.5 percentage points)
-        if drift_pct < 1.5:
+        if drift_pct < 1.5:  # only meaningful drift (1.5 percentage points)
             continue
+        drift_value = target_weight * base - values[symbol]
         side = "BUY" if drift_value > 0 else "SELL"
-        qty = abs(drift_value) / price
-        # Round to 2 decimals for fractional shares; integer floor for full shares
-        qty = round(qty, 2)
-        if qty <= 0:
+        qty = int(abs(drift_value) // price)
+        if side == "SELL":
+            qty = min(qty, int(float(p["quantity"])))
+        if qty < 1:
             continue
-        legs.append(
-            {
-                "symbol": p["symbol"],
-                "side": side,
-                "quantity": qty,
-                "price": round(price, 4),
-                "estimated_value": round(qty * price, 2),
-                "current_weight": round(current_weight, 4),
-                "target_weight": round(target_weight, 4),
-                "drift_pct": round(drift_pct, 2),
-            }
-        )
-        total_drift += abs(drift_value)
+        legs.append({"symbol": symbol, "side": side, "quantity": float(qty), "price": round(price, 4),
+                     "estimated_value": round(qty * price, 2), "current_weight": round(current_weight, 4),
+                     "target_weight": round(target_weight, 4), "drift_pct": round(drift_pct, 2)})
 
-    legs.sort(key=lambda l: l["drift_pct"], reverse=True)
-    return legs, portfolio_value
+    # Sells first; buys (largest drift first) only up to the cash available after the sells.
+    sells = sorted((l for l in legs if l["side"] == "SELL"), key=lambda l: l["drift_pct"], reverse=True)
+    budget = max(cash, 0.0) + sum(l["estimated_value"] for l in sells)
+    buys = []
+    for leg in sorted((l for l in legs if l["side"] == "BUY"), key=lambda l: l["drift_pct"], reverse=True):
+        affordable = int(budget // leg["price"])
+        qty = min(int(leg["quantity"]), affordable)
+        if qty < 1:
+            continue
+        leg = {**leg, "quantity": float(qty), "estimated_value": round(qty * leg["price"], 2)}
+        budget -= leg["estimated_value"]
+        buys.append(leg)
+    return sells + buys, base
 
 
 @router.get("/{portfolio_id}/rebalance-plan", response_model=_RebalancePlan)
@@ -726,61 +761,73 @@ def get_rebalance_plan(
     portfolio_id: int,
     current_user: dict = Depends(get_current_user),
 ):
-    """Compute a drift-based rebalance plan that would be sent to the broker."""
+    """Whole-share plan back to the target weights; placeable at IBKR for portfolios trading there."""
+    from core import ledger
+    from core.tws import paper
     details = PortfolioService.get_portfolio_details(portfolio_id, current_user["id"])
     if details is None:
         raise HTTPException(404, "Portfolio not found")
-
-    positions = details["positions"]
+    portfolio, positions = details["portfolio"], details["positions"]
     actives = [p for p in positions if p.get("status") == "active"]
-
-    # Fetch current prices
-    current_prices: dict[str, float] = {}
-    for p in actives:
-        try:
-            info = StockDataService.get_stock_info(p["symbol"])
-            current_prices[p["symbol"]] = float(info.get("current_price") or 0)
-        except Exception:
-            current_prices[p["symbol"]] = 0.0
-
-    legs, portfolio_value = _compute_rebalance_legs(positions, current_prices)
+    prices = ledger.latest_prices([p["symbol"] for p in actives])
+    summary = ledger.summarise(portfolio, positions, ledger.totals(portfolio_id), prices)
+    legs, portfolio_value = _compute_rebalance_legs(positions, prices, summary["cash"])
     total_drift = sum(l["estimated_value"] for l in legs)
+    env = portfolio.get("trading_environment")
 
-    if not legs:
-        notes = "Portfolio is within tolerance — no rebalance recommended (drift < 1.5pp on every holding)."
+    if summary["prices_missing"]:
+        notes = f"No current price for {', '.join(summary['prices_missing'])}; those holdings are left out. "
     else:
-        notes = f"{len(legs)} drift-based order(s) proposed. Estimated total turnover: {total_drift:,.2f}."
-
+        notes = ""
+    if not legs:
+        notes += "Portfolio is within tolerance — no rebalance needed (drift under 1.5 points on every holding)."
+    else:
+        notes += f"{len(legs)} whole-share order(s): sells first, buys only with the cash available. " \
+                 f"Estimated turnover {total_drift:,.2f}."
+    if not env:
+        notes += " This portfolio isn't at Interactive Brokers, so this plan is for information only."
     return _RebalancePlan(
         portfolio_id=portfolio_id,
         portfolio_value=round(portfolio_value, 2),
+        cash=round(summary["cash"], 2),
         total_drift_value=round(total_drift, 2),
         legs=[_RebalanceLeg(**l) for l in legs],
         notes=notes,
-        sim=True,
+        environment=env,
+        can_execute=bool(env and legs and paper.active(env)),
     )
 
 
 @router.post("/{portfolio_id}/execute-rebalance", status_code=202)
 def execute_rebalance(
     portfolio_id: int,
-    payload: PlaceOrdersRequest,
+    payload: _RebalanceExecute,
     current_user: dict = Depends(get_current_user),
 ):
-    """Admit an explicit reviewed batch atomically, never recompute on retry."""
-    from core.execution_safety import IntentService, SafetyError
-    requests = []
-    for leg in payload.orders:
-        if leg.portfolio_id not in (None, portfolio_id) or leg.signal_id is not None:
-            raise HTTPException(400, "Rebalance leg reference mismatch")
-        requests.append({**leg.model_dump(), "origin": "rebalance",
-                         "environment": payload.environment,
-                         "account_id": f"SIM:{current_user['id']}",
-                         "portfolio_id": portfolio_id,
-                         "expires_at": leg.expires_at.isoformat()})
-    try:
-        intents = IntentService().admit_batch(current_user["id"], payload.idempotency_key, requests)
-    except SafetyError as exc:
-        raise HTTPException(409, detail={"code": exc.code, "message": str(exc)})
-    return {"intents": intents, "placed": [], "execution_enabled": False,
-            "message": "Batch reserved atomically. No broker orders submitted; no sell proceeds credited."}
+    """Queue the reviewed legs as orders in the portfolio's own IBKR account (sells first)."""
+    from core.tws import paper
+    portfolio = PortfolioService.get_portfolio_details(portfolio_id, current_user["id"])
+    if portfolio is None:
+        raise HTTPException(404, "Portfolio not found")
+    env = portfolio["portfolio"].get("trading_environment")
+    if not env:
+        raise HTTPException(409, detail={"code": "not_at_broker",
+                                         "message": "Buy this portfolio on paper or for real first; then rebalancing "
+                                                    "places orders in that account."})
+    results = []
+    ordered = sorted(payload.legs, key=lambda l: l.side != "SELL")
+    for index, leg in enumerate(ordered):
+        try:
+            order = paper.admit({"origin": "manual", "idempotency_key": f"rebalance:{payload.idempotency_key}:{index}",
+                                 "symbol": leg.symbol, "side": leg.side, "quantity": int(leg.quantity),
+                                 "reference_price": str(leg.price), "portfolio_id": portfolio_id},
+                                current_user["id"], env)
+            results.append({"symbol": leg.symbol, "side": leg.side, "ok": True, "order_id": order["id"]})
+        except paper.PaperError as exc:
+            results.append({"symbol": leg.symbol, "side": leg.side, "ok": False, "code": exc.code,
+                            "message": str(exc)})
+    queued = sum(r["ok"] for r in results)
+    label = "real-money" if env == "live" else "paper"
+    return {"environment": env, "results": results, "queued": queued,
+            "message": f"{queued} {label} order(s) queued; Sapient sends them to TWS in a few seconds."
+                       if queued else "No orders were queued; see the reasons for each order."}

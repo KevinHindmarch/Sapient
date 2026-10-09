@@ -35,8 +35,8 @@ class AdmissionContractTests(unittest.TestCase):
         with self.assertRaises(ExecutionPolicyError):
             client.cancel_order("SIM:7", "SIM-OLD")
         status = connection_status()
-        self.assertEqual(status["mode"], "simulation")
-        self.assertFalse(status["execution_enabled"])
+        self.assertEqual(status["mode"], "none")
+        self.assertFalse(status["paper_trading_enabled"] or status["live_trading_enabled"])
 
     def test_signal_requires_expiry(self):
         with self.assertRaises(SafetyError):

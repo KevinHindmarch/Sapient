@@ -1,5 +1,5 @@
-from pydantic import BaseModel
-from typing import List, Dict, Optional
+from pydantic import BaseModel, Field
+from typing import List, Dict, Literal, Optional
 from datetime import datetime
 
 
@@ -75,6 +75,7 @@ class PositionResponse(BaseModel):
     weight_at_creation: Optional[float]
     allocation_amount: Optional[float]
     status: str
+    planned_quantity: Optional[float] = None   # whole shares planned when bought at IBKR
 
 
 class PortfolioResponse(BaseModel):
@@ -92,6 +93,7 @@ class PortfolioResponse(BaseModel):
     position_count: Optional[int] = 0
     ai_mode: Optional[str] = "off"
     market: Optional[str] = "ASX"
+    trading_environment: Optional[str] = None  # 'paper' / 'live' once bought at IBKR
 
 
 class PortfolioDetailResponse(BaseModel):
@@ -102,10 +104,10 @@ class PortfolioDetailResponse(BaseModel):
 
 
 class TradeRequest(BaseModel):
-    symbol: str
-    txn_type: str  # 'buy' or 'sell'
-    quantity: float
-    price: float
+    symbol: str = Field(..., min_length=1, max_length=20)
+    txn_type: Literal["buy", "sell"]
+    quantity: float = Field(..., gt=0, allow_inf_nan=False)
+    price: float = Field(..., gt=0, allow_inf_nan=False)
     notes: Optional[str] = None
 
 

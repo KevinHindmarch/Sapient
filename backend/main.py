@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from fastapi.middleware.cors import CORSMiddleware
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from backend.routers import stocks, portfolio, indicators, broker, ai_trading, execution, tws, paper
+from backend.routers import stocks, portfolio, indicators, broker, ai_trading, tws, paper
 from backend.security import LocalAccessMiddleware
 
 
@@ -56,7 +56,6 @@ app.include_router(portfolio.router, prefix="/api/portfolio", tags=["Portfolio"]
 app.include_router(indicators.router, prefix="/api/indicators", tags=["Technical Indicators"])
 app.include_router(broker.router, prefix="/api/broker", tags=["Brokerage"])
 app.include_router(ai_trading.router, prefix="/api/ai", tags=["AI Trading"])
-app.include_router(execution.router, prefix="/api/execution", tags=["Execution safety"])
 app.include_router(tws.router, prefix="/api/tws", tags=["Interactive Brokers TWS"])
 app.include_router(paper.router, prefix="/api/paper", tags=["Paper trading"])
 app.include_router(tws.live_router, prefix="/api/tws-live", tags=["Interactive Brokers TWS (live)"])

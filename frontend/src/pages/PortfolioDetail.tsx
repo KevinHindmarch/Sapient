@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
-import { portfolioApi, stocksApi, brokerApi, aiApi, IntentBatchRequest, apiErrorMessage } from '../lib/api'
+import { portfolioApi, stocksApi, brokerApi, aiApi, apiErrorMessage, money, PortfolioSummary, RebalancePlan } from '../lib/api'
 import { Portfolio, Position, Transaction } from '../types'
 import { toast } from 'sonner'
-import { ArrowLeft, TrendingUp, TrendingDown, DollarSign, Pencil, Trash2, Plus, X, Search, RefreshCw, Sparkles, Send, Zap, Activity, Link2 } from 'lucide-react'
+import { ArrowLeft, TrendingUp, TrendingDown, DollarSign, Pencil, Trash2, Plus, X, Search, RefreshCw, Sparkles, Send, Zap, Activity, Link2, AlertTriangle } from 'lucide-react'
 import HelpTooltip from '../components/HelpTooltip'
 import BrokerCompareCard from '../components/BrokerCompareCard'
 import { format } from 'date-fns'
@@ -62,26 +62,12 @@ export default function PortfolioDetail() {
   } | null>(null)
   const [syncingBroker, setSyncingBroker] = useState(false)
 
-  type RebalanceLeg = {
-    symbol: string
-    side: 'BUY' | 'SELL'
-    quantity: number
-    price: number
-    estimated_value: number
-    current_weight: number
-    target_weight: number
-    drift_pct: number
-  }
   const [showRebalanceDrawer, setShowRebalanceDrawer] = useState(false)
   const [rebalanceLoading, setRebalanceLoading] = useState(false)
-  const [rebalancePlan, setRebalancePlan] = useState<{
-    legs: RebalanceLeg[]
-    portfolio_value: number
-    total_drift_value: number
-    notes: string
-  } | null>(null)
+  const [rebalancePlan, setRebalancePlan] = useState<RebalancePlan | null>(null)
   const [executingRebalance, setExecutingRebalance] = useState(false)
-  const [rebalanceRequest, setRebalanceRequest] = useState<IntentBatchRequest | null>(null)
+  const [rebalanceKey, setRebalanceKey] = useState('')
+  const [summary, setSummary] = useState<PortfolioSummary | null>(null)
 
   const [showAddModal, setShowAddModal] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -115,10 +101,13 @@ export default function PortfolioDetail() {
       navigate('/brokerage')
       return
     }
-    // Account sync is provided by the local TWS connector (coming next); never show invented balances.
+    // The TWS connector records every fill as it happens; this just reloads the latest figures.
     setSyncingBroker(true)
     setAccountSummary(null)
-    toast.info('Account sync becomes available with the TWS connector.')
+    await loadPortfolio()
+    toast.success(data?.portfolio.trading_environment
+      ? 'Refreshed. Holdings follow your IBKR fills automatically; compare them with your account below.'
+      : 'Refreshed. This portfolio is not bought at IBKR yet; compare it with your account below.')
     setSyncingBroker(false)
   }
 
@@ -144,44 +133,12 @@ export default function PortfolioDetail() {
     setShowRebalanceDrawer(true)
     setRebalanceLoading(true)
     setRebalancePlan(null)
-    setRebalanceRequest(null)
     try {
       const res = await portfolioApi.getRebalancePlan(Number(id))
-      // Freeze the reviewed payload and its retry keys. Never recompute prices or expiry on retry.
-      const legs: RebalanceLeg[] = (res.data.legs || []).filter((leg: RebalanceLeg) =>
-        Number.isFinite(leg.quantity) && Math.floor(leg.quantity) >= 1 &&
-        Number.isFinite(leg.price) && leg.price > 0
-      ).map((leg: RebalanceLeg) => ({
-        ...leg,
-        quantity: Math.floor(leg.quantity),
-        estimated_value: Math.floor(leg.quantity) * leg.price,
-      }))
-      const expires_at = new Date(Date.now() + 15 * 60 * 1000).toISOString()
-      setRebalanceRequest({
-        environment: 'simulation',
-        idempotency_key: crypto.randomUUID(),
-        orders: legs.map((leg) => ({
-          symbol: leg.symbol,
-          side: leg.side,
-          quantity: leg.quantity,
-          order_type: 'LMT',
-          limit_price: leg.price,
-          idempotency_key: crypto.randomUUID(),
-          expires_at,
-          portfolio_id: Number(id),
-        })),
-      })
-      setRebalancePlan({
-        legs,
-        portfolio_value: res.data.portfolio_value || 0,
-        total_drift_value: legs.reduce((sum, leg) => sum + leg.estimated_value, 0),
-        notes: legs.length < (res.data.legs || []).length
-          ? 'Some proposed legs were excluded because whole shares or a valid limit price were unavailable.'
-          : res.data.notes || '',
-      })
+      setRebalancePlan(res.data as RebalancePlan)
+      setRebalanceKey(crypto.randomUUID())  // the reviewed plan is sent once; retries reuse the key
     } catch (e: unknown) {
-      const err = e as { response?: { data?: { detail?: string } } }
-      toast.error(err.response?.data?.detail || 'Failed to compute rebalance plan')
+      toast.error(apiErrorMessage(e, 'Failed to compute rebalance plan'))
       setShowRebalanceDrawer(false)
     } finally {
       setRebalanceLoading(false)
@@ -189,25 +146,17 @@ export default function PortfolioDetail() {
   }
 
   const handleExecuteRebalance = async () => {
-    if (!id || !rebalanceRequest?.orders.length) return
+    if (!id || !rebalancePlan?.legs.length || !rebalancePlan.can_execute) return
     setExecutingRebalance(true)
     try {
-      const res = await portfolioApi.executeRebalance(Number(id), rebalanceRequest)
-      const queued = res.data.intents?.filter((intent) => intent.state === 'QUEUED').length || 0
-      const failed = res.data.failed?.length || 0
-      if (!queued && !failed) {
-        toast.error('No intents queued. Review the current safety state before retrying.')
-        return
-      }
-      if (queued > 0) {
-        toast.success(`${queued} simulation intent(s) queued. No broker orders placed or filled.`)
-      }
-      if (failed > 0) {
-        toast.error(`${failed} intent(s) refused`)
-      }
-      if (queued && !failed) setShowRebalanceDrawer(false)
+      const res = await portfolioApi.executeRebalance(Number(id), rebalancePlan.legs, rebalanceKey)
+      const refused = res.data.results.filter((r) => !r.ok)
+      if (res.data.queued) toast.success(res.data.message)
+      for (const r of refused.slice(0, 3)) toast.error(`${r.side} ${r.symbol}: ${r.message}`)
+      if (res.data.queued && !refused.length) setShowRebalanceDrawer(false)
+      await loadPortfolio()
     } catch (e: unknown) {
-      toast.error(apiErrorMessage(e, 'Intent admission refused'))
+      toast.error(apiErrorMessage(e, 'The orders were refused'))
     } finally {
       setExecutingRebalance(false)
     }
@@ -230,20 +179,20 @@ export default function PortfolioDetail() {
     }
   }
 
+  // One engine call values the whole portfolio (cash, realised profit, missing prices).
   const loadCurrentPrices = async (symbols: string[]) => {
     setLoadingPrices(true)
     setPriceProgress({ done: 0, total: symbols.length })
-    const prices: Record<string, number> = {}
-    for (let i = 0; i < symbols.length; i++) {
-      try {
-        const response = await stocksApi.info(symbols[i])
-        prices[symbols[i]] = response.data.current_price
-      } catch {
-        prices[symbols[i]] = 0
-      }
-      setPriceProgress({ done: i + 1, total: symbols.length })
+    try {
+      const response = await portfolioApi.summary(Number(id))
+      const prices: Record<string, number> = {}
+      for (const h of response.data.holdings) prices[h.symbol] = h.price ?? 0
+      setCurrentPrices(prices)
+      setSummary(response.data)
+    } catch {
+      setSummary(null)
     }
-    setCurrentPrices(prices)
+    setPriceProgress({ done: symbols.length, total: symbols.length })
     setLoadingPrices(false)
   }
 
@@ -418,6 +367,8 @@ export default function PortfolioDetail() {
   }
 
   const { portfolio, positions, transactions } = data
+  // Bought at IBKR: holdings follow real fills, so they can't be edited by hand.
+  const atBroker = !!portfolio.trading_environment
 
   const chartData = positions
     .filter((p) => p.status === 'active')
@@ -437,8 +388,9 @@ export default function PortfolioDetail() {
     return sum + (Number(p.avg_cost) * Number(p.quantity))
   }, 0)
 
-  const totalReturn = totalValue - costBasis
-  const totalReturnPct = costBasis > 0 ? (totalReturn / costBasis) * 100 : 0
+  // The engine's figures (with cash and realised profit) when available.
+  const totalReturn = summary ? summary.total_return : totalValue - costBasis
+  const totalReturnPct = summary ? summary.total_return_pct : costBasis > 0 ? ((totalValue - costBasis) / costBasis) * 100 : 0
 
   const generateGrowthData = () => {
     const initial = Number(portfolio.initial_investment)
@@ -563,14 +515,14 @@ export default function PortfolioDetail() {
             }`}
           >
             {syncingBroker ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Link2 className="w-4 h-4" />}
-            <span className="hidden sm:inline">Sync IBKR</span>
+            <span className="hidden sm:inline">Refresh</span>
           </button>
           <button
             onClick={openRebalanceDrawer}
             className="flex items-center gap-1.5 px-3 py-2 sm:px-4 sm:py-2.5 bg-gradient-to-r from-emerald-500/15 to-sky-500/15 hover:from-emerald-500/25 hover:to-sky-500/25 text-emerald-400 hover:text-emerald-300 rounded-xl border border-emerald-500/30 hover:border-emerald-500/50 font-medium transition-all duration-200 text-sm"
           >
             <Send className="w-4 h-4" />
-            <span className="hidden sm:inline">Execute via Broker</span>
+            <span className="hidden sm:inline">Rebalance</span>
           </button>
           <button
             onClick={() => setShowDeletePortfolioModal(true)}
@@ -581,7 +533,9 @@ export default function PortfolioDetail() {
           </button>
           <button
             onClick={() => setShowAddModal(true)}
-            className="btn-primary flex items-center gap-2 text-sm"
+            className="btn-primary flex items-center gap-2 text-sm disabled:opacity-50"
+            disabled={atBroker}
+            title={atBroker ? 'This portfolio follows your IBKR fills; buy more with an order instead' : undefined}
           >
             <Plus className="w-4 h-4 sm:w-5 sm:h-5" />
             <span>Add Stock</span>
@@ -697,24 +651,34 @@ export default function PortfolioDetail() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      {summary && summary.prices_missing.length > 0 && (
+        <p className="text-sm text-amber-600 flex items-center gap-2" data-testid="prices-missing">
+          <AlertTriangle className="w-4 h-4" /> No current price for {summary.prices_missing.join(', ')} (Yahoo didn't answer).
+          Those holdings are valued at what they cost until a price comes back.
+        </p>
+      )}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4" data-testid="portfolio-money">
         <div className="card">
-          <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Cost Basis</p>
+          <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Money put in</p>
           <p className={`text-2xl font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
-            ${costBasis.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+            {summary ? money(summary.money_put_in, summary.currency, 0) : `$${costBasis.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
           </p>
+          <p className="text-xs theme-text-muted">Holdings cost {summary ? money(summary.cost_of_holdings, summary.currency, 0) : '…'}</p>
         </div>
         <div className="card">
-          <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Current Value</p>
+          <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Value now (incl. cash)</p>
           {loadingPrices ? (
             <div className="mt-2 space-y-1.5">
               <div className="animate-pulse h-8 w-28 rounded-lg bg-slate-500/20" />
               <p className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Loading live data…</p>
             </div>
           ) : (
-            <p className={`text-2xl font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
-              ${totalValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-            </p>
+            <>
+              <p className={`text-2xl font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+                {summary ? money(summary.total_value, summary.currency, 0) : `$${totalValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
+              </p>
+              {summary && <p className="text-xs theme-text-muted">Shares {money(summary.market_value, summary.currency, 0)}</p>}
+            </>
           )}
         </div>
         <div className="card">
@@ -732,12 +696,19 @@ export default function PortfolioDetail() {
               {totalReturn >= 0 ? '+' : ''}{totalReturnPct.toFixed(2)}%
             </p>
           )}
+          {summary && !loadingPrices && (
+            <p className="text-xs theme-text-muted">
+              {money(summary.total_return, summary.currency, 0)} · sold {money(summary.realised_pnl, summary.currency, 0)}
+              {summary.fees > 0 ? ` · fees ${money(summary.fees, summary.currency, 0)}` : ''}
+            </p>
+          )}
         </div>
         <div className="card">
-          <p className={`text-sm flex items-center ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Expected Sharpe<HelpTooltip term="Sharpe Ratio" /></p>
-          <p className="text-2xl font-bold text-sky-700 dark:text-sky-400">
-            {Number(portfolio.expected_sharpe || 0).toFixed(2)}
+          <p className={`text-sm flex items-center ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Cash</p>
+          <p className={`text-2xl font-bold ${summary && summary.cash < 0 ? 'text-red-500' : isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+            {summary ? money(summary.cash, summary.currency, 0) : '…'}
           </p>
+          <p className="text-xs theme-text-muted">Not yet invested, or from sales</p>
         </div>
       </div>
 
@@ -820,6 +791,7 @@ export default function PortfolioDetail() {
               </thead>
               <tbody>
                 {positions.filter(p => p.status === 'active').map((position) => {
+                  const priceMissing = !currentPrices[position.symbol]
                   const currentPrice = currentPrices[position.symbol] || Number(position.avg_cost)
                   const marketValue = currentPrice * Number(position.quantity)
                   const costBasis = Number(position.avg_cost) * Number(position.quantity)
@@ -829,14 +801,22 @@ export default function PortfolioDetail() {
                   return (
                     <tr key={position.id} className={`border-b ${isDark ? 'border-slate-700/50' : 'border-slate-200'} last:border-b-0 ${isDark ? 'bg-slate-800/30 hover:bg-slate-700/30' : 'bg-slate-50 hover:bg-slate-100'} transition-colors`}>
                       <td className={`py-3 font-medium ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{position.symbol.replace('.AX', '')}</td>
-                      <td className={`py-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{Number(position.quantity).toFixed(2)}</td>
+                      <td className={`py-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                        {atBroker ? Number(position.quantity).toFixed(0) : Number(position.quantity).toFixed(2)}
+                        {atBroker && position.planned_quantity != null && Number(position.quantity) < Number(position.planned_quantity) && (
+                          <span className="block text-xs text-amber-600">of {Number(position.planned_quantity)} planned</span>
+                        )}
+                      </td>
                       <td className={`py-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>${Number(position.avg_cost).toFixed(2)}</td>
-                      <td className={`py-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>${currentPrice.toFixed(2)}</td>
+                      <td className={`py-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                        {priceMissing && !loadingPrices ? <span className="text-amber-600" title="No current price from Yahoo">n/a</span> : `$${currentPrice.toFixed(2)}`}
+                      </td>
                       <td className={`py-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>${marketValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
                       <td className={`py-3 font-medium ${pl >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ textShadow: pl >= 0 ? '0 0 10px rgba(52, 211, 153, 0.3)' : '0 0 10px rgba(248, 113, 113, 0.3)' }}>
                         {pl >= 0 ? '+' : ''}{plPct.toFixed(2)}%
                       </td>
                       <td className="py-3 text-right">
+                        {atBroker ? <span className="text-xs theme-text-muted">at IBKR</span> : (
                         <div className="flex items-center justify-end gap-1">
                           <button
                             onClick={() => openEditModal(position)}
@@ -853,6 +833,7 @@ export default function PortfolioDetail() {
                             <Trash2 className="w-4 h-4" />
                           </button>
                         </div>
+                        )}
                       </td>
                     </tr>
                   )
@@ -1186,9 +1167,11 @@ export default function PortfolioDetail() {
                   <Send className="w-5 h-5" />
                 </div>
                 <div>
-                  <h2 className={`text-lg font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Review Rebalance Intents</h2>
+                  <h2 className={`text-lg font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Rebalance to target weights</h2>
                   <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                    Simulation intent review · LMT DAY · whole shares · no broker execution
+                    {rebalancePlan?.environment === 'live' ? 'REAL-MONEY orders in your live account'
+                      : rebalancePlan?.environment === 'paper' ? 'Paper orders in your TWS paper account'
+                      : 'Information only (this portfolio is not at Interactive Brokers)'} · limit DAY · whole shares
                   </p>
                 </div>
               </div>
@@ -1210,7 +1193,7 @@ export default function PortfolioDetail() {
                     <Zap className="w-6 h-6" />
                   </div>
                   <p className={`font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
-                    {rebalancePlan.notes.includes('excluded') ? 'No eligible whole-share limit legs' : 'Portfolio is in balance'}
+                    Nothing to rebalance
                   </p>
                   <p className={`text-sm mt-1 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>{rebalancePlan.notes}</p>
                 </div>
@@ -1218,11 +1201,17 @@ export default function PortfolioDetail() {
 
               {!rebalanceLoading && rebalancePlan && rebalancePlan.legs.length > 0 && (
                 <>
-                  <div className={`grid grid-cols-2 gap-3 mb-4 text-sm`}>
+                  <div className={`grid grid-cols-3 gap-3 mb-4 text-sm`}>
                     <div className={`p-3 rounded-xl ${isDark ? 'bg-slate-800/50' : 'bg-slate-50'}`}>
-                      <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Portfolio value</p>
+                      <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Value incl. cash</p>
                       <p className={`font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
                         ${rebalancePlan.portfolio_value.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                      </p>
+                    </div>
+                    <div className={`p-3 rounded-xl ${isDark ? 'bg-slate-800/50' : 'bg-slate-50'}`}>
+                      <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Cash</p>
+                      <p className={`font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+                        ${rebalancePlan.cash.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                       </p>
                     </div>
                     <div className={`p-3 rounded-xl ${isDark ? 'bg-slate-800/50' : 'bg-slate-50'}`}>
@@ -1255,7 +1244,7 @@ export default function PortfolioDetail() {
                             <p className={`font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
                               {leg.symbol.replace('.AX', '')}
                               <span className={`ml-2 text-xs font-normal ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                                {leg.quantity} whole shares · LMT DAY @ ${leg.price.toFixed(4)}
+                                {leg.quantity} shares · about ${leg.price.toFixed(2)} each
                               </span>
                             </p>
                             <p className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
@@ -1270,10 +1259,8 @@ export default function PortfolioDetail() {
                     ))}
                   </div>
 
-                  <p className="text-xs theme-text-muted mt-4">
-                    Admission requires current safety checks. Queuing does not place an IBKR order or change holdings.
-                    Paper and live execution remain blocked.
-                  </p>
+                  <p className="text-xs theme-text-muted mt-4">{rebalancePlan.notes} Each order still goes through your
+                    limits and TWS's own price check; the limit price is set from TWS's price when it is sent.</p>
                 </>
               )}
             </div>
@@ -1288,18 +1275,20 @@ export default function PortfolioDetail() {
               </button>
               <button
                 onClick={handleExecuteRebalance}
-                disabled={executingRebalance || !rebalanceRequest?.orders.length}
+                disabled={executingRebalance || !rebalancePlan?.can_execute}
                 className="btn-primary flex-1 flex items-center justify-center gap-2 disabled:opacity-50"
               >
                 {executingRebalance ? (
                   <>
                     <RefreshCw className="w-4 h-4 animate-spin" />
-                    Queueing…
+                    Placing…
                   </>
                 ) : (
                   <>
                     <Send className="w-4 h-4" />
-                    Queue {rebalanceRequest?.orders.length || 0} simulation intent(s)
+                    {rebalancePlan?.can_execute
+                      ? `Place ${rebalancePlan.legs.length} ${rebalancePlan.environment === 'live' ? 'REAL-MONEY' : 'paper'} order(s)`
+                      : rebalancePlan?.environment ? 'Trading is switched off for this account' : 'Buy this portfolio at IBKR to rebalance'}
                   </>
                 )}
               </button>

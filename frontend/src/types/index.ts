@@ -61,6 +61,7 @@ export interface Portfolio {
   position_count?: number
   ai_mode?: 'off' | 'suggestions' | 'autonomous'
   market?: string
+  trading_environment?: 'paper' | 'live' | null
 }
 
 export interface Position {
@@ -71,6 +72,7 @@ export interface Position {
   weight_at_creation: number | null
   allocation_amount: number | null
   status: string
+  planned_quantity?: number | null
 }
 
 export interface Transaction {

@@ -136,7 +136,7 @@ def approve_signal(
         raise HTTPException(status_code=404, detail="Signal not found")
     from core.tws import paper
     env = paper.environment_for(signal.get("portfolio_id"))
-    if env:  # the portfolio trades in paper or live (or paper is on): approval queues a broker order
+    if env:  # the portfolio trades in paper or live: approval queues an order in that account
         try:
             order = paper.admit(paper.signal_order(signal, "ai_approval", env), current_user["id"], env)
         except paper.PaperError as exc:
@@ -148,14 +148,10 @@ def approve_signal(
                 "message": ("REAL-MONEY order queued; Sapient sends it to your TWS live account in a few seconds."
                             if env == "live" else
                             "Paper order queued; Sapient sends it to your TWS paper account in a few seconds.")}
-    from core.execution_safety import IntentService, SafetyError, signal_request
-    try:
-        intent = IntentService().admit(current_user["id"], signal_request(
-            current_user["id"], signal, origin="ai_approval"))
-    except SafetyError as exc:
-        raise HTTPException(409, detail={"code": exc.code, "message": str(exc)})
-    return {"intent": intent, "execution_enabled": False,
-            "message": "Signal claimed and simulation intent queued; no broker order submitted."}
+    raise HTTPException(409, detail={"code": "not_at_broker",
+                                     "message": "This portfolio isn't bought at Interactive Brokers yet, so there is "
+                                                "nothing to trade. Use “Buy on paper / for real & manage” on its page "
+                                                "first, or reject this proposal."})
 
 
 @router.post("/signals/{signal_id}/reject", response_model=SignalDecisionResponse)

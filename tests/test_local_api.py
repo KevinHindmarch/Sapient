@@ -99,7 +99,7 @@ class LocalApiTests(unittest.TestCase):
         self.assertEqual(self.client.post("/api/tws/test", headers=self.auth()).status_code, 503)
         self.assertEqual(self.client.get("/api/tws/test/999", headers=self.auth()).status_code, 404)
         broker = self.client.get("/api/broker/status", headers=self.auth()).json()
-        self.assertFalse(broker["execution_enabled"])
+        self.assertFalse(broker["paper_trading_enabled"] or broker["live_trading_enabled"])
         self.client.put("/api/tws/settings", headers=self.auth(), json={"enabled": False, "expected_account": ""})
 
     def test_strategy_settings_and_scheduler_status(self):
@@ -120,15 +120,16 @@ class LocalApiTests(unittest.TestCase):
     def test_removed_login_and_oauth_routes_are_gone(self):
         for method, path in (("post", "/api/auth/login"), ("post", "/api/auth/register"),
                              ("post", "/api/broker/credentials"), ("get", "/api/broker/account"),
-                             ("post", "/api/execution/pairings")):
+                             ("post", "/api/execution/pairings"), ("get", "/api/execution/intents"),
+                             ("post", "/api/broker/orders"), ("post", "/api/execution/simulation/bind")):
             with self.subTest(path=path):
                 self.assertEqual(getattr(self.client, method)(path, headers=self.auth()).status_code, 404)
 
     def test_broker_status_is_truthful(self):
         status = self.client.get("/api/broker/status", headers=self.auth()).json()
-        self.assertEqual(status["mode"], "simulation")
+        self.assertEqual(status["mode"], "none")
         self.assertFalse(status["tws_configured"])
-        self.assertFalse(status["execution_enabled"])
+        self.assertFalse(status["paper_trading_enabled"] or status["live_trading_enabled"])
 
 
 class DesktopEntrypointTests(unittest.TestCase):

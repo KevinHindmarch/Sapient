@@ -8,8 +8,9 @@ and several checks were missed, only the latest one still inside market hours
 runs; the others are recorded as missed. Every tick also expires unanswered
 proposals whose answer-by time has passed.
 
-Proposals are only proposals: approvals and autonomous mode still go through
-the safety admission (`IntentService`), which only records simulation intents.
+Proposals become orders only through core.tws.paper.admit, in the account the
+portfolio was bought in: when you approve them, or automatically in fully
+automatic mode if you allowed automatic orders for that account.
 """
 from __future__ import annotations
 

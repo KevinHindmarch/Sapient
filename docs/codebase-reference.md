@@ -73,28 +73,27 @@ the portfolio table records which routes were public before Phase C.
 | POST | /capm/optimize | CAPM expected returns → optimiser | public |
 | GET | /capm/scan?top_n&period | CAPM over ASX200 | public |
 | PUT | /{id}/ai-mode | raw SQL on portfolios.ai_mode + audit | JWT |
-| GET | /{id}/rebalance-plan | drift legs (threshold 1.5pp) | JWT |
-| POST | /{id}/execute-rebalance | IntentService.admit_batch, origin rebalance, account `SIM:{uid}` | JWT |
+| GET | /{id}/rebalance-plan | whole-share legs back to target weights (1.5pp threshold), sells first, buys within cash; `can_execute` for portfolios at IBKR | token |
+| POST | /{id}/execute-rebalance | `{legs, idempotency_key}` → paper.admit per leg (origin manual) in the portfolio's account; 409 `not_at_broker` otherwise | token |
+| GET | /{id}/summary | core.ledger: money put in, value, cash, realised/unrealised, fees, missing prices, holdings | token |
+| GET | /summaries | the same for every portfolio (one price fetch) | token |
 
 ### `/api/broker`
-GET `/status` (truthful: simulation, TWS not configured, execution disabled),
-POST `/orders` (202, IntentService.admit_batch origin manual,
-`execution_enabled: false`), GET `/orders/recent` (legacy broker_orders table).
-The OAuth credential vault (`/credentials`, `/test`, `/account`) was removed.
+GET `/status` (mode `none`/`tws_paper`/`tws_live`, both TWS logins, which
+accounts may trade). Simulation orders (`/orders`) and the OAuth vault were removed.
 
 ### `/api/ai`
 GET/PUT `/settings` (PUT also halts + invalidates the safety account),
 POST `/kill-switch` (IntentService.halt), GET `/signals?status&limit`,
-POST `/signals/{id}/approve` (202, admit origin ai_approval), `/reject`,
+POST `/signals/{id}/approve` (202, paper.admit origin ai_approval in the
+portfolio's own account; 409 `not_at_broker` for portfolios not at IBKR), `/reject`,
 `/snooze`, POST `/scan/{portfolio_id}` (ai_engine.scan_portfolio), GET `/audit`,
 GET `/scheduler` (running, detail, next check, ASX/US market hours, last 20 runs).
 Settings changes halt the safety account only for policy keys (mode,
 thresholds, guardrails), not for schedule or stop-loss/take-profit changes.
 
 ### `/api/execution`
-SafetyError → 409 `{code,message}`. POST `/simulation/bind`, GET `/intents`,
-POST `/intents/{id}/cancel`, POST `/halt`, POST `/resume`. The cloud-era
-pairing/device/worker routes were removed (the TWS worker will be local).
+Removed in G2 with the simulation mode (IntentService stays for the Emergency stop).
 
 ### `/api/tws` (read-only TWS connection, Phase E)
 GET/PUT `/settings` (enabled, port 1–65535, client_id ≥1, expected_account
@@ -119,8 +118,7 @@ GET `/status` (binding, ready, blockers, authorisation text), POST
 PUT `/limits`, POST `/disable`, GET `/orders` (with fills), POST `/orders`
 (manual ticket; Yahoo reference price), POST `/orders/{id}/cancel`, POST
 `/orders/{id}/resolve` (user confirms an unknown order is not in TWS).
-PaperError → 409 `{code, message}`. `/api/ai/signals/{id}/approve` queues a
-paper order instead of a simulation intent while paper trading is on.
+PaperError → 409 `{code, message}`.
 
 ## 4. Database (SQLite, `core/db.py` + `core/migrations.py`)
 

@@ -492,10 +492,10 @@ class PaperExecutor:
         return {family: row for family, (_, row) in latest.items()}
 
     def _project_to_portfolio(self, cur, order: dict) -> None:
-        """Paper fills change the portfolio's holdings, once per fill (corrections apply their difference).
+        """Fills change the portfolio's holdings, once per fill (corrections apply their difference).
 
-        Entry orders buy what the portfolio already lists, so they set the real
-        average cost but do not add shares a second time.
+        A portfolio trading at IBKR holds exactly what filled for it: its first
+        purchase ("entry") starts from zero shares, like every later buy.
         """
         if not order.get("portfolio_id"):
             return
@@ -510,9 +510,9 @@ class PaperExecutor:
                            VALUES (%s,%s,%s,%s,%s) ON CONFLICT(exec_family) DO UPDATE
                            SET shares=excluded.shares, price=excluded.price, applied_at=%s""",
                         (family, order["id"], order["portfolio_id"], format(shares, "f"), format(price, "f"), _now()))
-            self._apply_position(cur, order, delta, price, row["exec_id"])
+            self._apply_position(cur, order, delta, price, row["exec_id"], family)
 
-    def _apply_position(self, cur, order: dict, delta: Decimal, price: Decimal, exec_id: str) -> None:
+    def _apply_position(self, cur, order: dict, delta: Decimal, price: Decimal, exec_id: str, family: str) -> None:
         pid, symbol = order["portfolio_id"], order["symbol"]
         cur.execute("""SELECT id, quantity, avg_cost FROM portfolio_positions
                        WHERE portfolio_id=%s AND symbol=%s AND status='active' ORDER BY id LIMIT 1""", (pid, symbol))
@@ -521,19 +521,14 @@ class PaperExecutor:
         old_cost = Decimal(str(position["avg_cost"])) if position else Decimal(0)
         note = (f"{'LIVE (real-money) fill' if self.env.name == 'live' else 'Paper fill'} in {self.account} "
                 f"(TWS execution {exec_id})")
+        if order["origin"] == "entry":
+            note = f"Bought in {self.env.label} for this portfolio. " + note
         position_id = position["id"] if position else None
-        if order["origin"] == "entry" and position:
-            cur.execute("""SELECT coalesce(decimal_sum(shares * price), '0') AS v, coalesce(decimal_sum(shares), '0') AS q
-                           FROM paper_portfolio_fills WHERE paper_order_id=%s""", (order["id"],))
-            totals = cur.fetchone()
-            if Decimal(str(totals["q"])) > 0:
-                cur.execute("UPDATE portfolio_positions SET avg_cost=%s WHERE id=%s",
-                            (float(Decimal(str(totals["v"])) / Decimal(str(totals["q"]))), position_id))
-            note = f"Entry fill: bought in {self.env.label} to match this portfolio. " + note
-        elif order["side"] == "BUY":
+        realised = None
+        if order["side"] == "BUY":
             new_qty = old_qty + delta
+            new_cost = (old_qty * old_cost + delta * price) / new_qty if new_qty > 0 else price
             if position:
-                new_cost = (old_qty * old_cost + delta * price) / new_qty if new_qty > 0 else price
                 cur.execute("UPDATE portfolio_positions SET quantity=%s, avg_cost=%s WHERE id=%s",
                             (float(new_qty), float(new_cost), position_id))
             else:
@@ -542,6 +537,7 @@ class PaperExecutor:
                             (pid, symbol, float(delta), float(price), float(delta * price)))
                 position_id = cur.fetchone()["id"]
         elif position:  # SELL
+            realised = delta * (price - old_cost)
             new_qty = old_qty - delta
             if new_qty <= 0:
                 cur.execute("""UPDATE portfolio_positions SET quantity=0, status='sold', closed_at=%s WHERE id=%s""",
@@ -549,9 +545,37 @@ class PaperExecutor:
             else:
                 cur.execute("UPDATE portfolio_positions SET quantity=%s WHERE id=%s", (float(new_qty), position_id))
         cur.execute("""INSERT INTO transactions(portfolio_id, portfolio_position_id, txn_type, symbol, quantity, price,
-                         total_amount, notes) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""",
+                         total_amount, notes, realised_pnl, exec_family) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                     (pid, position_id, order["side"].lower(), symbol, float(delta), float(price),
-                     float(delta * price), note))
+                     float(delta * price), note, float(realised) if realised is not None else None, family))
+        cur.execute("SELECT commission FROM paper_executions WHERE exec_id=%s", (exec_id,))
+        known = cur.fetchone()
+        if known and known["commission"] is not None:  # the commission report came first
+            self._apply_commission(cur, family, Decimal(str(known["commission"])))
+
+    def _apply_commission(self, cur, family: str, commission: Decimal) -> None:
+        """Book a fill's commission once: part of the cost for a buy, less profit for a sale."""
+        cur.execute("""SELECT t.id, t.txn_type, t.portfolio_position_id, t.fees FROM transactions t
+                       WHERE t.exec_family=%s ORDER BY t.id LIMIT 1""", (family,))
+        txn = cur.fetchone()
+        if not txn:
+            return
+        change = commission - Decimal(str(txn["fees"] or 0))
+        if change == 0:
+            return
+        cur.execute("UPDATE transactions SET fees=%s WHERE id=%s", (float(commission), txn["id"]))
+        if txn["txn_type"] == "sell":
+            cur.execute("UPDATE transactions SET realised_pnl = coalesce(realised_pnl, 0) - %s WHERE id=%s",
+                        (float(change), txn["id"]))
+        elif txn["portfolio_position_id"]:
+            cur.execute("SELECT quantity, avg_cost, status FROM portfolio_positions WHERE id=%s",
+                        (txn["portfolio_position_id"],))
+            position = cur.fetchone()
+            qty = Decimal(str(position["quantity"])) if position else Decimal(0)
+            if position and position["status"] == "active" and qty > 0:
+                cost = (qty * Decimal(str(position["avg_cost"])) + change) / qty
+                cur.execute("UPDATE portfolio_positions SET avg_cost=%s WHERE id=%s",
+                            (float(cost), txn["portfolio_position_id"]))
 
     def _on_commission(self, report) -> None:
         exec_id = getattr(report, "execId", None)
@@ -560,9 +584,19 @@ class PaperExecutor:
         amount = getattr(report, "commissionAndFees", None)
         if amount is None:
             amount = getattr(report, "commission", None)
+        try:
+            commission = Decimal(str(amount))
+        except (InvalidOperation, TypeError):
+            return
+        if not commission.is_finite() or commission < 0 or commission > 100_000:
+            return  # IBKR sends a huge sentinel when the commission isn't known yet
         with db.transaction() as (cur, _):
-            cur.execute("""UPDATE paper_executions SET commission=%s, commission_currency=%s WHERE exec_id=%s""",
-                        (str(amount), getattr(report, "currency", None), exec_id))
+            # The report can arrive before the execution itself: keep it until the fill is projected.
+            cur.execute("""INSERT INTO paper_executions(exec_id, commission, commission_currency) VALUES (%s,%s,%s)
+                           ON CONFLICT(exec_id) DO UPDATE SET commission=excluded.commission,
+                           commission_currency=excluded.commission_currency""",
+                        (exec_id, str(commission), getattr(report, "currency", None)))
+            self._apply_commission(cur, _exec_family(exec_id)[0], commission)
 
     def _on_commissionReport(self, f: dict) -> None:
         self._on_commission(f.get("commissionReport"))

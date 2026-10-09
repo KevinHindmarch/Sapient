@@ -90,8 +90,78 @@ export const portfolioApi = {
     api.get(`/portfolio/capm/scan?top_n=${top_n}`),
   getRebalancePlan: (portfolioId: number) =>
     api.get(`/portfolio/${portfolioId}/rebalance-plan`),
-  executeRebalance: (portfolioId: number, request: IntentBatchRequest) =>
-    api.post<IntentQueueResponse>(`/portfolio/${portfolioId}/execute-rebalance`, request),
+  executeRebalance: (portfolioId: number, legs: RebalanceLeg[], idempotency_key: string) =>
+    api.post<RebalanceResult>(`/portfolio/${portfolioId}/execute-rebalance`, { legs, idempotency_key }),
+  summary: (portfolioId: number) => api.get<PortfolioSummary>(`/portfolio/${portfolioId}/summary`),
+  summaries: () => api.get<PortfolioSummary[]>('/portfolio/summaries'),
+}
+
+export interface HoldingSummary {
+  position_id: number | null
+  symbol: string
+  quantity: number
+  planned_quantity: number | null
+  avg_cost: number
+  price: number | null
+  price_missing: boolean
+  cost: number
+  value: number
+  unrealised_pnl: number | null
+  target_weight: number | null
+  weight: number
+}
+
+/** Money for one portfolio, worked out by the engine (core/ledger.py). */
+export interface PortfolioSummary {
+  portfolio_id: number
+  name: string
+  market: string
+  currency: 'AUD' | 'USD'
+  trading_environment: TradingEnv | null
+  money_put_in: number
+  market_value: number
+  cash: number
+  total_value: number
+  cost_of_holdings: number
+  unrealised_pnl: number
+  realised_pnl: number
+  fees: number
+  total_return: number
+  total_return_pct: number
+  prices_missing: string[]
+  holdings: HoldingSummary[]
+}
+
+export const money = (value: number, currency: 'AUD' | 'USD' = 'AUD', digits = 2) =>
+  `${currency === 'USD' ? 'US$' : 'A$'}${value.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits })}`
+
+export interface RebalanceLeg {
+  symbol: string
+  side: 'BUY' | 'SELL'
+  quantity: number
+  price: number
+  estimated_value: number
+  current_weight: number
+  target_weight: number
+  drift_pct: number
+}
+
+export interface RebalancePlan {
+  portfolio_id: number
+  portfolio_value: number
+  cash: number
+  total_drift_value: number
+  legs: RebalanceLeg[]
+  notes: string
+  environment: TradingEnv | null
+  can_execute: boolean
+}
+
+export interface RebalanceResult {
+  environment: TradingEnv
+  queued: number
+  message: string
+  results: { symbol: string; side: string; ok: boolean; order_id?: string; code?: string; message?: string }[]
 }
 
 export const indicatorsApi = {
@@ -103,54 +173,17 @@ export const indicatorsApi = {
     api.get(`/indicators/rsi-screener?market=${market}&signal=${signal}`),
 }
 
-export interface BrokerOrderPayload {
-  symbol: string
-  side: 'BUY' | 'SELL'
-  quantity: number
-  order_type: 'LMT'
-  limit_price: number
-  idempotency_key: string
-  expires_at: string
-  portfolio_id?: number | null
-  signal_id?: number | null
-}
-
-export interface IntentBatchRequest {
-  orders: BrokerOrderPayload[]
-  idempotency_key: string
-  environment: 'simulation'
-}
-
-export interface QueuedIntent {
-  id: string
-  state: string
-  symbol: string
-  side: 'BUY' | 'SELL'
-  quantity: string | number
-  limit_price: string | number
-}
-
-export interface IntentQueueResponse {
-  intents: QueuedIntent[]
-  execution_enabled: false
-  message: string
-  failed?: { symbol: string; error: string }[]
-}
-
 export interface BrokerStatus {
-  mode: 'simulation' | 'tws_paper' | 'tws_live'
+  mode: 'none' | 'tws_paper' | 'tws_live'
   tws_configured: boolean
   worker: string
-  execution_enabled: boolean
+  paper_trading_enabled: boolean
+  live_trading_enabled: boolean
   message: string
 }
 
 export const brokerApi = {
   getStatus: () => api.get<BrokerStatus>('/broker/status'),
-  placeOrders: (orders: BrokerOrderPayload[], idempotency_key: string) =>
-    api.post<IntentQueueResponse>('/broker/orders', { orders, idempotency_key, environment: 'simulation' }),
-  recentOrders: (limit: number = 25) =>
-    api.get(`/broker/orders/recent?limit=${limit}`),
 }
 
 export interface TwsSettings {
@@ -266,7 +299,7 @@ export const aiApi = {
   scheduler: () => api.get<SchedulerStatus>('/ai/scheduler'),
   listSignals: (status: string = 'pending') =>
     api.get(`/ai/signals?status=${status}`),
-  approveSignal: (id: number) => api.post<{ intent?: QueuedIntent; paper_order?: PaperOrder; environment?: 'tws_paper' | 'tws_live';
+  approveSignal: (id: number) => api.post<{ paper_order?: PaperOrder; environment?: 'tws_paper' | 'tws_live';
     execution_enabled: boolean; message: string }>(`/ai/signals/${id}/approve`),
   rejectSignal: (id: number) => api.post(`/ai/signals/${id}/reject`),
   snoozeSignal: (id: number, snooze_minutes: number = 60) =>
