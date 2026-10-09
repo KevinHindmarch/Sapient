@@ -14,6 +14,19 @@ contextBridge.exposeInMainWorld('sapient', {
   apiToken: config.apiToken,
   appVersion: config.appVersion,
   openExternal: (url: string) => ipcRenderer.send('sapient:open-external', url),
+  updates: {
+    check: () => ipcRenderer.invoke('sapient:update-check'),
+    download: () => ipcRenderer.invoke('sapient:update-download'),
+    install: () => ipcRenderer.send('sapient:update-install'),
+    openReleases: () => ipcRenderer.send('sapient:open-releases'),
+    tokenStatus: () => ipcRenderer.invoke('sapient:update-token-status'),
+    setToken: (token: string | null) => ipcRenderer.invoke('sapient:update-set-token', token),
+    onProgress: (callback: (progress: { percent: number; transferred: number; total: number }) => void) => {
+      const listener = (_event: unknown, progress: { percent: number; transferred: number; total: number }) => callback(progress)
+      ipcRenderer.on('sapient:update-progress', listener)
+      return () => { ipcRenderer.removeListener('sapient:update-progress', listener) }
+    },
+  },
 })
 
 // Used only by the built-in "couldn't start" page.

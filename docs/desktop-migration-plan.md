@@ -244,7 +244,7 @@ licence/risk page, visible detail list, shortcuts, keep-data uninstall.
 windows-latest, smoke-tests the frozen engine, installs silently and runs
 `desktop/e2e/smoke.mjs` against the installed app; the installer is uploaded
 as a workflow artifact. Verified locally on a Linux packaged build (Xvfb).
-Not yet: code signing (Q4), auto-update (Q5), tray icon, uninstaller
+Not yet: tray icon, uninstaller
 "remove my data" checkbox, offline-state screen.
 
 ### Phase E — TWS connection, read-only (maps to IBKR roadmap phases 0 + 2)
@@ -343,18 +343,22 @@ for development and CI.
 | Local attack surface (other apps calling the API) | 127.0.0.1 only, per-launch token, Host check, CSP, sandboxed renderer |
 | Scope creep into live trading | phase gates E→G unchanged; live needs separate explicit consent |
 
-## 8. Open questions for the user
+## 8. Decisions (answered 2026-10-09)
 
-- **Q1** Personal use on your own PC only, or will others install it? (Affects
-  IBKR SDK licence, code signing, auto-update, multi-user needs.)
-- **Q2** Do you want existing saved portfolios/history from the Replit database
-  carried over, or start fresh?
-- **Q3** Single user with no login (recommended), or an optional app PIN /
-  Windows Hello lock?
-- **Q4** Buy a code-signing certificate (avoids "Windows protected your PC")?
-- **Q5** Auto-updates via GitHub Releases, or manual installers?
-- **Q6** Windows 10 and 11, 64-bit only? Any need for macOS later?
-- **Q7** TWS or IB Gateway? (Plan assumes TWS 10.51.1a, paper first.)
+- **Q1** Personal use: the user and their dad, each on their own Windows PC.
+  The IBKR API software stays a separate download from IBKR (not bundled).
+- **Q2** Start fresh: no Replit data is imported; the user removes the Replit
+  project/database themselves.
+- **Q3** Single local user, no login (done in Phase C).
+- **Q4** No code signing; SmartScreen "More info → Run anyway" is accepted.
+- **Q5** Manual updates from GitHub Releases: Release workflow publishes
+  `Sapient-Setup-X.Y.Z.exe` + `latest.yml` + blockmap; the installer upgrades in
+  place and keeps data; Settings → Updates checks/downloads/installs only when
+  the user clicks (differential download when possible). The repository is
+  private, so the updater uses a user-supplied read-only GitHub token stored with
+  Windows DPAPI.
+- **Q6** Windows 10/11 x64. **Q7** TWS (paper first), TWS 10.51.1a reported.
+- The committed `.replit` key was a fake value.
 
 ## 9. Suggested first PRs
 

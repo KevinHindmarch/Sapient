@@ -17,6 +17,16 @@ The user does not review PRs: implement the migration phase by phase, open a PR
 per phase, get CI green, merge it, and continue. Ask only for decisions that
 are genuinely theirs (trading authorisation, money, licences, accounts).
 
+Decisions (2026-10-09): personal app for the user and their dad only (two
+Windows PCs); no code signing (SmartScreen "Run anyway" is accepted); updates
+are manual — published with the **Release** workflow (Actions → Release → Run
+workflow, version X.Y.Z) to GitHub Releases, installed either by running the
+new `Sapient-Setup-X.Y.Z.exe` (in-place upgrade, data kept) or via Settings →
+Updates (electron-updater, user-initiated only, differential download). The
+repository is private, so the in-app updater uses a read-only fine-grained
+GitHub token the user pastes once (encrypted with DPAPI via safeStorage, main
+process only). No Replit data is migrated. The old `.replit` key was fake.
+
 ## Current state (October 2026)
 
 - Runs today as **React SPA + FastAPI + a local SQLite file**. It was built on
@@ -99,7 +109,8 @@ core/                Service layer (all business logic)
   ibkr_client.py     placeholder: connection_status() + IBKRClient that refuses
                      every direct place/cancel (OAuth/credential vault removed)
 desktop/             Electron shell (TypeScript): src/main (window, app:// protocol,
-                     CSP, EngineSupervisor), src/preload (window.sapient bridge),
+                     CSP, EngineSupervisor, updater.ts = manual GitHub-release
+                     updates + encrypted token), src/preload (window.sapient bridge),
                      electron-builder.yml (NSIS installer), build/ (icon, licence,
                      installer.nsh), e2e/smoke.mjs (Playwright Electron test)
 packaging/           sapient-api.spec (PyInstaller onedir engine), smoke_engine.py
@@ -151,6 +162,7 @@ npm run build:engine           # PyInstaller -> packaging/dist/sapient-api
 npm run dist:win               # Windows installer -> desktop/release (CI: desktop.yml)
 npm run dist:dir && npm run e2e -- release/<platform>-unpacked/<exe>   # packaged smoke test
 npm run dev                    # Electron + Vite dev server + engine from .venv (run Vite first)
+# Publishing: GitHub Actions → Release → Run workflow (version X.Y.Z) — see README.md
 # Desktop-style API (what Electron runs): token on stdin, prints ready JSON
 echo <32+ char token> | uv run python backend/desktop_main.py --data-dir /tmp/sapient
 
@@ -180,7 +192,7 @@ cd frontend && npm run build && npm run lint
 - yfinance prices are research data, not execution-price evidence.
 - Saved/model positions never imply broker holdings.
 - Keep honest status language: "simulation", "TWS paper", "TWS live" are distinct.
-- Secrets: never commit keys. A `BROKER_ENCRYPTION_KEY` was committed in the
-  old `.replit` (still in git history); treat it as compromised, never reuse it.
+- Secrets: never commit keys or tokens. The update token lives only in
+  `%APPDATA%\Sapient\github-update-token.bin` (DPAPI-encrypted).
 - Do not put model identifiers in commits/PRs. Develop on the assigned branch.
 - User preference: explain things in simple, everyday language.

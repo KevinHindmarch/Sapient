@@ -1,0 +1,103 @@
+name: Release
+
+# Publish a new Sapient version for download:
+#   GitHub → Actions → Release → Run workflow → type the version (e.g. 0.2.0).
+# Builds and tests the Windows installer, then creates release vX.Y.Z with
+# Sapient-Setup-X.Y.Z.exe plus the files the in-app updater needs
+# (latest.yml and the .blockmap used for "download only what changed").
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version number, e.g. 0.2.0 (must be higher than the last release)"
+        required: true
+      notes:
+        description: "What's new (optional, shown in Sapient before updating)"
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      VERSION: ${{ inputs.version }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the version number
+        shell: pwsh
+        run: |
+          if ($env:VERSION -notmatch '^\d+\.\d+\.\d+$') { throw "Version must look like 1.2.3" }
+          $existing = gh release view "v$env:VERSION" --json tagName 2>$null
+          if ($LASTEXITCODE -eq 0) { throw "Release v$env:VERSION already exists" }
+          $latest = gh release list --limit 1 --json tagName --jq '.[0].tagName' 2>$null
+          if ($latest) {
+            if ([version]$env:VERSION -le [version]($latest.TrimStart('v'))) { throw "Version must be higher than $latest" }
+          }
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            desktop/package-lock.json
+
+      - name: Python dependencies
+        run: uv sync --frozen
+      - name: Tests
+        run: uv run python scripts/check.py --no-frontend
+      - name: Freeze the engine (PyInstaller)
+        run: uv run --with pyinstaller==6.22.3 pyinstaller packaging/sapient-api.spec --noconfirm --distpath packaging/dist --workpath packaging/build
+      - name: Engine smoke test
+        run: uv run python packaging/smoke_engine.py packaging/dist/sapient-api/sapient-api.exe
+
+      - name: Build the UI
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build the installer
+        working-directory: desktop
+        run: |
+          npm ci
+          npm version $env:VERSION --no-git-tag-version --allow-same-version
+          npm run dist:win
+
+      - name: Install and smoke-test the release build
+        shell: pwsh
+        run: |
+          $installer = "desktop/release/Sapient-Setup-$env:VERSION.exe"
+          if (-not (Test-Path $installer)) { throw "installer missing: $installer" }
+          if (-not (Test-Path "desktop/release/latest.yml")) { throw "latest.yml missing" }
+          Start-Process -FilePath (Resolve-Path $installer) -ArgumentList '/S', "/D=$env:RUNNER_TEMP\SapientApp" -Wait
+          Push-Location desktop
+          node e2e/smoke.mjs "$env:RUNNER_TEMP\SapientApp\Sapient.exe" "$env:RUNNER_TEMP"
+          Pop-Location
+
+      - name: Publish the release
+        shell: pwsh
+        env:
+          NOTES: ${{ inputs.notes }}
+        run: |
+          $notes = $env:NOTES
+          if (-not $notes) { $notes = "Sapient $env:VERSION" }
+          $notes += "`n`nInstall or upgrade: download Sapient-Setup-$env:VERSION.exe and run it (your data is kept), or use Settings → Updates in Sapient."
+          gh release create "v$env:VERSION" `
+            "desktop/release/Sapient-Setup-$env:VERSION.exe" `
+            "desktop/release/Sapient-Setup-$env:VERSION.exe.blockmap" `
+            "desktop/release/latest.yml" `
+            --title "Sapient $env:VERSION" --notes $notes --target $env:GITHUB_SHA

@@ -7,6 +7,7 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { EngineCommand, EngineState, EngineSupervisor } from './engine'
 import { errorPage, loadingPage, SHELL_SCRIPT } from './pages'
+import { registerUpdater, RELEASES_URL } from './updater'
 
 const SCHEME = 'app'
 const HOST = 'sapient'
@@ -154,6 +155,8 @@ function registerIpc(): void {
   })
   ipcMain.on('sapient:open-logs', () => { void shell.openPath(logDir()) })
   ipcMain.on('sapient:retry', () => engine.start())
+  ipcMain.on('sapient:open-releases', () => { void shell.openExternal(RELEASES_URL) })
+  registerUpdater(() => mainWindow, logDir())
 }
 
 if (!app.requestSingleInstanceLock()) {
