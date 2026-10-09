@@ -71,6 +71,21 @@ the user ticks the live authorisation in the app; never bypass that.
   the plan, "Buy … & manage" again buys what is missing) and can't be edited by hand.
 - Research features (optimisers, scanners, indicators, portfolio bookkeeping)
   work end-to-end.
+- H-phase (user decisions 2026-10-10): checks stay **twice a day** per
+  portfolio; "Buy … & manage" can **buy each stock on an RSI dip** (RSI(14)
+  below 30 at a scheduled check, the planned shares at once; a stock that
+  hasn't dipped by the deadline, default 20 trading days, is skipped).
+  H2 signal lab (`core/signals.py`, `/api/signals`, portfolio page): 7
+  long-only textbook signals tested per stock on 5 years of daily prices
+  against buy-and-hold after 0.15%/trade costs; pass = significant
+  (Newey-West t, one-sided) after Benjamini-Hochberg at 10% FDR across the
+  batch AND still beating holding over the last 2 years; parameters are never
+  tuned. H3: a portfolio's `strategy` is 'rules' (RSI+MACD, default) or
+  'signals' (only passing signals vote, weighted by t-stat; score >= 0.6 buy
+  the plan back, <= 0.4 sell the whole holding, in between nothing; no
+  passing signal = hold). Stop-loss/take-profit always first. No news
+  sentiment (user dropped it). Never promise profits: the user asked for
+  "make money every single day" — explained that no strategy can.
 
 ## What the user does with it
 
@@ -129,7 +144,7 @@ core/                Service layer (all business logic)
   db.py              SQLite connection layer (WAL, FULL sync, BEGIN IMMEDIATE,
                      %s→? placeholders, Sapient-specific column-type converters)
   migrations.py      versioned checksummed schema (1 core, 2 safety, 3 tws,
-                     4 profile, 5 strategy, 6 paper, 7 live, 8 ledger); migrate()
+                     4 profile, 5 strategy, 6 paper, 7 live, 8 ledger, 9 entry, 10 strategy_choice); migrate()
                      runs at API startup after backing up the DB
   database.py        User (local profile)/Portfolio/AITradingSettings/AISignal/
                      BrokerOrder/AIAudit services (SQL via core.db)
@@ -237,6 +252,8 @@ python -m unittest discover -s tests -p 'test_g3_trading.py' -v  # proposals fit
 python -m unittest discover -s tests -p 'test_g4_us.py' -v       # US shares: SMART/USD, US hours, US$ cash, A$ limits
 python -m unittest discover -s tests -p 'test_g5_research.py' -v # optimiser maths, dividend units, stock lists
 python -m unittest discover -s tests -p 'test_g6_ops.py' -v      # daily backups, integrity check, restore requests
+python -m unittest discover -s tests -p 'test_h1_entry.py' -v    # buy on RSI dip, skip after the deadline
+python -m unittest discover -s tests -p 'test_h2_signals.py' -v  # signal lab statistics + lab-vote trading
 python -m compileall -q core backend
 cd frontend && npm run build && npm run lint
 ```

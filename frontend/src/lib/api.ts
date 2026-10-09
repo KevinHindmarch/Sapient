@@ -254,6 +254,9 @@ export const twsApi = makeTwsApi('/tws')
 export const twsLiveApi = makeTwsApi('/tws-live')
 export const twsApiFor = (env: TradingEnv) => (env === 'live' ? twsLiveApi : twsApi)
 
+/** RSI-dip entry: buy each stock only when its RSI is below `rsi_below`; skip it after `deadline_days`. */
+export interface EntryChoice { entry: 'now' | 'rsi_dip'; rsi_below?: number; deadline_days?: number }
+
 export interface BrokerCompare {
   state: string
   account: string | null
@@ -263,6 +266,11 @@ export interface BrokerCompare {
   live_started_at: string | null
   trading_environment: TradingEnv | null
   ai_mode: 'off' | 'suggestions' | 'autonomous'
+  entry_mode: 'now' | 'rsi_dip' | null
+  entry_rsi_below: number | null
+  entry_deadline: string | null
+  waiting: string[]
+  skipped: string[]
   rows: { symbol: string; model_quantity: number | null; broker_quantity: number | null; difference: number;
     status: 'match' | 'differs' | 'model_only' | 'broker_only' }[]
 }
@@ -396,9 +404,10 @@ const makeTradingApi = (base: string) => ({
     api.post<PaperOrder>(`${base}/orders`, ticket),
   cancel: (id: string) => api.post<PaperOrder>(`${base}/orders/${id}/cancel`),
   resolveUnknown: (id: string) => api.post<PaperOrder>(`${base}/orders/${id}/resolve`, { confirmation: UNKNOWN_CHECK_TEXT }),
-  startPortfolio: (id: number, mode?: 'suggestions' | 'autonomous') => api.post<{ started: boolean;
-    results: { symbol: string; ok: boolean; quantity?: number; message?: string }[] }>(`${base}/portfolios/${id}/start`,
-    mode ? { mode } : {}),
+  startPortfolio: (id: number, mode?: 'suggestions' | 'autonomous', entry?: EntryChoice) => api.post<{ started: boolean;
+    entry?: 'rsi_dip'; deadline?: string
+    results: { symbol: string; ok: boolean; waiting?: boolean; quantity?: number; message?: string }[] }>(
+    `${base}/portfolios/${id}/start`, { ...(mode ? { mode } : {}), ...(entry ?? {}) }),
   autonomy: () => api.get<AutonomyChecklist>(`${base}/autonomy`),
 })
 export const paperApi = makeTradingApi('/paper')
@@ -434,4 +443,25 @@ export const backupsApi = {
   now: () => api.post('/backups/now'),
   restore: (name: string) => api.post('/backups/restore', { name }),
   cancelRestore: () => api.delete('/backups/restore'),
+}
+
+// ---- Signal lab (H2) and how AI Trading decides per portfolio (H3) ----
+export interface SignalTest {
+  symbol: string; signal: string; label: string; days: number; trades: number; time_in_market: number
+  edge_per_year: number; strategy_per_year: number; holding_per_year: number; t_stat: number; p_value: number
+  recent_edge_per_year: number; holding_now: boolean; passed: boolean; verdict: string
+}
+export interface SignalVote {
+  symbol: string; score: number; says: 'hold' | 'out' | 'no change'
+  signals: { signal: string; label: string; holding_now: boolean; edge_per_year: number; p_value: number }[]
+}
+export interface SignalLabResult {
+  years: number; fdr: number; cost_per_trade: number; recent_years: number
+  tests: SignalTest[]; errors: Record<string, string>; votes: SignalVote[]
+  strategy?: 'rules' | 'signals'; buy_score?: number; sell_score?: number
+}
+export const signalsApi = {
+  portfolio: (id: number) => api.get<SignalLabResult>(`/signals/portfolio/${id}`, { timeout: 180000 }),
+  setStrategy: (id: number, strategy: 'rules' | 'signals') =>
+    api.put<{ strategy: 'rules' | 'signals' }>(`/signals/portfolio/${id}/strategy`, { strategy }),
 }

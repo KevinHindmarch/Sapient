@@ -554,6 +554,19 @@ UPDATE portfolio_positions SET quantity = max(coalesce({_FILLED_SHARES}, 0), 0),
  WHERE status = 'active' AND portfolio_id IN (SELECT id FROM portfolios WHERE trading_environment IS NOT NULL)
 """
 
+# H1: buy each stock only when its RSI dips (user decision 2026-10-10: below 30, skip after the deadline).
+ENTRY_V1 = """
+ALTER TABLE portfolios ADD COLUMN entry_mode TEXT;
+ALTER TABLE portfolios ADD COLUMN entry_rsi_below REAL;
+ALTER TABLE portfolios ADD COLUMN entry_deadline UTCTIME;
+ALTER TABLE portfolio_positions ADD COLUMN entry_state TEXT
+"""
+
+# H3: how AI Trading decides for a portfolio: 'rules' (RSI + MACD, default) or 'signals' (signal lab vote).
+STRATEGY_CHOICE_V1 = """
+ALTER TABLE portfolios ADD COLUMN strategy TEXT
+"""
+
 # (version, name, sql). Append only.
 MIGRATIONS = (
     (1, "core", CORE_V1),
@@ -564,6 +577,8 @@ MIGRATIONS = (
     (6, "paper", PAPER_V1),
     (7, "live", LIVE_V1),
     (8, "ledger", LEDGER_V1),
+    (9, "entry", ENTRY_V1),
+    (10, "strategy_choice", STRATEGY_CHOICE_V1),
 )
 SAFETY_SCHEMA_VERSION = 2
 

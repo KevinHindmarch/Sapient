@@ -316,7 +316,7 @@ class SQLiteSafetyTests(unittest.TestCase):
         self.assertEqual(before, self.sql("SELECT * FROM ai_signals ORDER BY id", fetch=True))
         self.assertEqual(self.service.list_intents(1)[0], intent)
         self.assertEqual(self.sql("SELECT version FROM schema_versions ORDER BY version", fetch=True),
-                         [(1,), (2,), (3,), (4,), (5,), (6,), (7,), (8,)])
+                         [(1,), (2,), (3,), (4,), (5,), (6,), (7,), (8,), (9,), (10,)])
 
     def test_migration_refuses_changed_or_newer_schema(self):
         self.sql("UPDATE schema_versions SET checksum='tampered' WHERE version=2")
@@ -332,7 +332,7 @@ class SQLiteSafetyTests(unittest.TestCase):
         path = Path(self.temp.name) / "upgrade.db"
         with mock.patch.object(migrations, "MIGRATIONS", migrations.MIGRATIONS[:1]):
             self.assertEqual(migrations.migrate(path), [1])
-        self.assertEqual(migrations.migrate(path), [2, 3, 4, 5, 6, 7, 8])
+        self.assertEqual(migrations.migrate(path), [2, 3, 4, 5, 6, 7, 8, 9, 10])
         backups = list((path.parent / "backups").glob("upgrade-pre-v2-*.db"))
         self.assertEqual(len(backups), 1)
         conn = db.connect(backups[0])

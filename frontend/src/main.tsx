@@ -6,14 +6,17 @@ import App from './App'
 import { ThemeProvider } from './lib/theme'
 import { ProfileProvider } from './lib/profile'
 import { Toaster } from 'sonner'
+import ErrorBoundary from './components/ErrorBoundary'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <HashRouter>
       <ThemeProvider>
-        <ProfileProvider>
-          <App />
-        </ProfileProvider>
+        <ErrorBoundary>
+          <ProfileProvider>
+            <App />
+          </ProfileProvider>
+        </ErrorBoundary>
         <Toaster position="top-right" richColors />
       </ThemeProvider>
     </HashRouter>

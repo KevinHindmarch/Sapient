@@ -138,7 +138,7 @@ export default function AITradingInbox() {
       await loadAll()
     } catch (err) {
       const e = err as { response?: { data?: { detail?: string } } }
-      toast.error(e.response?.data?.detail || 'Failed to reject signal')
+      toast.error(apiErrorMessage(e, 'Failed to reject signal'))
     } finally {
       setActioningId(null)
     }
@@ -152,7 +152,7 @@ export default function AITradingInbox() {
       await loadAll()
     } catch (err) {
       const e = err as { response?: { data?: { detail?: string } } }
-      toast.error(e.response?.data?.detail || 'Failed to snooze signal')
+      toast.error(apiErrorMessage(e, 'Failed to snooze signal'))
     } finally {
       setActioningId(null)
     }

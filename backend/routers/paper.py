@@ -21,7 +21,7 @@ def _refuse(exc: paper.PaperError):
 class Limits(BaseModel):
     model_config = ConfigDict(extra="forbid")
     max_order_value: float | None = Field(default=None, gt=0, le=1_000_000)
-    max_orders_per_day: int | None = Field(default=None, ge=0, le=100)
+    max_orders_per_day: int | None = Field(default=None, ge=0, le=500)
     max_value_per_day: float | None = Field(default=None, ge=0, le=10_000_000)
     max_price_gap_pct: float | None = Field(default=None, gt=0, le=10)
     autonomous_allowed: bool | None = None
@@ -51,6 +51,9 @@ class Resolve(BaseModel):
 class StartPortfolio(BaseModel):
     model_config = ConfigDict(extra="forbid")
     mode: str | None = Field(default=None, pattern=r"^(suggestions|autonomous)$")
+    entry: str = Field(default="now", pattern=r"^(now|rsi_dip)$")  # rsi_dip: buy each stock when its RSI dips
+    rsi_below: float = Field(default=paper.DEFAULT_ENTRY_RSI, ge=5, le=50)
+    deadline_days: int = Field(default=paper.DEFAULT_ENTRY_DAYS, ge=1, le=120)
 
 
 def _reference_price(symbol: str) -> float:
@@ -125,15 +128,17 @@ def make_router(env: str) -> APIRouter:
         details = PortfolioService.get_portfolio_details(portfolio_id, user["id"])
         if not details:
             raise HTTPException(404, "Portfolio not found")
+        body = body or StartPortfolio()
         prices = {}
-        for position in details.get("positions") or []:
+        for position in (details.get("positions") or []) if body.entry == "now" else []:
             if position.get("status", "active") == "active":
                 try:
                     prices[position["symbol"]] = _reference_price(position["symbol"])
                 except HTTPException:
                     prices[position["symbol"]] = None
         try:
-            return paper.start_portfolio(portfolio_id, user["id"], prices, env, body.mode if body else None)
+            return paper.start_portfolio(portfolio_id, user["id"], prices, env, body.mode, entry=body.entry,
+                                         rsi_below=body.rsi_below, deadline_days=body.deadline_days)
         except paper.PaperError as exc:
             _refuse(exc)
 

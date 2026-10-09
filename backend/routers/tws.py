@@ -111,5 +111,12 @@ def compare_with_broker(portfolio_id: int, user=Depends(get_current_user)):
         "live_started_at": details["portfolio"].get("live_started_at"),
         "trading_environment": details["portfolio"].get("trading_environment"),
         "ai_mode": details["portfolio"].get("ai_mode") or "off",
+        "entry_mode": details["portfolio"].get("entry_mode"),
+        "entry_rsi_below": details["portfolio"].get("entry_rsi_below"),
+        "entry_deadline": details["portfolio"].get("entry_deadline"),
+        "waiting": [p["symbol"] for p in details.get("positions") or []
+                    if p.get("status") == "active" and p.get("entry_state") == "waiting"],
+        "skipped": [p["symbol"] for p in details.get("positions") or []
+                    if p.get("status") == "active" and p.get("entry_state") == "skipped"],
         "rows": compare(details.get("positions") or [], broker or [], status["account"]) if broker is not None else [],
     }

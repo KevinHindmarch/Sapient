@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import SignalLab from '../components/SignalLab'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { portfolioApi, stocksApi, brokerApi, aiApi, apiErrorMessage, money, PortfolioSummary, RebalancePlan } from '../lib/api'
 import { Portfolio, Position, Transaction } from '../types'
@@ -47,6 +48,7 @@ export default function PortfolioDetail() {
   const [deletingPosition, setDeletingPosition] = useState<Position | null>(null)
 
   const [aiMode, setAiMode] = useState<'off' | 'suggestions' | 'autonomous'>('off')
+  const [strategy, setStrategy] = useState<'rules' | 'signals'>('rules')
   const [savingAiMode, setSavingAiMode] = useState(false)
 
   const [brokerConnected, setBrokerConnected] = useState(false)
@@ -121,7 +123,7 @@ export default function PortfolioDetail() {
     } catch (e: unknown) {
       setAiMode(previous)
       const err = e as { response?: { data?: { detail?: string } } }
-      toast.error(err.response?.data?.detail || 'Failed to update AI mode')
+      toast.error(apiErrorMessage(err, 'Failed to update AI mode'))
     } finally {
       setSavingAiMode(false)
     }
@@ -187,6 +189,7 @@ export default function PortfolioDetail() {
       const response = await portfolioApi.detail(Number(id))
       setData(response.data)
       setAiMode(response.data.portfolio?.ai_mode || 'off')
+      setStrategy(response.data.portfolio?.strategy === 'signals' ? 'signals' : 'rules')
 
       const symbols = response.data.positions.map((p: Position) => p.symbol)
       if (symbols.length > 0) {
@@ -246,7 +249,7 @@ export default function PortfolioDetail() {
       loadPortfolio()
     } catch (error: unknown) {
       const err = error as { response?: { data?: { detail?: string } } }
-      toast.error(err.response?.data?.detail || 'Failed to update position')
+      toast.error(apiErrorMessage(err, 'Failed to update position'))
     } finally {
       setSaving(false)
     }
@@ -268,7 +271,7 @@ export default function PortfolioDetail() {
       loadPortfolio()
     } catch (error: unknown) {
       const err = error as { response?: { data?: { detail?: string } } }
-      toast.error(err.response?.data?.detail || 'Failed to remove position')
+      toast.error(apiErrorMessage(err, 'Failed to remove position'))
     } finally {
       setSaving(false)
     }
@@ -345,7 +348,7 @@ export default function PortfolioDetail() {
       loadPortfolio()
     } catch (error: unknown) {
       const err = error as { response?: { data?: { detail?: string } } }
-      toast.error(err.response?.data?.detail || 'Failed to add stock')
+      toast.error(apiErrorMessage(err, 'Failed to add stock'))
     } finally {
       setSaving(false)
     }
@@ -612,6 +615,8 @@ export default function PortfolioDetail() {
         </div>
       </div>
 
+      <SignalLab portfolioId={Number(id)} strategy={strategy} onStrategy={setStrategy} />
+
       {accountSummary && brokerConnected && (
         <div className={`card border ${isDark ? 'border-sky-500/30' : 'border-sky-200'}`}>
           <div className="flex items-start justify-between gap-3 mb-3">
@@ -831,7 +836,8 @@ export default function PortfolioDetail() {
                       <td className={`py-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
                         {atBroker ? Number(position.quantity).toFixed(0) : Number(position.quantity).toFixed(2)}
                         {atBroker && position.planned_quantity != null && Number(position.quantity) < Number(position.planned_quantity) && (
-                          <span className="block text-xs text-amber-600">of {Number(position.planned_quantity)} planned</span>
+                          <span className="block text-xs text-amber-600">of {Number(position.planned_quantity)} planned
+                            {position.entry_state === 'waiting' ? ' · waiting for RSI dip' : position.entry_state === 'skipped' ? ' · skipped (no dip)' : ''}</span>
                         )}
                       </td>
                       <td className={`py-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>${Number(position.avg_cost).toFixed(2)}</td>

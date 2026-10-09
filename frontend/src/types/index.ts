@@ -60,6 +60,7 @@ export interface Portfolio {
   status: string
   position_count?: number
   ai_mode?: 'off' | 'suggestions' | 'autonomous'
+  strategy?: 'rules' | 'signals' | null   // how AI Trading decides (H3)
   market?: string
   trading_environment?: 'paper' | 'live' | null
 }
@@ -73,6 +74,7 @@ export interface Position {
   allocation_amount: number | null
   status: string
   planned_quantity?: number | null
+  entry_state?: 'waiting' | 'skipped' | null   // RSI-dip entry
 }
 
 export interface Transaction {

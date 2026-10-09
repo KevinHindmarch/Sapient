@@ -188,3 +188,58 @@ Code changes this implies (scheduled in migration Phases E–F):
 7. Kill switch during entry batch → unsent legs blocked, working orders cancel
    requested, outcome reported honestly.
 8. Market closed / holiday → no proposals.
+
+## Buying on an RSI dip (H1, user decisions 2026-10-10)
+
+"Buy … & manage" offers two ways to buy:
+
+- **Now:** buys all holdings straight away.
+- **When each stock is cheap:** buys nothing straight away.
+
+With **When each stock is cheap**:
+- Each holding's planned whole shares are recorded (`planned_quantity`), and the holding is marked `entry_state='waiting'`.
+- At each scheduled check, twice per trading day, `core.ai_engine._dip_entry` checks each waiting stock's RSI(14).
+- If the RSI is below the portfolio's level (`entry_rsi_below`, default **30**), it proposes buying all the missing planned shares in one go.
+  - **Fully automatic:** the purchase is placed straight away.
+  - **Semi-automatic:** it waits in the AI Inbox for approval.
+- A buy for the plan is not reduced by the per-trade AI guardrails; the account's own limits still apply when the order is admitted.
+- A stock that hasn't dipped by the deadline (`entry_deadline`, default 20 trading days) becomes `entry_state='skipped'` and is never bought.
+- The normal RSI/MACD rules never buy a waiting or skipped stock.
+- Pressing **Buy now** later ends the wait for the stocks it buys.
+
+The checks stay twice a day (user decision).
+
+## Signal lab and lab-vote trading (H2/H3, user decisions 2026-10-10)
+
+**The lab** (`core/signals.py`; `GET /api/signals/portfolio/{id}`; the "Signal lab" card on each portfolio page) tests 7 long-only signals on each holding, using 5 years of daily Yahoo prices:
+- RSI dip;
+- MACD above its signal line;
+- price above its 200-day average;
+- golden cross;
+- Bollinger dip;
+- 12-1 month momentum;
+- 55-day high on heavy volume.
+
+**How each signal is tested:**
+- Its position is decided at the close and applied from the next day, so it never sees the future.
+- Its edge is its daily return minus buy-and-hold's, after 0.15% per buy or sell.
+
+A signal **passes** for a stock only when all four hold:
+1. its edge is significantly positive: one-sided t-test with Newey-West standard errors;
+2. it survives the Benjamini–Hochberg correction at a 10% false discovery rate across every stock × signal tested together;
+3. it still beats holding over the last 2 years;
+4. it has enough trades and history to judge.
+
+Parameters are textbook values and never tuned.
+
+**Lab-vote trading:** on the same card, the user can choose how AI Trading decides for each portfolio:
+- **Simple rules** (default): RSI with MACD, as before.
+- **Signal lab:**
+  - At each scheduled check the lab is re-run, and each stock's passing signals vote, weighted by their t-statistic.
+  - A score of 0.6 or more means **hold**. If nothing is held, Sapient buys the planned shares back; this buy is not cut down by the per-trade size limit.
+  - A score of 0.4 or less means **out**: Sapient sells the whole holding. Risk-reducing sells are not size-limited.
+  - Anything in between, or a stock with no passing signal, changes nothing.
+  - Stop-loss and take-profit are always checked first.
+  - Account limits, cash, the per-stock cap, the daily trade count and turnover still apply.
+
+No strategy wins every day. The lab only reduces the chance of trading on luck. New portfolios should run on paper first.

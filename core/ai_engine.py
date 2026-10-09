@@ -181,6 +181,7 @@ def _within_guardrails(
     turnover_today: float,
     settings: dict,
     risk_exit: bool = False,
+    plan_sized: bool = False,
 ) -> tuple[bool, str | None]:
     """Apply per-trade and per-day guardrails. Returns (ok, reason_if_skipped).
 
@@ -194,7 +195,7 @@ def _within_guardrails(
 
     trade_pct = (estimated_value / portfolio_value) * 100.0
     max_trade_pct = float(settings.get("max_trade_pct") or 0)
-    if trade_pct > max_trade_pct + 1e-6:
+    if not plan_sized and trade_pct > max_trade_pct + 1e-6:  # signal-lab buy-backs restore the plan
         return False, f"trade_pct {trade_pct:.2f}% exceeds max_trade_pct {max_trade_pct}%"
 
     max_daily_trades = int(settings.get("max_daily_trades") or 0)
@@ -363,6 +364,99 @@ def _build_signal(
     }
 
 
+def _lab_signal(portfolio_id: int, portfolio: dict, position: dict, analysis: dict, lab_vote: dict | None,
+                portfolio_value: float, expires_at: datetime | None) -> tuple[dict | None, str | None]:
+    """Signal-lab decision for one stock: all-in or all-out on the evidence-weighted vote (H3).
+
+    Only signals that passed the lab vote. "out" sells the whole holding;
+    "hold" with nothing held buys the planned shares back (user decision
+    2026-10-10: may fully sell and buy back). No passing signal = hold as is.
+    """
+    symbol = position["symbol"]
+    price = float(analysis.get("current_price") or 0)
+    held = float(position.get("quantity") or 0)
+    if lab_vote is None:
+        return None, "signal lab: no signal passed for this stock, so it is held as is"
+    if price <= 0:
+        return None, "signal lab: no price right now"
+    names = ", ".join(s["label"] for s in lab_vote["signals"])
+    if lab_vote["says"] == "out" and held >= 1:
+        action, quantity = "SELL", float(math.floor(held + 1e-9))
+        summary = f"Signal lab says sell (score {lab_vote['score']:.2f}; {names})"
+    elif lab_vote["says"] == "hold" and held < 1:
+        planned = float(position.get("planned_quantity") or 0)
+        weight = float(position.get("weight_at_creation") or 0)
+        quantity = float(math.floor(planned if planned >= 1 else weight * portfolio_value / price))
+        if quantity < 1:
+            return None, "signal lab says buy, but its share of the portfolio is less than one share"
+        action = "BUY"
+        summary = f"Signal lab says buy back (score {lab_vote['score']:.2f}; {names})"
+    else:
+        return None, f"signal lab: {lab_vote['says']} (score {lab_vote['score']:.2f}), nothing to do"
+    return {
+        "portfolio_id": portfolio_id,
+        "symbol": symbol,
+        "company_name": _company_name(symbol),
+        "market": (portfolio.get("market") or "ASX").upper(),
+        "action": action,
+        "quantity": quantity,
+        "price_at_signal": price,
+        "confidence": float(round(max(lab_vote["score"], 1 - lab_vote["score"]), 3)),
+        "rationale": {"rule": "signal_vote", "score": lab_vote["score"], "signals": lab_vote["signals"],
+                      "current_price": price, "portfolio_value": portfolio_value},
+        "rule_summary": summary,
+        "expires_at": expires_at or datetime.now(timezone.utc) + timedelta(hours=SIGNAL_TTL_HOURS),
+    }, None
+
+
+def _dip_entry(portfolio_id: int, portfolio: dict, position: dict, analysis: dict | None, pending_buy: float,
+               now: datetime, expires_at: datetime | None) -> tuple[dict | None, str | None]:
+    """RSI-dip entry for one waiting holding: (BUY proposal, None) or (None, why it is still waiting / skipped).
+
+    Buys the planned shares still missing once the stock's RSI is below the
+    portfolio's level; past the deadline the holding is skipped (user decision
+    2026-10-10). Entry buys are the plan itself, so the per-trade guardrails
+    don't shrink them; the account's own limits still apply at admission.
+    """
+    from core.tws import paper
+    symbol = position["symbol"]
+    planned = int(float(position.get("planned_quantity") or 0))
+    missing = int(planned - float(position.get("quantity") or 0) - max(pending_buy, 0.0))
+    if missing < 1:
+        if pending_buy <= 0:
+            paper.set_entry_state(portfolio_id, symbol, None)  # fully bought
+        return None, "entry order already working at IBKR" if pending_buy > 0 else None
+    threshold = float(portfolio.get("entry_rsi_below") or paper.DEFAULT_ENTRY_RSI)
+    deadline = portfolio.get("entry_deadline")
+    if isinstance(deadline, str):
+        deadline = datetime.fromisoformat(deadline)
+    if deadline is not None and deadline.tzinfo is None:
+        deadline = deadline.replace(tzinfo=timezone.utc)
+    if deadline is not None and now >= deadline:
+        paper.set_entry_state(portfolio_id, symbol, "skipped")
+        return None, f"skipped: its RSI didn't drop below {threshold:g} by {deadline:%d %b %Y}"
+    rsi = ((analysis or {}).get("indicators") or {}).get("rsi", {}).get("value") if analysis else None
+    price = float((analysis or {}).get("current_price") or 0)
+    if rsi is None or price <= 0:
+        return None, "waiting to buy: no RSI or price right now"
+    if rsi >= threshold:
+        return None, f"waiting to buy: RSI {rsi:.1f}, buys below {threshold:g}"
+    return {
+        "portfolio_id": portfolio_id,
+        "symbol": symbol,
+        "company_name": _company_name(symbol),
+        "market": (portfolio.get("market") or "ASX").upper(),
+        "action": "BUY",
+        "quantity": float(missing),
+        "price_at_signal": price,
+        "confidence": 0.8,
+        "rationale": {"rule": "rsi_dip_entry", "rsi": rsi, "rsi_buy_threshold": threshold,
+                      "current_price": price, "planned_quantity": planned},
+        "rule_summary": f"RSI {rsi:.1f} is below {threshold:g}: buying the planned {missing} shares",
+        "expires_at": expires_at or now + timedelta(hours=SIGNAL_TTL_HOURS),
+    }, None
+
+
 def _maybe_autonomous_execute(
     user_id: int,
     portfolio_id: int,
@@ -454,6 +548,11 @@ def scan_portfolio(user_id: int, portfolio_id: int, expires_at: datetime | None 
     skipped: list[dict] = []
     scanned = 0
 
+    # RSI-dip entry: holdings still waiting to be bought are handled by _dip_entry, never by the normal rules.
+    waiting = {p["symbol"]: p for p in positions if p.get("entry_state") == "waiting"}
+    not_bought = {p["symbol"] for p in positions if p.get("entry_state") in ("waiting", "skipped")
+                  and float(p.get("quantity") or 0) <= 0}
+
     analysed: list[tuple[dict, dict]] = []
     for position in positions + list(sold_with_target.values()):
         symbol = position["symbol"]
@@ -481,9 +580,24 @@ def scan_portfolio(user_id: int, portfolio_id: int, expires_at: datetime | None 
     portfolio_value = market_value + max(cash, 0.0) if env else (market_value or _portfolio_total_value(positions))
 
     loss_breaker = _loss_breaker(analysed, settings)
+
+    # Signal lab (H3): for portfolios that chose it, the evidence-weighted vote replaces the RSI/MACD rules;
+    # stop-loss and take-profit still come first.
+    use_lab = bool(env) and (portfolio.get("strategy") or "rules") == "signals"
+    lab_votes: dict[str, dict | None] = {}
+    if use_lab:
+        from core import signals
+        lab_symbols = [p["symbol"] for p, _ in analysed if p["symbol"] not in not_bought]
+        try:
+            lab = signals.run_lab(lab_symbols)
+            lab_votes = {symbol: signals.vote(lab["tests"], symbol) for symbol in lab_symbols}
+        except Exception as exc:  # no lab today: only the protective exits run
+            skipped.append({"symbol": "*", "reason": f"signal lab unavailable ({exc}); only stop-loss/take-profit ran"})
     sectors: dict[str, str | None] = {}
     for position, analysis in analysed:
         symbol = position["symbol"]
+        if symbol in not_bought:
+            continue
         candidate = _build_signal(
             portfolio_id=portfolio_id,
             portfolio=portfolio,
@@ -493,7 +607,12 @@ def scan_portfolio(user_id: int, portfolio_id: int, expires_at: datetime | None 
             portfolio_value=portfolio_value,
             expires_at=expires_at,
         )
-        if candidate is None:
+        if use_lab and (candidate is None or candidate["rationale"].get("rule") not in RISK_EXITS):
+            candidate, note = _lab_signal(portfolio_id, portfolio, position, analysis, lab_votes.get(symbol),
+                                          portfolio_value, expires_at)
+            if note:
+                skipped.append({"symbol": symbol, "reason": note})
+        if candidate is None or (candidate["action"] == "BUY" and symbol in waiting):
             continue
 
         duplicate = _already_proposed(portfolio_id, symbol, candidate["action"])
@@ -528,13 +647,33 @@ def scan_portfolio(user_id: int, portfolio_id: int, expires_at: datetime | None 
             turnover_today=turnover_today_baseline
                 + sum(s["quantity"] * s["price_at_signal"] for s in new_signals_payload),
             settings=settings,
-            risk_exit=candidate["rationale"].get("rule") in RISK_EXITS,
+            risk_exit=candidate["rationale"].get("rule") in RISK_EXITS
+                or (candidate["rationale"].get("rule") == "signal_vote" and candidate["action"] == "SELL"),
+            plan_sized=candidate["rationale"].get("rule") == "signal_vote",
         )
         if not ok:
             skipped.append({"symbol": symbol, "reason": reason})
             continue
 
         new_signals_payload.append(candidate)
+
+    if waiting and env:
+        pending = paper.open_order_quantities(portfolio_id, env)
+        by_symbol = {p["symbol"]: a for p, a in analysed}
+        now = datetime.now(timezone.utc)
+        for symbol, position in waiting.items():
+            candidate, note = _dip_entry(portfolio_id, portfolio, position, by_symbol.get(symbol),
+                                         float(pending.get(symbol, 0)), now, expires_at)
+            if candidate is None:
+                if note:
+                    skipped.append({"symbol": symbol, "reason": note})
+                continue
+            duplicate = _already_proposed(portfolio_id, symbol, "BUY")
+            blocked = duplicate or loss_breaker
+            if blocked:
+                skipped.append({"symbol": symbol, "reason": blocked})
+                continue
+            new_signals_payload.append(candidate)
 
     created: list[dict] = []
     if new_signals_payload:

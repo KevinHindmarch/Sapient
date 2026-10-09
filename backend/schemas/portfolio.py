@@ -77,6 +77,7 @@ class PositionResponse(BaseModel):
     allocation_amount: Optional[float]
     status: str
     planned_quantity: Optional[float] = None   # whole shares planned when bought at IBKR
+    entry_state: Optional[str] = None          # RSI-dip entry: 'waiting' / 'skipped' (None = bought or not waiting)
 
 
 class PortfolioResponse(BaseModel):
@@ -93,6 +94,7 @@ class PortfolioResponse(BaseModel):
     status: str
     position_count: Optional[int] = 0
     ai_mode: Optional[str] = "off"
+    strategy: Optional[str] = "rules"            # how AI Trading decides: rules | signals (H3)
     market: Optional[str] = "ASX"
     trading_environment: Optional[str] = None  # 'paper' / 'live' once bought at IBKR
 

@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { portfolioApi, normaliseWeights } from '../lib/api'
+import { portfolioApi, normaliseWeights, apiErrorMessage } from '../lib/api'
 import { toast } from 'sonner'
 import { Wand2, Save, Loader2, CheckCircle, Info, AlertTriangle, Target, Globe, SlidersHorizontal } from 'lucide-react'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts'
@@ -228,7 +228,7 @@ export default function AutoBuilder() {
       toast.success(`Auto-built portfolio from ${scanResponse.data.total_scanned} ${marketLabel} stocks!`)
     } catch (error: unknown) {
       const err = error as { response?: { data?: { detail?: string } } }
-      toast.error(err.response?.data?.detail || 'Failed to build portfolio')
+      toast.error(apiErrorMessage(err, 'Failed to build portfolio'))
     } finally {
       setBuilding(false)
       setProgress('')
@@ -253,7 +253,7 @@ export default function AutoBuilder() {
       setShowSaveModal(false)
     } catch (error: unknown) {
       const err = error as { response?: { data?: { detail?: string } } }
-      toast.error(err.response?.data?.detail || 'Failed to save portfolio')
+      toast.error(apiErrorMessage(err, 'Failed to save portfolio'))
     } finally {
       setSaving(false)
     }
