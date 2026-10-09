@@ -263,9 +263,16 @@ def admit(request: dict, user_id: int, env: str = "paper") -> dict:
     r = _normalise(request)
     digest = hashlib.sha256(json.dumps({**r, "environment": e.name}, sort_keys=True).encode()).hexdigest()
     order_market = markets.for_symbol(r["symbol"])
-    # Fetched before the database is locked; used only if TWS hasn't sent its own rate.
-    fx_fallback = (markets.yahoo_rate_to_aud(order_market.currency)
-                   if order_market and order_market.currency != "AUD" and r["side"] == "BUY" else None)
+    # Fetched before the database is locked, and only when TWS hasn't sent its own rate.
+    fx_fallback = None
+    if order_market and order_market.currency != "AUD" and r["side"] == "BUY":
+        conn = db.connect()
+        try:
+            summary, _ = _snapshot(conn.cursor(), "summary", e.name)
+        finally:
+            conn.close()
+        if markets.rate_to_aud(summary or {}, order_market.currency) is None:
+            fx_fallback = markets.yahoo_rate_to_aud(order_market.currency)
     with db.transaction() as (cur, _):
         cur.execute("SELECT * FROM paper_orders WHERE idempotency_key=%s", (r["idempotency_key"],))
         existing = cur.fetchone()
