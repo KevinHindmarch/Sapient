@@ -426,10 +426,13 @@ def _check_limits(cur, r, binding, now, e: Env, market: "markets.Market" = marke
             raise PaperError("order_too_large", f"Buy value up to {shown} is above your {e.label} limit of "
                                                 f"A${binding['max_order_value']:,.2f} per order.")
         cash = _cash(summary, market.currency)
-        if nav is None or cash is None:
+        if nav is None:
+            raise PaperError("no_account_values", "Account values from TWS are missing.")
+        if cash is None:
+            detail = ((summary or {}).get("_cash_source") or {}).get("detail")
             raise PaperError("no_account_values", f"TWS hasn't sent your {market.currency} cash balance yet; try again "
-                                                  "after the next account update (about a minute)." if nav is not None
-                             else "Account values from TWS are missing.")
+                                                  "after the next account update (about a minute)."
+                             + (f" What TWS sent: {detail}." if detail else ""))
         cur.execute("SELECT max_trade_pct, max_daily_trades FROM ai_trading_settings ORDER BY id LIMIT 1")
         legacy = cur.fetchone() or {}
         max_trade_pct = Decimal(str(legacy.get("max_trade_pct") or 5))

@@ -34,6 +34,9 @@ REQ_LEDGER = 2_100_000_005
 REQUEST_IDS = {REQ_SUMMARY, REQ_EXECUTIONS, REQ_CONTRACT, REQ_MARKET, REQ_LEDGER}
 # Per-currency values Sapient needs (US buys: US$ cash; A$ limits: TWS's exchange rate).
 CURRENCY_KEYS = ("CashBalance", "ExchangeRate")
+# TWS setting "Prepend $LEDGER- prefix to per-currency account values" (on by default for
+# new TWS users) renames per-currency values, e.g. "$LEDGER-CashBalance". Both forms are read.
+LEDGER_PREFIX = "$LEDGER-"
 
 # Broker evidence about orders. These are kept for the order projector no matter
 # which request the session happened to be waiting for when they arrived.
@@ -75,6 +78,12 @@ def _contract(contract) -> dict:
 def _code(fields: dict) -> int | None:
     code = fields.get("errorCode")
     return code if isinstance(code, int) else None
+
+
+def _describe(name: str, rows: dict) -> str:
+    """Short note of which per-currency cash rows arrived (for the user's error message)."""
+    cash = sorted(key.split(":", 1)[1] for key in rows if key.startswith("CashBalance:"))
+    return f"{name}: {len(rows)} values, cash in {', '.join(cash) or 'no currency'}"
 
 
 class TwsSession:
@@ -191,20 +200,31 @@ class TwsSession:
         Rows are keyed "Tag:CUR" (CashBalance:USD, ExchangeRate:USD, ...).
         """
         values = self._summary(SUMMARY_TAGS, timeout, keyed=False)
+        notes: list[str] = []  # what TWS sent, shown when US$ cash is missing
         ledger: dict[str, dict] = {}
         try:
             ledger = self._summary("$LEDGER:ALL", timeout, keyed=True, req_id=REQ_LEDGER)
-        except TwsTimeout:
-            pass
+            notes.append(_describe("ledger", ledger))
+        except TwsTimeout as exc:
+            notes.append(f"ledger: {exc}")
+        source = "ledger"
         if not any(key.startswith("CashBalance:") for key in ledger):
+            source = "none"
             account = next((v.get("account") for v in values.values() if v.get("account")), None) \
                 or (self.health.accounts[0] if self.health.accounts else None)
             if account:
                 try:
-                    ledger.update(self.account_values(account, timeout))
-                except TwsTimeout:
-                    pass  # totals still count; US buys explain that the US$ figures are missing
+                    updates = self.account_values(account, timeout)
+                    notes.append(_describe("account updates", updates))
+                    ledger.update(updates)
+                    if any(key.startswith("CashBalance:") for key in updates):
+                        source = "account_updates"
+                except TwsTimeout as exc:
+                    notes.append(f"account updates: {exc}")
+            else:
+                notes.append("account updates: no account id")
         values.update(ledger)
+        values["_cash_source"] = {"value": source, "currency": None, "detail": "; ".join(notes)[:500]}
         return values
 
     def _summary(self, tags: str, timeout: float, keyed: bool, req_id: int = REQ_SUMMARY) -> dict:
@@ -216,6 +236,8 @@ class TwsSession:
                 refused.append(fields)
             if name == "accountSummary" and fields.get("reqId") == req_id:
                 tag, currency = str(fields.get("tag")), _plain(fields.get("currency"))
+                if keyed:
+                    tag = tag.removeprefix(LEDGER_PREFIX)
                 entry = {"value": _plain(fields.get("value")), "currency": currency,
                          "account": _plain(fields.get("account"))}
                 values[f"{tag}:{currency}" if keyed or tag not in STANDARD_TAGS else tag] = entry
@@ -233,21 +255,28 @@ class TwsSession:
         return values
 
     def account_values(self, account: str, timeout: float = 20.0) -> dict:
-        """Cash and exchange rate per currency from TWS's account updates (read-only)."""
-        values: dict[str, dict] = {}
+        """Cash and exchange rate per currency from TWS's account updates (read-only).
+
+        With TWS's "$LEDGER-" prefix setting on, per-currency rows are the
+        prefixed ones (unprefixed rows are account totals), so they win.
+        """
+        plain: dict[str, dict] = {}
+        prefixed: dict[str, dict] = {}
 
         def collect(name, fields):
             if name == "updateAccountValue" and fields.get("accountName") in (account, "", None):
                 key, currency = str(fields.get("key")), _plain(fields.get("currency"))
+                target = prefixed if key.startswith(LEDGER_PREFIX) else plain
+                key = key.removeprefix(LEDGER_PREFIX)
                 if key in CURRENCY_KEYS and currency and currency != "BASE":
-                    values[f"{key}:{currency}"] = {"value": _plain(fields.get("val")), "currency": currency,
+                    target[f"{key}:{currency}"] = {"value": _plain(fields.get("val")), "currency": currency,
                                                    "account": account}
         self.transport.request("reqAccountUpdates", True, account)
         try:
             self._wait(lambda n, f: n == "accountDownloadEnd", timeout, collect)
         finally:
             self.transport.request("reqAccountUpdates", False, account)
-        return values
+        return prefixed or plain
 
     def positions(self, timeout: float = 20.0) -> list[dict]:
         rows: list[dict] = []

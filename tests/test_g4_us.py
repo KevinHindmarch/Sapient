@@ -47,6 +47,12 @@ class UsAdmissionTests(PaperTestCase):
         store.save_snapshot("summary", ledger(usd_cash="100"))
         error = self.refused("insufficient_cash", self.order, key="u3", symbol="MSFT", quantity=1, price="400")
         self.assertIn("Convert A$ to US$ in TWS", str(error))
+        summary = ledger()
+        del summary["CashBalance:USD"]
+        summary["_cash_source"] = {"value": "none", "currency": None, "detail": "ledger: 3 values, cash in AUD"}
+        store.save_snapshot("summary", summary)
+        error = self.refused("no_account_values", self.order, key="u4", symbol="MSFT", quantity=1, price="400")
+        self.assertIn("What TWS sent: ledger: 3 values, cash in AUD", str(error))
 
     def test_us_hours_apply_to_us_orders(self):
         with mock.patch("core.tws.paper.calendar.is_open", side_effect=lambda m, now: m.name == "ASX"):
@@ -144,8 +150,46 @@ class LedgerRequestTests(unittest.TestCase):
         values = session.account_summary(timeout=2)
         self.assertEqual((values["CashBalance:USD"]["value"], values["ExchangeRate:USD"]["value"]), ("23704", "1.434"))
         self.assertNotIn("CashBalance:BASE", values)
+        self.assertEqual(values["_cash_source"]["value"], "account_updates")
+        self.assertIn("ledger: TWS refused", values["_cash_source"]["detail"])
         self.assertNotIn("NetLiquidation:AUD", values)
         self.assertEqual(values["NetLiquidation"]["value"], "1000000")
+
+
+class LedgerPrefixTests(unittest.TestCase):
+    """TWS setting "Prepend $LEDGER- prefix to per-currency account values" (default for new TWS users)."""
+
+    def session_with(self, ledger_rows, update_rows):
+        from core.tws.session import TwsSession
+
+        class Prefixed(PaperFakeTws):
+            def request(self, name, *args):
+                if name == "reqAccountSummary" and args[2] == "$LEDGER:ALL":
+                    for tag, value, cur in ledger_rows:
+                        self.emit("accountSummary", reqId=args[0], account=ACCOUNT, tag=tag, value=value, currency=cur)
+                    self.emit("accountSummaryEnd", reqId=args[0])
+                    return
+                if name == "reqAccountUpdates" and args[0]:
+                    for key, value, cur in update_rows:
+                        self.emit("updateAccountValue", key=key, val=value, currency=cur, accountName=ACCOUNT)
+                    self.emit("accountDownloadEnd", accountName=ACCOUNT)
+                    return
+                super().request(name, *args)
+        session = TwsSession(Prefixed())
+        session.connect(7497, 71)
+        return session.account_summary(timeout=2)
+
+    def test_prefixed_ledger_summary_rows(self):
+        values = self.session_with([("$LEDGER-CashBalance", "23704", "USD"), ("$LEDGER-ExchangeRate", "1.434", "USD")], [])
+        self.assertEqual((values["CashBalance:USD"]["value"], values["ExchangeRate:USD"]["value"]), ("23704", "1.434"))
+        self.assertEqual(values["_cash_source"]["value"], "ledger")
+
+    def test_prefixed_account_updates_win_over_account_totals(self):
+        values = self.session_with([], [("CashBalance", "990802", "USD"),              # account-level total
+                                        ("$LEDGER-CashBalance", "23704", "USD"),
+                                        ("$LEDGER-ExchangeRate", "1.434", "USD")])
+        self.assertEqual((values["CashBalance:USD"]["value"], values["ExchangeRate:USD"]["value"]), ("23704", "1.434"))
+        self.assertEqual(values["_cash_source"]["value"], "account_updates")
 
 
 class UsExecutorTests(PaperTestCase):
