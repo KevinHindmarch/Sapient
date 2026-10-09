@@ -54,6 +54,55 @@ class UsAdmissionTests(PaperTestCase):
             self.refused("market_closed", self.order, key="u4", symbol="AAPL", quantity=1, price="200")
 
 
+class ExchangeRateFallbackTests(PaperTestCase):
+    def setUp(self):
+        super().setUp()
+        self.authorise(max_order_value=2000, max_value_per_day=100000)
+        summary = ledger()
+        del summary["ExchangeRate:USD"]                                     # TWS sent no rate
+        store.save_snapshot("summary", summary)
+
+    def test_yahoo_rate_with_a_cautious_margin_when_tws_sends_none(self):
+        with mock.patch("core.yahoo.Ticker") as ticker:
+            import pandas as pd
+            ticker.return_value.history.return_value = pd.DataFrame({"Close": [0.65]})
+            rate = markets.yahoo_rate_to_aud("USD")
+            self.assertEqual(rate, (Decimal(1) / Decimal("0.65") * Decimal("1.02")).quantize(Decimal("0.000001")))
+            self.order(key="u1", symbol="AAPL", quantity=5, price="200")      # 5x200x1.03x1.569 ~ A$1,616
+            self.refused("order_too_large", self.order, key="u2", symbol="AAPL", quantity=7, price="200")
+        with mock.patch("core.tws.markets.yahoo_rate_to_aud", return_value=None):
+            self.refused("no_exchange_rate", self.order, key="u3", symbol="AAPL", quantity=1, price="200")
+
+
+class LedgerRequestTests(unittest.TestCase):
+    def test_ledger_is_asked_for_separately_and_keyed_by_currency(self):
+        from core.tws.session import TwsSession
+
+        class Ledger(PaperFakeTws):
+            def request(self, name, *args):
+                if name == "reqAccountSummary":
+                    self.summary_tags.append(args[2])
+                    req = args[0]
+                    if args[2] == "$LEDGER:ALL":
+                        for cur, cash, rate in (("AUD", "1000", "1"), ("USD", "2787", "1.53")):
+                            self.emit("accountSummary", reqId=req, account=ACCOUNT, tag="CashBalance", value=cash, currency=cur)
+                            self.emit("accountSummary", reqId=req, account=ACCOUNT, tag="ExchangeRate", value=rate, currency=cur)
+                    else:
+                        self.emit("accountSummary", reqId=req, account=ACCOUNT, tag="NetLiquidation", value="5000", currency="AUD")
+                    self.emit("accountSummaryEnd", reqId=req)
+                    return
+                super().request(name, *args)
+        fake = Ledger()
+        fake.summary_tags = []
+        session = TwsSession(fake)
+        session.connect(7497, 71)
+        values = session.account_summary()
+        self.assertEqual(fake.summary_tags[-1], "$LEDGER:ALL")
+        self.assertNotIn("$LEDGER", fake.summary_tags[0])
+        self.assertEqual((values["CashBalance:USD"]["value"], values["ExchangeRate:USD"]["value"],
+                          values["NetLiquidation"]["value"]), ("2787", "1.53", "5000"))
+
+
 class UsExecutorTests(PaperTestCase):
     def setUp(self):
         super().setUp()
