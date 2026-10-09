@@ -36,7 +36,7 @@ export default function AutonomyChecklist() {
         </p>
       </div>
       <ul className="space-y-1.5 text-sm">
-        {data.shared.map((item) => <Item key={item.key} {...item} />)}
+        {data.shared.map((item) => <Item key={item.key} ok={item.ok} text={item.text} />)}
       </ul>
       {data.portfolios.length === 0 ? (
         <p className="text-sm theme-text-secondary">No portfolios yet.</p>
@@ -56,7 +56,7 @@ export default function AutonomyChecklist() {
                   {p.autonomous ? 'TRADING AUTOMATICALLY' : 'NOT AUTOMATIC'}
                 </span>
               </div>
-              <ul className="space-y-1">{p.items.map((item) => <Item key={item.key} {...item} />)}</ul>
+              <ul className="space-y-1">{p.items.map((item) => <Item key={item.key} ok={item.ok} text={item.text} />)}</ul>
             </div>
           ))}
         </div>

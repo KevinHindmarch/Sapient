@@ -46,7 +46,7 @@ export default function PaperTradingCard({ status, account, paperConfirmed, onCh
   if (!status) return null
 
   const targetAccount = binding?.account_id ?? account ?? ''
-  const statement = status.authorisation_text.replace('{account}', targetAccount)
+  const statement = status.authorisation_text.replace('{account}', targetAccount || '(connect TWS first)')
   const set = <K extends keyof typeof limits>(key: K, value: (typeof limits)[K]) => setLimits((l) => ({ ...l, [key]: value }))
 
   const run = async (action: () => Promise<unknown>, done: string) => {

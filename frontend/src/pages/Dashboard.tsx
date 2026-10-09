@@ -1,15 +1,11 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { money, portfolioApi, PortfolioSummary } from '../lib/api'
-import { Portfolio, Position } from '../types'
+import { Portfolio } from '../types'
 import { useTheme } from '../lib/theme'
 import { useProfile } from '../lib/profile'
 import { Briefcase, TrendingUp, TrendingDown, Wand2, Wrench, ArrowRight, Sparkles, RefreshCw } from 'lucide-react'
 
-interface PortfolioWithPositions {
-  portfolio: Portfolio
-  positions: Position[]
-}
 
 function SkeletonPulse({ className }: { className?: string }) {
   return (
@@ -24,7 +20,6 @@ export default function Dashboard() {
   const [portfolios, setPortfolios] = useState<Portfolio[]>([])
   const [loading, setLoading] = useState(true)
   const [totalReturn, setTotalReturn] = useState<number | null>(null)
-  const [totalCurrentValue, setTotalCurrentValue] = useState<number>(0)
   const [loadingReturns, setLoadingReturns] = useState(false)
   const [loadingProgress, setLoadingProgress] = useState({ done: 0, total: 0 })
   const [summaries, setSummaries] = useState<PortfolioSummary[]>([])
@@ -56,7 +51,6 @@ export default function Dashboard() {
       const response = await portfolioApi.summaries()
       setSummaries(response.data)
       const aud = response.data.filter((x) => x.currency === 'AUD')
-      setTotalCurrentValue(aud.reduce((sum, x) => sum + x.total_value, 0))
       setTotalReturn(aud.reduce((sum, x) => sum + x.total_return, 0))
       setLoadingProgress({ done: portfolioList.length, total: portfolioList.length })
     } catch (error) {

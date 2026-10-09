@@ -188,7 +188,7 @@ function BrokerageAccount({ profile }: { profile: TradingEnv }) {
             ? (live ? 'bg-red-500/15 text-red-600 border-red-500/40' : 'bg-emerald-500/15 text-emerald-600 border-emerald-500/30')
             : 'bg-slate-500/10 theme-text-secondary theme-border'}`}>{ordersBadge}</span>
         </div>
-        <p className="text-sm theme-text-secondary mt-2">{status?.detail ?? 'Checking…'}</p>
+        <p className="text-sm theme-text-secondary mt-2">{status ? (status.detail ?? (status.state === 'NOT_CONFIGURED' ? 'Not set up yet: follow the steps below.' : status.state)) : 'Checking…'}</p>
         {status && !status.worker_running && (
           <p className="text-sm text-amber-600 mt-1">The TWS connector isn't running. Restarting Sapient usually fixes this.</p>
         )}

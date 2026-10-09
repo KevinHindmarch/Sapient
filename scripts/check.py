@@ -45,6 +45,7 @@ def main():
             sys.exit("npm not found")
         run([npm, "ci"], cwd=ROOT / "frontend")
         run([npm, "run", "build"], cwd=ROOT / "frontend")
+        run([npm, "run", "lint"], cwd=ROOT / "frontend")  # errors fail; React Compiler hints are warnings
     print("All checks passed")
 
 

@@ -4,6 +4,7 @@ import { apiBase, apiToken } from './runtime'
 
 const api = axios.create({
   baseURL: apiBase,
+  timeout: 300_000,  // a full market scan can take a few minutes; nothing should wait forever
   headers: {
     'Content-Type': 'application/json',
     Authorization: `Bearer ${apiToken}`,

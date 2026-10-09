@@ -129,7 +129,9 @@ export default function StockAnalysis() {
       setScreenerResults(res.data.results)
       setScreenerStats({ total_scanned: res.data.total_scanned, signals_found: res.data.signals_found })
       setSelectedScannerSymbols(new Set())
-      toast.success(`Scan complete! Found ${res.data.signals_found} signals`)
+      const missing = (res.data.total_scanned ?? 0) - (res.data.analysed ?? res.data.total_scanned ?? 0)
+      toast.success(`Scan complete! Found ${res.data.signals_found} signals`
+        + (missing > 0 ? ` (${missing} stocks had no Yahoo data and were skipped)` : ''))
     } catch (error: unknown) {
       const err = error as { response?: { data?: { detail?: string } } }
       toast.error(err.response?.data?.detail || 'Screener scan failed')

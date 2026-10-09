@@ -26,7 +26,6 @@ export default function HelpTooltip({ term }: HelpTooltipProps) {
   const panelRef = useRef<HTMLDivElement>(null)
 
   const entry = glossaryTerms[term]
-  if (!entry) return null
 
   const isMobile = () => window.innerWidth < 640
 
@@ -86,6 +85,7 @@ export default function HelpTooltip({ term }: HelpTooltipProps) {
     setOpen(prev => !prev)
   }
 
+  if (!entry) return null  // after every hook: hooks must run in the same order on each render
   return (
     <>
       <button

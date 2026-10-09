@@ -4,7 +4,6 @@ import { portfolioApi, stocksApi, brokerApi, aiApi, apiErrorMessage, money, Port
 import { Portfolio, Position, Transaction } from '../types'
 import { toast } from 'sonner'
 import { ArrowLeft, TrendingUp, TrendingDown, DollarSign, Pencil, Trash2, Plus, X, Search, RefreshCw, Sparkles, Send, Zap, Activity, Link2, AlertTriangle } from 'lucide-react'
-import HelpTooltip from '../components/HelpTooltip'
 import BrokerCompareCard from '../components/BrokerCompareCard'
 import { format } from 'date-fns'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, LineChart, Line, XAxis, YAxis, CartesianGrid } from 'recharts'
@@ -193,7 +192,7 @@ export default function PortfolioDetail() {
       if (symbols.length > 0) {
         loadCurrentPrices(symbols)
       }
-    } catch (error) {
+    } catch {
       toast.error('Failed to load portfolio')
     } finally {
       setLoading(false)

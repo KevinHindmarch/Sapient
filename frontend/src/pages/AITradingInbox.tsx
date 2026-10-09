@@ -195,7 +195,7 @@ export default function AITradingInbox() {
                 <RefreshCw className="w-4 h-4" />
               </button>
               <div
-                className={`flex items-center gap-1 p-1 rounded-xl border ${
+                className={`flex items-center gap-1 p-1 rounded-xl border max-w-full overflow-x-auto ${
                   isDark ? 'bg-slate-800/50 border-slate-700/50' : 'bg-slate-100 border-slate-200'
                 }`}
               >

@@ -19,5 +19,14 @@ export default defineConfig([
       ecmaVersion: 2020,
       globals: globals.browser,
     },
+    // React Compiler advice (set state in an effect, function declared after the effect that
+    // calls it, memo hints) and fast-refresh hints are shown as warnings; real hook-order bugs
+    // (rules-of-hooks) and unused code stay errors, and CI fails on them (scripts/check.py).
+    rules: {
+      'react-hooks/set-state-in-effect': 'warn',
+      'react-hooks/immutability': 'warn',
+      'react-hooks/preserve-manual-memoization': 'warn',
+      'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
+    },
   },
 ])
