@@ -24,7 +24,8 @@ are genuinely theirs (trading authorisation, money, licences, accounts).
   are gone, and it is single-user with no login (Phase C). Target: a
   self-contained **Electron + React/Tailwind desktop app on Windows** talking to
   Yahoo Finance and a locally installed **IBKR Trader Workstation (TWS)**.
-  Phases D onward of the migration plan are not yet done.
+  The Electron shell and Windows installer exist (Phase D); TWS connectivity
+  (Phase E) onward is not yet done.
 - **No real broker orders are possible.** `core/ibkr_client.py` is a simulation stub
   (`place_order`/`cancel_order` always raise). All order paths go through the
   durable "safety admission" in `core/execution_safety.py`, which only records
@@ -97,6 +98,11 @@ core/                Service layer (all business logic)
   execution_safety.py IntentService: the single order admission boundary
   ibkr_client.py     placeholder: connection_status() + IBKRClient that refuses
                      every direct place/cancel (OAuth/credential vault removed)
+desktop/             Electron shell (TypeScript): src/main (window, app:// protocol,
+                     CSP, EngineSupervisor), src/preload (window.sapient bridge),
+                     electron-builder.yml (NSIS installer), build/ (icon, licence,
+                     installer.nsh), e2e/smoke.mjs (Playwright Electron test)
+packaging/           sapient-api.spec (PyInstaller onedir engine), smoke_engine.py
 safety_spec/         stdlib-only SQLite reference model of the TWS worker protocol
 scripts/tws_readonly_check.py  operator-run read-only TWS probe (official ibapi)
 tests/               unittest suites (see Commands)
@@ -139,6 +145,12 @@ cd frontend && npm ci        # frontend deps (frontend/package-lock.json)
 uv run python scripts/check.py   # what CI runs: tests + compileall + frontend build
 # Backend (dev, port 8000) + frontend (Vite, port 5000, proxies /api → 8000)
 uv run python run_dev.py
+# Desktop app
+cd frontend && npm run build && cd ../desktop && npm ci
+npm run build:engine           # PyInstaller -> packaging/dist/sapient-api
+npm run dist:win               # Windows installer -> desktop/release (CI: desktop.yml)
+npm run dist:dir && npm run e2e -- release/<platform>-unpacked/<exe>   # packaged smoke test
+npm run dev                    # Electron + Vite dev server + engine from .venv (run Vite first)
 # Desktop-style API (what Electron runs): token on stdin, prints ready JSON
 echo <32+ char token> | uv run python backend/desktop_main.py --data-dir /tmp/sapient
 

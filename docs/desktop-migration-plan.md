@@ -232,6 +232,21 @@ Exit: clean Windows 10/11 VM — install, launch offline (cached data + clear
 "no internet" state), launch online, build a portfolio, close, reopen, uninstall.
 No Python/Node/Postgres needed on the machine.
 
+**Done (2026-10-09):** `desktop/` Electron 44 shell (TypeScript, no bundler):
+engine supervisor with stdin token handshake, restart backoff and log file;
+`app://sapient` protocol serving the built UI with a strict CSP; sandboxed,
+context-isolated renderer; navigation lock and https-only external links;
+permission requests denied; single-instance lock; loading and "couldn't start"
+pages with Retry / Open logs. `packaging/sapient-api.spec` freezes the engine
+(~205 MB onedir); electron-builder NSIS assisted per-user installer with
+licence/risk page, visible detail list, shortcuts, keep-data uninstall.
+`.github/workflows/desktop.yml` builds the engine and installer on
+windows-latest, smoke-tests the frozen engine, installs silently and runs
+`desktop/e2e/smoke.mjs` against the installed app; the installer is uploaded
+as a workflow artifact. Verified locally on a Linux packaged build (Xvfb).
+Not yet: code signing (Q4), auto-update (Q5), tray icon, uninstaller
+"remove my data" checkbox, offline-state screen.
+
 ### Phase E — TWS connection, read-only (maps to IBKR roadmap phases 0 + 2)
 
 No orders. TWS Read-Only API stays ticked.

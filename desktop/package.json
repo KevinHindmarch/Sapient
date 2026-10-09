@@ -1,0 +1,27 @@
+{
+  "name": "sapient-desktop",
+  "productName": "Sapient",
+  "version": "0.1.0",
+  "description": "Sapient portfolio research and IBKR trading assistant",
+  "author": "Sapient",
+  "private": true,
+  "main": "dist/main/index.js",
+  "scripts": {
+    "build:ts": "tsc -p tsconfig.json",
+    "prepare:renderer": "node scripts/prepare-renderer.mjs",
+    "start": "npm run build:ts && electron .",
+    "dev": "npm run build:ts && cross-env SAPIENT_DEV_RENDERER_URL=http://127.0.0.1:5000 electron .",
+    "build:engine": "node scripts/build-engine.mjs",
+    "dist:win": "npm run build:ts && npm run prepare:renderer && electron-builder --win --publish never",
+    "dist:dir": "npm run build:ts && npm run prepare:renderer && electron-builder --dir --publish never",
+    "e2e": "node e2e/smoke.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "cross-env": "^7.0.3",
+    "electron": "^44.0.0",
+    "electron-builder": "^26.0.0",
+    "playwright-core": "^1.56.1",
+    "typescript": "~5.9.3"
+  }
+}

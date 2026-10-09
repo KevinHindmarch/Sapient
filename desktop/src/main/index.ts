@@ -1,0 +1,190 @@
+// Sapient desktop shell: one secure window, the bundled UI served from app://,
+// and the local Sapient engine supervised in the background.
+
+import { app, BrowserWindow, ipcMain, Menu, net, protocol, session, shell } from 'electron'
+import fs from 'node:fs'
+import path from 'node:path'
+import { pathToFileURL } from 'node:url'
+import { EngineCommand, EngineState, EngineSupervisor } from './engine'
+import { errorPage, loadingPage, SHELL_SCRIPT } from './pages'
+
+const SCHEME = 'app'
+const HOST = 'sapient'
+const APP_ORIGIN = `${SCHEME}://${HOST}`
+const devRendererUrl = process.env.SAPIENT_DEV_RENDERER_URL // e.g. Vite on http://127.0.0.1:5000
+
+protocol.registerSchemesAsPrivileged([
+  { scheme: SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } },
+])
+
+let mainWindow: BrowserWindow | null = null
+let engine: EngineSupervisor
+let shellPage = ''  // HTML for app://sapient/__shell while starting or failed
+
+function rendererDir(): string {
+  return path.join(__dirname, '..', '..', 'renderer')
+}
+
+function engineCommand(): EngineCommand {
+  if (app.isPackaged) {
+    const exe = process.platform === 'win32' ? 'sapient-api.exe' : 'sapient-api'
+    return { command: path.join(process.resourcesPath, 'engine', exe), args: [] }
+  }
+  // Development: the repository's Python environment (created by `uv sync`).
+  const repo = path.resolve(__dirname, '..', '..', '..')
+  const python = process.platform === 'win32'
+    ? path.join(repo, '.venv', 'Scripts', 'python.exe')
+    : path.join(repo, '.venv', 'bin', 'python')
+  return { command: python, args: [path.join(repo, 'backend', 'desktop_main.py')], cwd: repo }
+}
+
+function logDir(): string {
+  return app.getPath('logs')
+}
+
+function contentSecurityPolicy(): string {
+  const state = engine?.current
+  const api = state?.kind === 'ready' ? `http://127.0.0.1:${state.info.port}` : ''
+  return [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",  // React style attributes
+    "img-src 'self' data: blob:",
+    "font-src 'self' data:",
+    `connect-src 'self' ${api}`.trim(),
+    "object-src 'none'",
+    "base-uri 'none'",
+    "frame-ancestors 'none'",
+    "form-action 'none'",
+  ].join('; ')
+}
+
+function serveApp(): void {
+  protocol.handle(SCHEME, async (request) => {
+    const url = new URL(request.url)
+    if (url.host !== HOST) return new Response('Not found', { status: 404 })
+    const headers = { 'Content-Security-Policy': contentSecurityPolicy() }
+    if (url.pathname === '/__shell') {
+      return new Response(shellPage, { headers: { ...headers, 'Content-Type': 'text/html; charset=utf-8' } })
+    }
+    if (url.pathname === '/__shell.js') {
+      return new Response(SHELL_SCRIPT, { headers: { ...headers, 'Content-Type': 'text/javascript' } })
+    }
+    const root = rendererDir()
+    const relative = decodeURIComponent(url.pathname === '/' ? '/index.html' : url.pathname)
+    const file = path.normalize(path.join(root, relative))
+    if (!file.startsWith(root + path.sep) || !fs.existsSync(file)) {
+      return new Response('Not found', { status: 404 })
+    }
+    const response = await net.fetch(pathToFileURL(file).toString())
+    const merged = new Headers(response.headers)
+    merged.set('Content-Security-Policy', headers['Content-Security-Policy'])
+    return new Response(response.body, { status: response.status, headers: merged })
+  })
+}
+
+function isAppUrl(target: string): boolean {
+  if (target.startsWith(APP_ORIGIN + '/')) return true
+  return !!devRendererUrl && target.startsWith(devRendererUrl)
+}
+
+function showShell(html: string): void {
+  shellPage = html
+  mainWindow?.loadURL(`${APP_ORIGIN}/__shell`)
+}
+
+function showApp(): void {
+  if (!mainWindow) return
+  mainWindow.loadURL(devRendererUrl ?? `${APP_ORIGIN}/index.html`)
+}
+
+function onEngineState(state: EngineState): void {
+  if (state.kind === 'starting') {
+    showShell(loadingPage(state.attempt > 1 ? 'Restarting the Sapient engine…' : 'Preparing your local engine and data…'))
+  } else if (state.kind === 'ready') {
+    showApp()
+  } else if (state.kind === 'failed') {
+    showShell(errorPage(state.message, path.join(logDir(), 'engine.log')))
+  }
+}
+
+function createWindow(): void {
+  mainWindow = new BrowserWindow({
+    width: 1400,
+    height: 900,
+    minWidth: 1024,
+    minHeight: 700,
+    title: 'Sapient',
+    icon: path.join(__dirname, '..', '..', 'build', 'icon.png'),
+    backgroundColor: '#f8fafc',
+    show: false,
+    webPreferences: {
+      preload: path.join(__dirname, '..', 'preload', 'index.js'),
+      contextIsolation: true,
+      sandbox: true,
+      nodeIntegration: false,
+      webSecurity: true,
+      spellcheck: false,
+    },
+  })
+  mainWindow.once('ready-to-show', () => mainWindow?.show())
+  mainWindow.on('closed', () => { mainWindow = null })
+
+  // Never navigate away from the app; open https links in the user's browser.
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith('https://')) void shell.openExternal(url)
+    return { action: 'deny' }
+  })
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (!isAppUrl(url)) event.preventDefault()
+  })
+
+  onEngineState(engine.current)
+}
+
+function registerIpc(): void {
+  ipcMain.on('sapient:config', (event) => {
+    const state = engine.current
+    event.returnValue = state.kind === 'ready'
+      ? { apiBase: state.info.apiBase, apiToken: state.info.token, appVersion: app.getVersion() }
+      : { apiBase: '', apiToken: '', appVersion: app.getVersion() }
+  })
+  ipcMain.on('sapient:open-external', (_event, url: unknown) => {
+    if (typeof url === 'string' && url.startsWith('https://')) void shell.openExternal(url)
+  })
+  ipcMain.on('sapient:open-logs', () => { void shell.openPath(logDir()) })
+  ipcMain.on('sapient:retry', () => engine.start())
+}
+
+if (!app.requestSingleInstanceLock()) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      mainWindow.focus()
+    }
+  })
+
+  app.whenReady().then(() => {
+    Menu.setApplicationMenu(null)
+    session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false))
+    serveApp()
+    registerIpc()
+    const origins = devRendererUrl ? [new URL(devRendererUrl).origin] : [APP_ORIGIN]
+    engine = new EngineSupervisor(engineCommand(), app.getPath('userData'),
+      path.join(logDir(), 'engine.log'), origins)
+    engine.on('state', onEngineState)
+    engine.start()
+    createWindow()
+  })
+
+  let quitting = false
+  app.on('before-quit', (event) => {
+    if (quitting) return
+    quitting = true
+    event.preventDefault()
+    void engine.stop().finally(() => app.exit(0))
+  })
+  app.on('window-all-closed', () => app.quit())
+}

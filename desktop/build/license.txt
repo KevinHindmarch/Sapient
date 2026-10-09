@@ -1,0 +1,19 @@
+SAPIENT - IMPORTANT NOTICE
+
+Sapient is portfolio research software that runs entirely on this computer.
+Your portfolios, settings and history are stored only in your Windows user
+profile (%APPDATA%\Sapient). They are kept if you uninstall Sapient.
+
+Market data comes from Yahoo Finance and is for research only. It may be
+delayed or inaccurate and is not a price you can trade at.
+
+Trading involves risk, including the loss of money. Sapient does not give
+financial advice. You are responsible for every order placed in your
+Interactive Brokers account.
+
+Sapient never asks for or stores your Interactive Brokers password. You log in
+to Trader Workstation (TWS) yourself. Sapient starts in simulation and
+read-only modes; paper trading and real-money trading each need your explicit
+permission and can be stopped at any time with the kill switch.
+
+By clicking "I Agree" you confirm you have read and understood this notice.
