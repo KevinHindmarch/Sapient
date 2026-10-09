@@ -23,11 +23,13 @@ READ_ONLY_REQUESTS = frozenset({
     "reqCurrentTime", "reqManagedAccts", "reqAccountSummary", "cancelAccountSummary",
     "reqPositions", "cancelPositions", "reqAllOpenOrders", "reqExecutions",
     "reqContractDetails", "reqMarketDataType", "reqMktData", "cancelMktData",
+    "reqAccountUpdates",  # account values per currency (subscribe, read, unsubscribe)
 })
 
 CALLBACKS = (
     "nextValidId", "managedAccounts", "currentTime",
-    "accountSummary", "accountSummaryEnd", "position", "positionEnd",
+    "accountSummary", "accountSummaryEnd", "updateAccountValue", "accountDownloadEnd",
+    "position", "positionEnd",
     "openOrder", "openOrderEnd", "execDetails", "execDetailsEnd",
     "contractDetails", "contractDetailsEnd", "marketDataType", "tickPrice", "tickSnapshotEnd",
     "orderStatus", "commissionReport", "commissionAndFeesReport",

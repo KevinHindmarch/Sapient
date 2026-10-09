@@ -99,6 +99,7 @@ class LedgerRequestTests(unittest.TestCase):
             def request(self, name, *args):
                 if name == "reqAccountSummary":
                     self.summary_tags.append(args[2])
+                    self.summary_ids.append(args[0])
                     req = args[0]
                     if args[2] == "$LEDGER:ALL":
                         for cur, cash, rate in (("AUD", "1000", "1"), ("USD", "2787", "1.53")):
@@ -110,7 +111,7 @@ class LedgerRequestTests(unittest.TestCase):
                     return
                 super().request(name, *args)
         fake = Ledger()
-        fake.summary_tags = []
+        fake.summary_tags, fake.summary_ids = [], []
         session = TwsSession(fake)
         session.connect(7497, 71)
         values = session.account_summary()
@@ -118,6 +119,33 @@ class LedgerRequestTests(unittest.TestCase):
         self.assertNotIn("$LEDGER", fake.summary_tags[0])
         self.assertEqual((values["CashBalance:USD"]["value"], values["ExchangeRate:USD"]["value"],
                           values["NetLiquidation"]["value"]), ("2787", "1.53", "5000"))
+        self.assertEqual(len(set(fake.summary_ids)), 2)                      # the ledger has its own request id
+        self.assertNotIn("reqAccountUpdates", fake.requests)
+
+    def test_account_updates_fill_in_when_tws_refuses_the_ledger(self):
+        from core.tws.session import TwsSession
+
+        class NoLedger(PaperFakeTws):
+            def request(self, name, *args):
+                if name == "reqAccountSummary" and args[2] == "$LEDGER:ALL":
+                    self.emit("error", reqId=args[0], errorCode=322, errorString="Duplicate ticker id")
+                    return
+                if name == "reqAccountUpdates" and args[0]:
+                    self.requests.append(name)
+                    for key, value, cur in (("CashBalance", "23704", "USD"), ("ExchangeRate", "1.434", "USD"),
+                                            ("CashBalance", "1.2", "BASE"), ("NetLiquidation", "9", "AUD")):
+                        self.emit("updateAccountValue", key=key, val=value, currency=cur, accountName=ACCOUNT)
+                    self.emit("accountDownloadEnd", accountName=ACCOUNT)
+                    return
+                super().request(name, *args)
+        fake = NoLedger()
+        session = TwsSession(fake)
+        session.connect(7497, 71)
+        values = session.account_summary(timeout=2)
+        self.assertEqual((values["CashBalance:USD"]["value"], values["ExchangeRate:USD"]["value"]), ("23704", "1.434"))
+        self.assertNotIn("CashBalance:BASE", values)
+        self.assertNotIn("NetLiquidation:AUD", values)
+        self.assertEqual(values["NetLiquidation"]["value"], "1000000")
 
 
 class UsExecutorTests(PaperTestCase):
