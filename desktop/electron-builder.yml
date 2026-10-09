@@ -13,6 +13,11 @@ extraResources:
   - from: ../packaging/dist/sapient-api
     to: engine
 asar: true
+publish:
+  provider: github
+  owner: KevinHindmarch
+  repo: Sapient
+  releaseType: release
 win:
   target:
     - target: nsis

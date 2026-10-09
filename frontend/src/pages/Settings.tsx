@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useTheme } from '../lib/theme'
 import { profileApi } from '../lib/api'
 import { Moon, Sun, User, Palette } from 'lucide-react'
+import UpdatesCard from '../components/UpdatesCard'
 
 export default function Settings() {
   const { theme, setTheme } = useTheme()
@@ -113,16 +114,14 @@ export default function Settings() {
         </div>
       </div>
 
+      <UpdatesCard />
+
       <div className="card">
         <h3 className="font-semibold theme-text mb-2">About Sapient</h3>
-        <p className="text-sm theme-text-secondary mb-4">
-          Smart Portfolios, Smarter Returns. Sapient uses Modern Portfolio Theory to optimize your ASX investments for maximum risk-adjusted returns.
+        <p className="text-sm theme-text-secondary">
+          Smart Portfolios, Smarter Returns. Sapient uses Modern Portfolio Theory to optimise ASX and US share
+          portfolios for the best risk-adjusted returns. It runs entirely on this PC.
         </p>
-        <div className="flex items-center gap-2 text-xs theme-text-muted">
-          <span>Version 2.0</span>
-          <span>•</span>
-          <span>Premium Edition</span>
-        </div>
       </div>
     </div>
   )

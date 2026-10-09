@@ -57,6 +57,19 @@ jobs:
         shell: pwsh
         run: node e2e/smoke.mjs "$env:RUNNER_TEMP\SapientApp\Sapient.exe" "$env:RUNNER_TEMP"
 
+      - name: Upgrade over the existing install keeps data
+        working-directory: desktop
+        shell: pwsh
+        run: |
+          $db = "$env:APPDATA\Sapient\sapient.db"
+          if (-not (Test-Path $db)) { throw "expected the first run to create $db" }
+          $before = (Get-Item $db).Length
+          $installer = Get-ChildItem release/Sapient-Setup-*.exe | Select-Object -First 1
+          Start-Process -FilePath $installer.FullName -ArgumentList '/S', "/D=$env:RUNNER_TEMP\SapientApp" -Wait
+          if (-not (Test-Path $db)) { throw "upgrade removed the database" }
+          node e2e/smoke.mjs "$env:RUNNER_TEMP\SapientApp\Sapient.exe" "$env:RUNNER_TEMP"
+          Write-Host "database kept across upgrade ($before bytes before)"
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
