@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { indicatorsApi, stocksApi } from '../lib/api'
+import { indicatorsApi, stocksApi, apiErrorMessage } from '../lib/api'
 import { TechnicalAnalysis, RsiScreenerResult } from '../types'
 import { toast } from 'sonner'
 import { Search, TrendingUp, TrendingDown, Activity, AlertCircle, BarChart3, Loader2, X, ExternalLink, Users, Globe, Building2, Sparkles } from 'lucide-react'
@@ -112,7 +112,7 @@ export default function StockAnalysis() {
       toast.success('Analysis complete!')
     } catch (error: unknown) {
       const err = error as { response?: { data?: { detail?: string } } }
-      toast.error(err.response?.data?.detail || 'Analysis failed')
+      toast.error(apiErrorMessage(err, 'Analysis failed'))
       setAnalysis(null)
       setChartData(null)
     } finally {
@@ -134,7 +134,7 @@ export default function StockAnalysis() {
         + (missing > 0 ? ` (${missing} stocks had no Yahoo data and were skipped)` : ''))
     } catch (error: unknown) {
       const err = error as { response?: { data?: { detail?: string } } }
-      toast.error(err.response?.data?.detail || 'Screener scan failed')
+      toast.error(apiErrorMessage(err, 'Screener scan failed'))
     } finally {
       setScreenerLoading(false)
     }

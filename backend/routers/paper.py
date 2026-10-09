@@ -21,7 +21,7 @@ def _refuse(exc: paper.PaperError):
 class Limits(BaseModel):
     model_config = ConfigDict(extra="forbid")
     max_order_value: float | None = Field(default=None, gt=0, le=1_000_000)
-    max_orders_per_day: int | None = Field(default=None, ge=0, le=100)
+    max_orders_per_day: int | None = Field(default=None, ge=0, le=500)
     max_value_per_day: float | None = Field(default=None, ge=0, le=10_000_000)
     max_price_gap_pct: float | None = Field(default=None, gt=0, le=10)
     autonomous_allowed: bool | None = None

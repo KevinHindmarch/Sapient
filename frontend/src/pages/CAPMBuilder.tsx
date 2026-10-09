@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import { useState } from 'react'
-import { portfolioApi, stocksApi, MIN_STOCKS } from '../lib/api'
+import { portfolioApi, stocksApi, MIN_STOCKS, apiErrorMessage } from '../lib/api'
 import { toast } from 'sonner'
 import { Search, TrendingUp, Save, Loader2, Activity, Target, Shield, Zap, X, Plus, Radar, Check } from 'lucide-react'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts'
@@ -91,7 +91,7 @@ export default function CAPMBuilder() {
       toast.success(`Found ${response.data.undervalued_count} undervalued stocks`)
     } catch (error: unknown) {
       const err = error as { response?: { data?: { detail?: string } } }
-      toast.error(err.response?.data?.detail || 'Failed to scan stocks')
+      toast.error(apiErrorMessage(err, 'Failed to scan stocks'))
     } finally {
       setScanning(false)
     }
@@ -158,7 +158,7 @@ export default function CAPMBuilder() {
       toast.success('CAPM analysis complete')
     } catch (error: unknown) {
       const err = error as { response?: { data?: { detail?: string } } }
-      toast.error(err.response?.data?.detail || 'Failed to analyze stocks')
+      toast.error(apiErrorMessage(err, 'Failed to analyze stocks'))
     } finally {
       setAnalyzing(false)
     }
@@ -182,7 +182,7 @@ export default function CAPMBuilder() {
       toast.success('Portfolio optimized using CAPM!')
     } catch (error: unknown) {
       const err = error as { response?: { data?: { detail?: string } } }
-      toast.error(err.response?.data?.detail || 'Failed to optimize portfolio')
+      toast.error(apiErrorMessage(err, 'Failed to optimize portfolio'))
     } finally {
       setOptimizing(false)
     }
@@ -201,7 +201,7 @@ export default function CAPMBuilder() {
       setPortfolioName('')
     } catch (error: unknown) {
       const err = error as { response?: { data?: { detail?: string } } }
-      toast.error(err.response?.data?.detail || 'Failed to save portfolio')
+      toast.error(apiErrorMessage(err, 'Failed to save portfolio'))
     } finally {
       setSaving(false)
     }

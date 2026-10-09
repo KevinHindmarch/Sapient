@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { stocksApi, portfolioApi, MIN_STOCKS, normaliseWeights } from '../lib/api'
+import { stocksApi, portfolioApi, MIN_STOCKS, normaliseWeights, apiErrorMessage } from '../lib/api'
 import { OptimizationResult } from '../types'
 import { toast } from 'sonner'
 import { Search, X, TrendingUp, Save, AlertTriangle, CheckCircle, Info, Loader2, Globe, SlidersHorizontal } from 'lucide-react'
@@ -200,7 +200,7 @@ export default function ManualBuilder() {
       }
     } catch (error: unknown) {
       const err = error as { response?: { data?: { detail?: string } } }
-      toast.error(err.response?.data?.detail || 'Optimization failed')
+      toast.error(apiErrorMessage(err, 'Optimization failed'))
     } finally {
       setOptimizing(false)
     }
@@ -226,7 +226,7 @@ export default function ManualBuilder() {
       setPortfolioName('')
     } catch (error: unknown) {
       const err = error as { response?: { data?: { detail?: string } } }
-      toast.error(err.response?.data?.detail || 'Failed to save portfolio')
+      toast.error(apiErrorMessage(err, 'Failed to save portfolio'))
     } finally {
       setSaving(false)
     }

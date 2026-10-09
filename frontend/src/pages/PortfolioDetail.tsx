@@ -121,7 +121,7 @@ export default function PortfolioDetail() {
     } catch (e: unknown) {
       setAiMode(previous)
       const err = e as { response?: { data?: { detail?: string } } }
-      toast.error(err.response?.data?.detail || 'Failed to update AI mode')
+      toast.error(apiErrorMessage(err, 'Failed to update AI mode'))
     } finally {
       setSavingAiMode(false)
     }
@@ -246,7 +246,7 @@ export default function PortfolioDetail() {
       loadPortfolio()
     } catch (error: unknown) {
       const err = error as { response?: { data?: { detail?: string } } }
-      toast.error(err.response?.data?.detail || 'Failed to update position')
+      toast.error(apiErrorMessage(err, 'Failed to update position'))
     } finally {
       setSaving(false)
     }
@@ -268,7 +268,7 @@ export default function PortfolioDetail() {
       loadPortfolio()
     } catch (error: unknown) {
       const err = error as { response?: { data?: { detail?: string } } }
-      toast.error(err.response?.data?.detail || 'Failed to remove position')
+      toast.error(apiErrorMessage(err, 'Failed to remove position'))
     } finally {
       setSaving(false)
     }
@@ -345,7 +345,7 @@ export default function PortfolioDetail() {
       loadPortfolio()
     } catch (error: unknown) {
       const err = error as { response?: { data?: { detail?: string } } }
-      toast.error(err.response?.data?.detail || 'Failed to add stock')
+      toast.error(apiErrorMessage(err, 'Failed to add stock'))
     } finally {
       setSaving(false)
     }

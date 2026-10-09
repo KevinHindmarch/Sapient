@@ -132,7 +132,7 @@ export default function AITradingSettings() {
       toast.success('AI trading settings saved')
     } catch (err) {
       const e = err as { response?: { data?: { detail?: string } } }
-      toast.error(e.response?.data?.detail || 'Failed to save settings')
+      toast.error(apiErrorMessage(e, 'Failed to save settings'))
     } finally {
       setSaving(false)
     }
@@ -398,7 +398,7 @@ export default function AITradingSettings() {
             help="across all portfolios"
             value={settings.max_daily_trades}
             min={1}
-            max={50}
+            max={500}
             step={1}
             onChange={(v) => update('max_daily_trades', Math.round(v))}
           />
@@ -714,6 +714,7 @@ function NumberField({
         step={step}
         value={value}
         onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
+        onBlur={() => onChange(Math.min(max, Math.max(min, value)))}  // typed values aren't limited by min/max
         className="input"
       />
       <p className="text-xs theme-text-muted mt-1.5">{help}</p>

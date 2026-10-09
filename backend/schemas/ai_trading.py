@@ -21,7 +21,7 @@ class AITradingSettings(BaseModel):
     rsi_buy_threshold: float = Field(30.0, ge=5, le=50)
     rsi_sell_threshold: float = Field(70.0, ge=50, le=95)
     max_trade_pct: float = Field(5.0, ge=0.5, le=25, description="Max single trade as % of portfolio")
-    max_daily_trades: int = Field(8, ge=1, le=50)
+    max_daily_trades: int = Field(8, ge=1, le=500)
     max_daily_turnover_pct: float = Field(20.0, ge=1, le=100)
     sector_cap_pct: float = Field(35.0, ge=10, le=100)
     paper_only: bool = True
@@ -42,7 +42,7 @@ class AITradingSettingsUpdate(BaseModel):
     rsi_buy_threshold: float | None = Field(None, ge=5, le=50)
     rsi_sell_threshold: float | None = Field(None, ge=50, le=95)
     max_trade_pct: float | None = Field(None, ge=0.5, le=25)
-    max_daily_trades: int | None = Field(None, ge=1, le=50)
+    max_daily_trades: int | None = Field(None, ge=1, le=500)
     max_daily_turnover_pct: float | None = Field(None, ge=1, le=100)
     sector_cap_pct: float | None = Field(None, ge=10, le=100)
     paper_only: bool | None = None
