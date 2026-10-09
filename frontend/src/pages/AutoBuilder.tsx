@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom'
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -144,6 +145,7 @@ const formatMarketCap = (val: number) => {
 }
 
 export default function AutoBuilder() {
+  const navigate = useNavigate()
   const { theme } = useTheme()
   const isDark = theme === 'dark'
   
@@ -244,8 +246,9 @@ export default function AutoBuilder() {
     setSaving(true)
     try {
       const resultToSave = editedWeights ? { ...result, weights: editedWeights } : result
-      await portfolioApi.save(portfolioName.trim(), resultToSave, investmentAmount, 'auto', riskTolerance, market)
-      toast.success('Portfolio saved successfully!')
+      const saved = await portfolioApi.save(portfolioName.trim(), resultToSave, investmentAmount, 'auto', riskTolerance, market)
+      toast.success('Portfolio saved. Buy it on paper or for real from its page.')
+      if (saved.data?.portfolio_id) navigate(`/portfolios/${saved.data.portfolio_id}`)
       setShowSaveModal(false)
     } catch (error: unknown) {
       const err = error as { response?: { data?: { detail?: string } } }

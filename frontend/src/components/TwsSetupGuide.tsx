@@ -35,8 +35,8 @@ export const TWS_SETUP_STEPS: Step[] = [
   },
   {
     title: 'Log in to Paper Trading',
-    body: <p>On the TWS login screen choose <strong>Paper Trading</strong>. Sapient starts with paper (simulated money) only.
-      Real-money trading needs a separate sign-off later.</p>,
+    body: <p>On the TWS login screen choose <strong>Paper Trading</strong>. Practice money; real-money
+      trading is set up separately on the Live tab.</p>,
   },
   {
     title: 'Turn on the API in TWS',
@@ -45,7 +45,7 @@ export const TWS_SETUP_STEPS: Step[] = [
         <li>Open <strong>File → Global Configuration</strong> (on some layouts <strong>Edit → Global Configuration</strong>).</li>
         <li>In the left panel choose <strong>API → Settings</strong>.</li>
         <li>Tick <strong>Enable ActiveX and Socket Clients</strong>.</li>
-        <li>Keep <strong>Read-Only API</strong> ticked — Sapient only reads at this stage.</li>
+        <li>Keep <strong>Read-Only API</strong> ticked for now — you untick it only when you authorise paper orders (Step 4).</li>
         <li>Set <strong>Socket port</strong> to{' '}
           <button className="font-mono underline" onClick={() => copy('7497')}>7497 <Copy className="w-3 h-3 inline" /></button>{' '}
           (paper default; live is normally 7496).</li>
@@ -72,10 +72,39 @@ export const TWS_SETUP_STEPS: Step[] = [
   },
 ]
 
-export default function TwsSetupGuide() {
+// Live login: a second TWS window with your real account on port 7496 (paper keeps 7497).
+const LIVE_STEPS: Step[] = [
+  TWS_SETUP_STEPS[0],
+  {
+    title: 'Open a second TWS window for your live account',
+    body: <p>Start TWS again and log in with your <strong>live</strong> username (not Paper Trading). Paper and live can run
+      side by side. Check the top of TWS shows your <strong>U…</strong> account and <strong>no</strong> red Paper Trading banner.</p>,
+  },
+  {
+    title: 'Turn on the API in the live TWS window',
+    body: (
+      <ol className="list-decimal ml-5 space-y-1">
+        <li>In the <strong>live</strong> window open <strong>File → Global Configuration → API → Settings</strong>.</li>
+        <li>Tick <strong>Enable ActiveX and Socket Clients</strong>.</li>
+        <li>Keep <strong>Read-Only API</strong> ticked until you authorise real-money trading in Step 4.</li>
+        <li>Set <strong>Socket port</strong> to{' '}
+          <button className="font-mono underline" onClick={() => copy('7496')}>7496 <Copy className="w-3 h-3 inline" /></button>{' '}
+          (must differ from the paper window's 7497).</li>
+        <li>Tick <strong>Allow connections from localhost only</strong>, leave <strong>Master API client ID</strong> empty,
+          click <strong>Apply</strong> and <strong>OK</strong>.</li>
+        <li>For real-money orders, subscribe to ASX real-time data: IBKR Client Portal → Settings → Market Data
+          Subscriptions → <strong>ASX Total</strong> (Non-Professional).</li>
+      </ol>
+    ),
+  },
+  TWS_SETUP_STEPS[3],
+]
+
+export default function TwsSetupGuide({ live = false }: { live?: boolean }) {
+  const steps = live ? LIVE_STEPS : TWS_SETUP_STEPS
   return (
     <ol className="space-y-5">
-      {TWS_SETUP_STEPS.map((step, index) => (
+      {steps.map((step, index) => (
         <li key={step.title} className="flex gap-4">
           <div className="w-7 h-7 shrink-0 rounded-full border border-sky-500/40 bg-sky-500/10 text-sky-600 text-sm font-semibold flex items-center justify-center">
             {index + 1}

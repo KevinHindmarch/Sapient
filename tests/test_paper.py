@@ -159,7 +159,7 @@ class AuthorisationTests(PaperTestCase):
         self.refused("confirmation_mismatch", paper.authorise, ACCOUNT, "yes")
         self.refused("confirmation_mismatch", paper.authorise, "DU999", TEXT)
         store.save_settings({"paper_confirmed": False})
-        self.refused("not_confirmed_paper", paper.authorise, ACCOUNT, TEXT)
+        self.refused("not_confirmed", paper.authorise, ACCOUNT, TEXT)
         store.save_settings({"paper_confirmed": True})
         store.set_status(account="DU0000001")
         self.refused("account_not_seen", paper.authorise, ACCOUNT, TEXT)

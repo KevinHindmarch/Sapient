@@ -58,6 +58,7 @@ class _Report:
 def run_test(settings: dict, transport_factory: Callable[[SdkInfo], Transport],
              check_port: Callable[[int], bool] = port_open, sdk_finder=find_sdk) -> dict:
     report = _Report()
+    live = settings.get("profile") == "live"
     port, client_id = int(settings["port"]), int(settings["client_id"])
     expected = (settings.get("expected_account") or "").strip()
 
@@ -74,7 +75,7 @@ def run_test(settings: dict, transport_factory: Callable[[SdkInfo], Transport],
         report.fail("port", f"Nothing is answering on port {port}.",
                     "Start TWS and log in. Then in TWS open File → Global Configuration → API → Settings, tick "
                     "\"Enable ActiveX and Socket Clients\" and check the Socket port matches "
-                    f"{port} (paper trading normally uses 7497).")
+                    f"{port} ({'live trading normally uses 7496' if live else 'paper trading normally uses 7497'}).")
         return report.result()
     report.ok("port", f"Port {port} is open")
 
@@ -130,15 +131,21 @@ def run_test(settings: dict, transport_factory: Callable[[SdkInfo], Transport],
         if not expected:
             report.warn("account", f"TWS shows account {accounts[0]}.",
                         "Enter this account number in the settings above so Sapient can always check it.")
-        elif not settings.get("paper_confirmed"):
+        elif not (settings.get("account_confirmed") or settings.get("paper_confirmed")):
             report.warn("account", f"Account {accounts[0]} matches.",
+                        "Tick \"This is my real-money (live) account\" once you have checked it." if live else
                         "Tick \"TWS shows the Paper Trading banner\" once you have checked it.")
         else:
             report.ok("account", f"Account {accounts[0]} matches")
-        if not accounts[0].startswith("DU") :
+        if live and accounts[0].startswith("DU"):
+            report.fail("account", f"Account {accounts[0]} looks like a paper account (paper accounts start with DU).",
+                        "This is the live (real-money) connection. Log in to your live account in a second TWS "
+                        "window on port 7496, or use the Paper tab for this account.")
+            return report.result()
+        if not live and not accounts[0].startswith("DU"):
             report.warn("account", f"Account {accounts[0]} does not look like a paper account (they usually start with DU).",
-                        "Sapient only reads from TWS at this stage, but start with Paper Trading: log out of TWS "
-                        "and choose Paper Trading on the login screen.")
+                        "This is the paper connection. Log out of TWS and choose Paper Trading on the login "
+                        "screen, or set this account up on the Live tab instead.")
 
         try:
             summary = session.account_summary()
@@ -151,11 +158,19 @@ def run_test(settings: dict, transport_factory: Callable[[SdkInfo], Transport],
         report.ok("snapshot", f"{len(summary)} account values and {len(positions)} positions received")
 
         try:
-            snapshot = session.market_snapshot("AAPL", "SMART", "USD")
+            snapshot = (session.market_snapshot("BHP", "ASX", "AUD", data_type=1) if live
+                        else session.market_snapshot("AAPL", "SMART", "USD"))
         except TwsTimeout:
             snapshot = {"qualified": True, "timeout": True}
-        if not snapshot.get("qualified"):
-            report.warn("market_data", "TWS could not find the test stock (AAPL).",
+        if live and snapshot.get("qualified") and snapshot.get("market_data_type") not in (None, 1):
+            report.warn("market_data", "TWS sent delayed or frozen ASX prices, not real-time.",
+                        "Real-money orders need real-time prices. In IBKR Client Portal → Settings → Market Data "
+                        "Subscriptions, subscribe to ASX Total (Non-Professional). Until then Sapient refuses live orders.")
+            snapshot = {"qualified": True, "reported": True}
+        if snapshot.get("reported"):
+            pass
+        elif not snapshot.get("qualified"):
+            report.warn("market_data", "TWS could not find the test stock.",
                         "Market data checks will be repeated later; this does not block reading your account.")
         elif snapshot.get("timeout") or not snapshot.get("prices"):
             report.warn("market_data", "No price arrived for the test stock.",

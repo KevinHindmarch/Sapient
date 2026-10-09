@@ -20,6 +20,7 @@ interface Proposal {
 
 interface PaperOrder {
   id: string
+  environment?: 'paper' | 'live'
   origin: string
   symbol: string
   side: string
@@ -34,11 +35,12 @@ interface PaperOrder {
 interface DesktopSettings { closeToTray: boolean }
 
 // Paper order changes worth a notification (automatic trades must never be silent).
+const kind = (o: PaperOrder) => (o.environment === 'live' ? 'REAL-MONEY' : 'Paper')
 const ORDER_NOTICES: Record<string, (o: PaperOrder) => string> = {
-  FILLED: (o) => `Paper ${o.side.toLowerCase()} filled: ${Number(o.filled_quantity)} ${o.symbol} at A$${o.avg_fill_price ?? '?'}`,
-  PARTIALLY_FILLED: (o) => `Paper ${o.side.toLowerCase()} partly filled: ${Number(o.filled_quantity)} of ${Number(o.quantity)} ${o.symbol}`,
-  REJECTED: (o) => `TWS refused the paper ${o.side.toLowerCase()} of ${o.symbol}`,
-  UNKNOWN: (o) => `Check TWS: outcome of the paper ${o.side.toLowerCase()} of ${o.symbol} is unknown`,
+  FILLED: (o) => `${kind(o)} ${o.side.toLowerCase()} filled: ${Number(o.filled_quantity)} ${o.symbol} at A$${o.avg_fill_price ?? '?'}`,
+  PARTIALLY_FILLED: (o) => `${kind(o)} ${o.side.toLowerCase()} partly filled: ${Number(o.filled_quantity)} of ${Number(o.quantity)} ${o.symbol}`,
+  REJECTED: (o) => `TWS refused the ${kind(o).toLowerCase()} ${o.side.toLowerCase()} of ${o.symbol}`,
+  UNKNOWN: (o) => `Check TWS: outcome of the ${kind(o).toLowerCase()} ${o.side.toLowerCase()} of ${o.symbol} is unknown`,
 }
 
 const POLL_MS = 30_000
@@ -131,7 +133,7 @@ export class Alerts {
     this.tray.setContextMenu(Menu.buildFromTemplate([
       { label: 'Open Sapient', click: () => this.showWindow() },
       { label: this.pending ? `AI Inbox (${this.pending})` : 'AI Inbox', click: () => this.openInbox() },
-      { label: 'Paper orders', click: () => this.openPage('#/paper-orders') },
+      { label: 'Orders', click: () => this.openPage('#/paper-orders') },
       { type: 'separator' },
       { label: 'Emergency stop…', click: () => { void this.emergencyStop(true) } },
       { type: 'separator' },
@@ -191,8 +193,9 @@ export class Alerts {
       this.orderStates.set(order.id, order.state)
       if (!this.ordersSeeded || before === order.state) continue
       if (before === undefined && order.origin === 'ai_autonomous') {
-        notices.push({ title: `Sapient is placing a paper ${order.side.toLowerCase()}: ${Number(order.quantity)} ${order.symbol}`,
-          body: 'Automatic (Autonomous mode). Paper account only. Press Emergency stop in the tray to stop.' })
+        notices.push({ title: `Sapient is placing a ${kind(order).toLowerCase()} ${order.side.toLowerCase()}: ${Number(order.quantity)} ${order.symbol}`,
+          body: `Automatic (fully automatic mode, ${order.environment === 'live' ? 'REAL MONEY' : 'paper account'}). `
+            + 'Press Emergency stop in the tray to stop.' })
       }
       const describe = ORDER_NOTICES[order.state]
       if (describe) notices.push({ title: describe(order), body: order.detail ?? 'See Paper orders in Sapient.' })
@@ -233,8 +236,8 @@ export class Alerts {
         type: 'warning',
         title: 'Emergency stop',
         message: 'Stop all AI trading now?',
-        detail: 'This switches AI Trading and paper trading off, expires all waiting proposals, blocks queued orders '
-          + 'and asks TWS to cancel Sapient\'s own working paper orders (never your own TWS orders). '
+        detail: 'This switches AI Trading, paper and real-money trading off, expires all waiting proposals, blocks queued '
+          + 'orders and asks TWS to cancel Sapient\'s own working orders (never your own TWS orders). '
           + 'You can switch things back on later (after a 24-hour cooldown).',
         buttons: ['Stop now', 'Cancel'],
         defaultId: 0,
@@ -246,9 +249,9 @@ export class Alerts {
       const result = await this.call<{ cancelled_signals: number; paper_orders_cancel_requested?: number }>(
         '/ai/kill-switch', 'POST')
       const paperOrders = result.paper_orders_cancel_requested ?? 0
-      const message = `Stopped. AI Trading and paper trading are off and ${result.cancelled_signals} waiting proposal(s) were expired. `
+      const message = `Stopped. AI Trading, paper and real-money trading are off and ${result.cancelled_signals} waiting proposal(s) were expired. `
         + (paperOrders
-          ? `Cancel requested for ${paperOrders} working paper order(s); TWS confirms each one on the Paper orders page. `
+          ? `Cancel requested for ${paperOrders} working order(s); TWS confirms each one on the Orders page. `
             + 'An order can still fill before its cancel arrives. Check TWS if in doubt.'
           : 'Sapient had no working orders at Interactive Brokers. Orders you placed yourself in TWS are not touched.')
       await this.poll()

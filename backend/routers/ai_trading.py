@@ -135,16 +135,19 @@ async def approve_signal(
     if signal is None:
         raise HTTPException(status_code=404, detail="Signal not found")
     from core.tws import paper
-    if paper.active():  # paper trading authorised and on: approval queues a real paper order
+    env = paper.environment_for(signal.get("portfolio_id"))
+    if env:  # the portfolio trades in paper or live (or paper is on): approval queues a broker order
         try:
-            order = paper.admit(paper.signal_order(signal, "ai_approval"), current_user["id"])
+            order = paper.admit(paper.signal_order(signal, "ai_approval", env), current_user["id"], env)
         except paper.PaperError as exc:
             raise HTTPException(409, detail={"code": exc.code, "message": str(exc)})
-        AIAuditService.log(user_id=current_user["id"], event_type="ai_signal_paper_order",
+        AIAuditService.log(user_id=current_user["id"], event_type=f"ai_signal_{env}_order",
                            portfolio_id=signal.get("portfolio_id"), signal_id=signal_id,
-                           payload={"paper_order_id": order["id"]})
-        return {"paper_order": order, "execution_enabled": True, "environment": "tws_paper",
-                "message": "Paper order queued; Sapient sends it to your TWS paper account in a few seconds."}
+                           payload={"order_id": order["id"], "environment": env})
+        return {"paper_order": order, "execution_enabled": True, "environment": f"tws_{env}",
+                "message": ("REAL-MONEY order queued; Sapient sends it to your TWS live account in a few seconds."
+                            if env == "live" else
+                            "Paper order queued; Sapient sends it to your TWS paper account in a few seconds.")}
     from core.execution_safety import IntentService, SafetyError, signal_request
     try:
         intent = IntentService().admit(current_user["id"], signal_request(

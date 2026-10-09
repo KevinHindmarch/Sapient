@@ -27,11 +27,12 @@ export default function AutonomyChecklist() {
   return (
     <section className="card space-y-4" data-testid="autonomy-checklist">
       <div>
-        <h2 className="text-xl font-semibold theme-text">Fully automatic paper trading</h2>
+        <h2 className="text-xl font-semibold theme-text">Fully automatic trading</h2>
         <p className="text-sm theme-text-muted mt-1">
           When everything below is ticked, Sapient manages that portfolio on its own: during market hours it checks the
           rules, places paper buy and sell orders within your limits, and updates the portfolio from the fills. You get a
-          notification after each trade and can press Emergency stop (tray icon) at any time. Live trading stays off.
+          notification after each trade and can press Emergency stop (tray icon) at any time. Each portfolio trades either on
+          paper or with real money, whichever you chose when you bought it.
         </p>
       </div>
       <ul className="space-y-1.5 text-sm">
@@ -44,10 +45,15 @@ export default function AutonomyChecklist() {
           {data.portfolios.map((p) => (
             <div key={p.portfolio_id} className="rounded-xl border theme-border p-3 text-sm">
               <div className="flex items-center justify-between gap-2 mb-2">
-                <Link to={`/portfolios/${p.portfolio_id}`} className="font-semibold text-sky-500 hover:underline">{p.name}</Link>
+                <span className="flex items-center gap-2">
+                  <Link to={`/portfolios/${p.portfolio_id}`} className="font-semibold text-sky-500 hover:underline">{p.name}</Link>
+                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${p.environment === 'live'
+                    ? 'bg-red-500/15 text-red-600 border-red-500/40' : 'bg-slate-500/10 theme-text-secondary theme-border'}`}>
+                    {p.environment === 'live' ? 'REAL MONEY' : 'PAPER'}</span>
+                </span>
                 <span className={`text-xs font-bold px-2 py-0.5 rounded-md border ${p.autonomous
                   ? 'bg-emerald-500/15 text-emerald-600 border-emerald-500/30' : 'bg-slate-500/10 theme-text-secondary theme-border'}`}>
-                  {p.autonomous ? 'TRADING AUTOMATICALLY (PAPER)' : 'NOT AUTOMATIC'}
+                  {p.autonomous ? 'TRADING AUTOMATICALLY' : 'NOT AUTOMATIC'}
                 </span>
               </div>
               <ul className="space-y-1">{p.items.map((item) => <Item key={item.key} {...item} />)}</ul>

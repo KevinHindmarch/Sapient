@@ -59,6 +59,8 @@ app.include_router(ai_trading.router, prefix="/api/ai", tags=["AI Trading"])
 app.include_router(execution.router, prefix="/api/execution", tags=["Execution safety"])
 app.include_router(tws.router, prefix="/api/tws", tags=["Interactive Brokers TWS"])
 app.include_router(paper.router, prefix="/api/paper", tags=["Paper trading"])
+app.include_router(tws.live_router, prefix="/api/tws-live", tags=["Interactive Brokers TWS (live)"])
+app.include_router(paper.live_router, prefix="/api/live", tags=["Live trading (real money)"])
 
 
 @app.get("/api/health")

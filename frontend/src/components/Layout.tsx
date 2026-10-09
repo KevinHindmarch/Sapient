@@ -35,7 +35,7 @@ const navItems = [
 
 const tradingNavItems = [
   { path: '/brokerage', label: 'Brokerage', icon: ShieldCheck },
-  { path: '/paper-orders', label: 'Paper orders', icon: ClipboardList },
+  { path: '/paper-orders', label: 'Orders', icon: ClipboardList },
   { path: '/ai-trading', label: 'AI Settings', icon: Sparkles },
 ]
 
@@ -128,6 +128,7 @@ export default function Layout() {
           
           <div className="space-y-1">
             <TwsStatusPill />
+            <TwsStatusPill profile="live" />
             {tradingNavItems.map((item) => (
               <NavLink
                 key={item.path}
@@ -250,6 +251,7 @@ export default function Layout() {
             </button>
 
             <TwsStatusPill />
+            <TwsStatusPill profile="live" />
             {tradingNavItems.map((item) => (
               <NavLink
                 key={item.path}

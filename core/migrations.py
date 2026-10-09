@@ -474,6 +474,66 @@ CREATE TABLE paper_audit (
 );
 """
 
+LIVE_V1 = f"""
+CREATE TABLE tws_live_settings (
+ id INTEGER PRIMARY KEY CHECK (id = 1),
+ enabled FLAG NOT NULL DEFAULT FALSE,
+ port INTEGER NOT NULL DEFAULT 7496 CHECK (port BETWEEN 1 AND 65535),
+ client_id INTEGER NOT NULL DEFAULT 72 CHECK (client_id > 0),
+ expected_account TEXT,
+ live_confirmed FLAG NOT NULL DEFAULT FALSE,
+ sdk_folder TEXT,
+ updated_at UTCTIME NOT NULL DEFAULT {_NOW}
+);
+INSERT INTO tws_live_settings(id) VALUES (1);
+CREATE TABLE tws_live_status (
+ id INTEGER PRIMARY KEY CHECK (id = 1),
+ state TEXT NOT NULL DEFAULT 'NOT_CONFIGURED',
+ detail TEXT,
+ account TEXT,
+ server_version INTEGER,
+ sdk_version TEXT,
+ ib_connected FLAG,
+ connected_since UTCTIME,
+ last_sync_at UTCTIME,
+ worker_heartbeat_at UTCTIME,
+ updated_at UTCTIME NOT NULL DEFAULT {_NOW}
+);
+INSERT INTO tws_live_status(id) VALUES (1);
+CREATE TABLE tws_live_snapshots (
+ kind TEXT PRIMARY KEY,
+ data JSONTEXT NOT NULL,
+ taken_at UTCTIME NOT NULL DEFAULT {_NOW}
+);
+ALTER TABLE tws_commands ADD COLUMN profile TEXT NOT NULL DEFAULT 'paper' CHECK (profile IN ('paper','live'));
+CREATE TABLE live_binding (
+ id INTEGER PRIMARY KEY CHECK (id = 1),
+ account_id TEXT,
+ enabled FLAG NOT NULL DEFAULT FALSE,
+ authorised_at UTCTIME,
+ authorised_text TEXT,
+ halted FLAG NOT NULL DEFAULT FALSE,
+ halted_at UTCTIME,
+ max_order_value DECNUM(15, 2) NOT NULL DEFAULT 1000 CHECK (max_order_value > 0),
+ max_orders_per_day INTEGER NOT NULL DEFAULT 5 CHECK (max_orders_per_day >= 0),
+ max_value_per_day DECNUM(15, 2) NOT NULL DEFAULT 5000 CHECK (max_value_per_day >= 0),
+ max_price_gap_pct DECNUM(5, 2) NOT NULL DEFAULT 2 CHECK (max_price_gap_pct > 0 AND max_price_gap_pct <= 10),
+ autonomous_allowed FLAG NOT NULL DEFAULT FALSE,
+ updated_at UTCTIME NOT NULL DEFAULT {_NOW}
+);
+INSERT INTO live_binding(id) VALUES (1);
+CREATE TABLE live_order_ids (
+ id INTEGER PRIMARY KEY CHECK (id = 1),
+ high_water INTEGER NOT NULL DEFAULT 0
+);
+INSERT INTO live_order_ids(id) VALUES (1);
+ALTER TABLE paper_orders ADD COLUMN environment TEXT NOT NULL DEFAULT 'paper' CHECK (environment IN ('paper','live'));
+CREATE INDEX paper_orders_environment_state ON paper_orders(environment, state);
+ALTER TABLE portfolios ADD COLUMN live_started_at UTCTIME;
+ALTER TABLE portfolios ADD COLUMN trading_environment TEXT CHECK (trading_environment IS NULL OR trading_environment IN ('paper','live'));
+UPDATE portfolios SET trading_environment='paper' WHERE paper_started_at IS NOT NULL
+"""
+
 # (version, name, sql). Append only.
 MIGRATIONS = (
     (1, "core", CORE_V1),
@@ -482,6 +542,7 @@ MIGRATIONS = (
     (4, "profile", PROFILE_V1),
     (5, "strategy", STRATEGY_V1),
     (6, "paper", PAPER_V1),
+    (7, "live", LIVE_V1),
 )
 SAFETY_SCHEMA_VERSION = 2
 

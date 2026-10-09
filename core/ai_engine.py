@@ -257,16 +257,17 @@ def _maybe_autonomous_execute(
     user also allowed automatic paper orders; otherwise they wait for approval.
     """
     from core.tws import paper
-    if paper.active():
+    env = paper.environment_for(portfolio_id)  # the portfolio's paper/live account, else paper if on
+    if env:
         results: list[dict] = []
-        if not paper.get_binding()["autonomous_allowed"]:
+        if not paper.active(env) or not paper.get_binding(env=env)["autonomous_allowed"]:
             for sig in persisted_signals:
                 results.append({"signal_id": sig["id"], "status": "awaiting_approval",
-                                "detail": "Automatic paper orders are off; approve it in the AI Inbox."})
+                                "detail": "Automatic orders are off for this account; approve it in the AI Inbox."})
             return results
         for sig in persisted_signals:
             try:
-                order = paper.admit(paper.signal_order(sig, "ai_autonomous"), user_id)
+                order = paper.admit(paper.signal_order(sig, "ai_autonomous", env), user_id, env)
                 results.append({"signal_id": sig["id"], "paper_order_id": order["id"], "status": order["state"],
                                 "execution_enabled": True})
             except paper.PaperError as e:

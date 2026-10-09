@@ -11,6 +11,7 @@ Target trading lifecycle (RSI entry → Sharpe weights → IBKR orders → RSI e
 autonomous/semi-autonomous management, paper + live): [docs/trading-workflow.md](docs/trading-workflow.md).
 Installer + first-run TWS setup wizard + Test connection UX: [docs/install-and-setup.md](docs/install-and-setup.md).
 Paper trading (authorisation record, rules, submit protocol): [docs/paper-trading.md](docs/paper-trading.md).
+Live (real-money) trading (user decisions, rules): [docs/live-trading.md](docs/live-trading.md).
 
 ## Working agreement with the user
 
@@ -30,8 +31,11 @@ is supported in case it is made private later. No Replit data is migrated.
 The old `.replit` key was fake.
 
 Paper trading authorised by the user on 2026-10-09 for their TWS **paper**
-account (DUT146393) using **delayed prices with cautious limit orders**. Live
-trading is NOT authorised and does not exist in the code.
+account (DUT146393) using **delayed prices with cautious limit orders**.
+Live (real-money) trading was requested by the user on 2026-10-09 (account
+U29239702, real-time prices only, per-portfolio semi/fully automatic, limits
+A$1,000/order and A$5,000/day to start). The code exists but stays locked until
+the user ticks the live authorisation in the app; never bypass that.
 
 ## Current state (October 2026)
 
@@ -48,12 +52,12 @@ trading is NOT authorised and does not exist in the code.
 - First run shows a welcome wizard (name, light/dark, TWS now/later). Upgrades
   keep everything (data lives in %APPDATA%\Sapient, never the install folder)
   and never repeat the wizard; CI proves it by upgrading from the latest release.
-- **No live orders are possible.** Paper orders exist only through
-  `core/tws/paper.py` (admission) → `core/tws/execution.py` (connector sends).
-  Without paper authorisation every order path still goes through the
+- Broker orders (paper and live) exist only through `core/tws/paper.py`
+  (admission, per environment) → `core/tws/execution.py` (that environment's
+  connector sends). Live needs its own in-app authorisation and real-time
+  prices. Without authorisation every order path still goes through the
   simulation "safety admission" in `core/execution_safety.py` (simulation
   intents only). `core/ibkr_client.py` refuses all direct place/cancel.
-  Never claim live readiness.
 - Research features (optimisers, scanners, indicators, portfolio bookkeeping)
   work end-to-end.
 
@@ -104,14 +108,15 @@ backend/             FastAPI app (thin HTTP layer), 127.0.0.1 only
                      --worker runs the TWS connector instead
   routers/           stocks, portfolio, indicators, broker (status + simulation
                      orders), ai_trading, execution (intents/halt/resume),
-                     tws (settings/status/test/account/compare), paper (authorise,
-                     limits, orders, cancel, resolve unknown)
+                     tws (/api/tws paper login, /api/tws-live live login), paper
+                     (/api/paper and /api/live: authorise, limits, orders, cancel,
+                     resolve unknown, buy portfolio & manage, autonomy checklist)
   schemas/           pydantic request/response models
 core/                Service layer (all business logic)
   db.py              SQLite connection layer (WAL, FULL sync, BEGIN IMMEDIATE,
                      %s→? placeholders, Sapient-specific column-type converters)
   migrations.py      versioned checksummed schema (1 core, 2 safety, 3 tws,
-                     4 profile, 5 strategy, 6 paper); migrate()
+                     4 profile, 5 strategy, 6 paper, 7 live); migrate()
                      runs at API startup after backing up the DB
   database.py        User (local profile)/Portfolio/AITradingSettings/AISignal/
                      BrokerOrder/AIAudit services (SQL via core.db)
@@ -136,7 +141,8 @@ core/                Service layer (all business logic)
                      (127.0.0.1, READ_ONLY_REQUESTS allowlist), session, diagnostics
                      (Test connection steps + fixes), worker (state machine), store,
                      compare (model holdings vs TWS positions, read-only),
-                     paper (authorisation, order admission, cancel, status),
+                     environments (paper/live definitions), paper (authorisation,
+                     order admission, cancel, status — both environments),
                      execution (connector-side submit protocol, fills, cancels)
 desktop/             Electron shell (TypeScript): src/main (window, app:// protocol,
                      CSP, EngineSupervisor, updater.ts = manual GitHub-release
@@ -211,6 +217,7 @@ python -m unittest discover -s tests -p 'test_tws.py' -v         # fake TWS: dia
 python -m unittest discover -s tests -p 'test_upgrades.py' -v    # fresh install vs upgrade keeps data, no repeat wizard
 python -m unittest discover -s tests -p 'test_strategy.py' -v    # calendar, rules, sizing, scheduler
 python -m unittest discover -s tests -p 'test_paper.py' -v       # paper admission, submit protocol, fills, cancel, halt
+python -m unittest discover -s tests -p 'test_live.py' -v        # live: separate auth, real-time only, separation from paper
 python -m compileall -q core backend
 cd frontend && npm run build && npm run lint
 ```
