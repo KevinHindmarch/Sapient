@@ -1,6 +1,7 @@
 """Entry point used by the desktop shell (and the frozen sapient-api.exe).
 
     sapient-api --data-dir DIR [--port 0] [--allowed-origin app://sapient]
+    sapient-api --worker --data-dir DIR     (the read-only TWS connector)
 
 Protocol with the parent process (Electron main):
 - The parent writes the per-launch API token as the first line on stdin.
@@ -71,6 +72,7 @@ def main(argv=None) -> int:
     parser.add_argument("--data-dir", required=True, type=Path)
     parser.add_argument("--port", type=int, default=0, help="0 picks a free port")
     parser.add_argument("--allowed-origin", action="append", default=[])
+    parser.add_argument("--worker", action="store_true", help="run the TWS connector instead of the API")
     args = parser.parse_args(argv)
 
     token = sys.stdin.readline().strip()
@@ -92,6 +94,9 @@ def main(argv=None) -> int:
         emit("error", code="database", message=str(exc))
         return 3
 
+    if args.worker:
+        return run_worker(args.data_dir)
+
     import uvicorn
     from backend.main import app
 
@@ -109,6 +114,21 @@ def main(argv=None) -> int:
     threading.Thread(target=announce, name="announce", daemon=True).start()
 
     server.run(sockets=[sock])
+    return 0
+
+
+def run_worker(data_dir: Path) -> int:
+    import logging
+    from logging.handlers import RotatingFileHandler
+    from core.tws.worker import TwsWorker
+
+    logs = data_dir / "logs"
+    logs.mkdir(parents=True, exist_ok=True)
+    handler = RotatingFileHandler(logs / "tws-connector.log", maxBytes=2_000_000, backupCount=3, encoding="utf-8")
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
+    logging.basicConfig(level=logging.INFO, handlers=[handler])
+    emit("ready")
+    TwsWorker().run()
     return 0
 
 

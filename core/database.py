@@ -43,11 +43,31 @@ class UserService:
         return UserService.get_user_by_id(LOCAL_USER_ID)
 
     @staticmethod
+    def update_profile(display_name: str | None = None, theme: str | None = None,
+                       complete_onboarding: bool = False) -> dict:
+        """Change the local profile; completing onboarding stops the first-run wizard."""
+        from datetime import datetime, timezone
+        sets, params = [], []
+        if display_name is not None:
+            sets.append("display_name = %s")
+            params.append(display_name)
+        if theme is not None:
+            sets.append("theme = %s")
+            params.append(theme)
+        if complete_onboarding:
+            sets.append("onboarded_at = COALESCE(onboarded_at, %s)")
+            params.append(datetime.now(timezone.utc))
+        if sets:
+            with get_db_cursor() as (cur, conn):
+                cur.execute(f"UPDATE users SET {', '.join(sets)} WHERE id = %s", (*params, LOCAL_USER_ID))
+        return UserService.get_local_user()
+
+    @staticmethod
     def get_user_by_id(user_id: int) -> dict:
         """Get user by ID."""
         with get_db_cursor() as (cur, conn):
             cur.execute("""
-                SELECT id, email, display_name, created_at FROM users WHERE id = %s
+                SELECT id, email, display_name, theme, onboarded_at, created_at FROM users WHERE id = %s
             """, (user_id,))
             user = cur.fetchone()
             return dict(user) if user else None

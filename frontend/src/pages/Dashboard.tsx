@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { portfolioApi, stocksApi } from '../lib/api'
 import { Portfolio, Position } from '../types'
 import { useTheme } from '../lib/theme'
+import { useProfile } from '../lib/profile'
 import { Briefcase, TrendingUp, TrendingDown, Wand2, Wrench, ArrowRight, Sparkles, RefreshCw } from 'lucide-react'
 
 interface PortfolioWithPositions {
@@ -17,6 +18,7 @@ function SkeletonPulse({ className }: { className?: string }) {
 }
 
 export default function Dashboard() {
+  const { profile } = useProfile()
   const { theme } = useTheme()
   const isDark = theme === 'dark'
   const [portfolios, setPortfolios] = useState<Portfolio[]>([])
@@ -108,7 +110,7 @@ export default function Dashboard() {
         <div className="flex items-center gap-2">
           <Sparkles className="w-8 h-8 text-sky-400" />
           <h1 className="page-title">
-            Welcome back, <span className="gradient-text">Investor</span>!
+            Welcome back, <span className="gradient-text">{profile?.display_name || 'Investor'}</span>!
           </h1>
         </div>
         <p className="page-subtitle">

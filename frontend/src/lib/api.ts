@@ -30,8 +30,17 @@ export function apiErrorMessage(error: unknown, fallback: string): string {
   return fallback
 }
 
+export interface Profile {
+  display_name: string
+  theme: 'light' | 'dark' | null
+  onboarded: boolean
+  data_dir: string
+}
+
 export const profileApi = {
-  get: () => api.get<{ display_name: string; data_dir: string }>('/profile'),
+  get: () => api.get<Profile>('/profile'),
+  update: (changes: { display_name?: string; theme?: 'light' | 'dark'; complete_onboarding?: boolean }) =>
+    api.put<Profile>('/profile', changes),
 }
 
 export const stocksApi = {
@@ -142,6 +151,58 @@ export const brokerApi = {
     api.post<IntentQueueResponse>('/broker/orders', { orders, idempotency_key, environment: 'simulation' }),
   recentOrders: (limit: number = 25) =>
     api.get(`/broker/orders/recent?limit=${limit}`),
+}
+
+export interface TwsSettings {
+  enabled: boolean
+  port: number
+  client_id: number
+  expected_account: string | null
+  paper_confirmed: boolean
+  sdk_folder: string | null
+}
+
+export interface TwsStatus {
+  state: string
+  detail: string | null
+  account: string | null
+  server_version: number | null
+  sdk_version: string | null
+  ib_connected: boolean | null
+  connected_since: string | null
+  last_sync_at: string | null
+  worker_running: boolean
+}
+
+export interface TwsTestStep {
+  key: string
+  title: string
+  status: 'ok' | 'warn' | 'fail' | 'skipped'
+  detail: string | null
+  fix: string | null
+}
+
+export interface TwsCommand {
+  id: number
+  status: 'pending' | 'running' | 'done' | 'failed'
+  result: { ok?: boolean; steps?: TwsTestStep[]; message?: string; facts?: Record<string, unknown> } | null
+}
+
+export interface TwsAccount {
+  state: string
+  account: string | null
+  snapshots: Record<string, { data: unknown; taken_at: string }>
+}
+
+export const twsApi = {
+  settings: () => api.get<TwsSettings>('/tws/settings'),
+  saveSettings: (changes: Partial<TwsSettings>) => api.put<TwsSettings>('/tws/settings', changes),
+  sdk: () => api.get<{ found: boolean; folder: string | null; version: string | null }>('/tws/sdk'),
+  status: () => api.get<TwsStatus>('/tws/status'),
+  startTest: () => api.post<{ id: number }>('/tws/test'),
+  testResult: (id: number) => api.get<TwsCommand>(`/tws/test/${id}`),
+  reconnect: () => api.post('/tws/reconnect'),
+  account: () => api.get<TwsAccount>('/tws/account'),
 }
 
 export interface AISettingsUpdate {

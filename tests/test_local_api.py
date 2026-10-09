@@ -70,6 +70,38 @@ class LocalApiTests(unittest.TestCase):
         settings = self.client.get("/api/ai/settings", headers=self.auth()).json()
         self.assertEqual(settings["mode"], "off")
 
+    def test_first_run_profile_wizard_saves_name_and_theme(self):
+        profile = self.client.get("/api/profile", headers=self.auth()).json()
+        self.assertFalse(profile["onboarded"])
+        self.assertIsNone(profile["theme"])
+        bad = self.client.put("/api/profile", headers=self.auth(), json={"theme": "purple"})
+        self.assertEqual(bad.status_code, 422)
+        done = self.client.put("/api/profile", headers=self.auth(),
+                               json={"display_name": "  Kevin ", "theme": "dark", "complete_onboarding": True}).json()
+        self.assertEqual((done["display_name"], done["theme"], done["onboarded"]), ("Kevin", "dark", True))
+        renamed = self.client.put("/api/profile", headers=self.auth(), json={"display_name": "Dad"}).json()
+        self.assertEqual((renamed["display_name"], renamed["onboarded"]), ("Dad", True))
+        self.client.put("/api/profile", headers=self.auth(), json={"display_name": "Investor", "theme": "light"})
+
+    def test_tws_settings_status_and_test_route(self):
+        settings = self.client.get("/api/tws/settings", headers=self.auth()).json()
+        self.assertEqual((settings["port"], settings["client_id"], settings["enabled"]), (7497, 71, False))
+        saved = self.client.put("/api/tws/settings", headers=self.auth(),
+                                json={"enabled": True, "expected_account": "du1234567", "paper_confirmed": True}).json()
+        self.assertEqual(saved["expected_account"], "DU1234567")
+        changed = self.client.put("/api/tws/settings", headers=self.auth(), json={"expected_account": "DU7654321"}).json()
+        self.assertFalse(changed["paper_confirmed"], "a new account must be confirmed as paper again")
+        for bad in ({"client_id": 0}, {"port": 70000}, {"expected_account": "DU 1; drop"}, {"host": "10.0.0.1"}):
+            with self.subTest(bad=bad):
+                self.assertEqual(self.client.put("/api/tws/settings", headers=self.auth(), json=bad).status_code, 422)
+        status = self.client.get("/api/tws/status", headers=self.auth()).json()
+        self.assertFalse(status["worker_running"])
+        self.assertEqual(self.client.post("/api/tws/test", headers=self.auth()).status_code, 503)
+        self.assertEqual(self.client.get("/api/tws/test/999", headers=self.auth()).status_code, 404)
+        broker = self.client.get("/api/broker/status", headers=self.auth()).json()
+        self.assertFalse(broker["execution_enabled"])
+        self.client.put("/api/tws/settings", headers=self.auth(), json={"enabled": False, "expected_account": ""})
+
     def test_removed_login_and_oauth_routes_are_gone(self):
         for method, path in (("post", "/api/auth/login"), ("post", "/api/auth/register"),
                              ("post", "/api/broker/credentials"), ("get", "/api/broker/account"),

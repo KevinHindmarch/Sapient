@@ -1,6 +1,6 @@
 # Sapient codebase reference
 
-Snapshot of the code as of 2026-10-09 (after migration Phases A–C). Summary and rules live in
+Snapshot of the code as of 2026-10-09 (after migration Phases A–E). Summary and rules live in
 [CLAUDE.md](../CLAUDE.md). Line numbers drift; re-check before relying on them.
 
 ## 1. Backend entry (`backend/main.py`, `backend/desktop_main.py`)
@@ -11,12 +11,16 @@ Snapshot of the code as of 2026-10-09 (after migration Phases A–C). Summary an
 - Middleware: `LocalAccessMiddleware` (loopback Host + launch token), then CORS
   for `SAPIENT_ALLOWED_ORIGINS` only (no wildcard, no credentials).
 - Routers: `/api/stocks`, `/api/portfolio`, `/api/indicators`, `/api/broker`,
-  `/api/ai`, `/api/execution`; plus `GET /api/health` (public) and
-  `GET /api/profile` (display name + data folder).
+  `/api/ai`, `/api/execution`, `/api/tws`; plus `GET /api/health` (public),
+  `GET /api/profile` (display_name, theme, onboarded, data_dir) and
+  `PUT /api/profile` (display_name 1–60 chars, theme light/dark,
+  complete_onboarding; unknown fields rejected).
 - The backend no longer serves the frontend; Vite (dev) or Electron (Phase D) does.
 - `desktop_main.py --data-dir D [--port 0] [--allowed-origin O]`: reads the token
   from stdin, migrates, binds 127.0.0.1 (free port by default), prints
   `{"event":"ready","port":N}` or `{"event":"error",...}`, exits when stdin closes.
+  With `--worker` it instead runs the TWS connector (`core.tws.worker`), logging
+  to `<data>/logs/tws-connector.log`; Electron starts it after the API is ready.
 
 ## 2. Access control (`backend/security.py`)
 
@@ -89,6 +93,15 @@ SafetyError → 409 `{code,message}`. POST `/simulation/bind`, GET `/intents`,
 POST `/intents/{id}/cancel`, POST `/halt`, POST `/resume`. The cloud-era
 pairing/device/worker routes were removed (the TWS worker will be local).
 
+### `/api/tws` (read-only TWS connection, Phase E)
+GET/PUT `/settings` (enabled, port 1–65535, client_id ≥1, expected_account
+`[A-Za-z0-9]{0,32}` upper-cased, paper_confirmed — reset when the account
+changes, sdk_folder), GET `/sdk` (where the official IBKR API was found),
+GET `/status` (state + `worker_running`, stale after 60 s), POST `/test`
+(queues a Test connection, 503 if the connector isn't running), GET
+`/test/{id}`, POST `/reconnect`, GET `/account` (latest summary, positions,
+open orders, executions snapshots).
+
 ## 4. Database (SQLite, `core/db.py` + `core/migrations.py`)
 
 One file at `SAPIENT_DB_PATH` or `<SAPIENT_DATA_DIR>/sapient.db` (default
@@ -119,6 +132,16 @@ a changed checksum or an unknown newer version refuses to start:
    epoch), `safety_intents`, `safety_reservations`, `safety_batches`
    (`intent_ids` JSON array), `safety_outbox`, `safety_audit`, `safety_pairings`,
    `safety_devices` (`scopes` JSON array), `safety_leases`, `safety_evidence`.
+3. `tws` — `tws_settings` (single row; port 7497, client ID 71, disabled by
+   default), `tws_status` (state, detail, heartbeat), `tws_snapshots`
+   (kind → JSON), `tws_commands` (test_connection / reconnect queue with result).
+4. `profile` — `users.theme` (NULL until saved, so upgrades keep the theme on
+   screen) and `users.onboarded_at`; existing users are marked onboarded so an
+   upgrade never re-runs the welcome wizard.
+
+Upgrades keep all data: the database lives in the data folder (never in the
+install folder), the installer keeps it on upgrade and uninstall, and
+`tests/test_upgrades.py` + the desktop CI upgrade-from-latest-release job check it.
 
 ## 5. Safety admission (`core/execution_safety.py`)
 
@@ -146,8 +169,26 @@ off and reports `broker_confirmed: False`.
 - `indicators.py`: RSI/MACD/SMA/EMA/Bollinger/Stochastic, 15-thread RSI screener.
 - `ai_engine.py`: RSI buy/sell with MACD confidence boost, 12h signal TTL,
   guardrails, autonomous → `IntentService.admit` (docstring still stale).
-- `ibkr_client.py`: `connection_status()` and an `IBKRClient` whose
+- `ibkr_client.py`: `connection_status()` (reports the TWS connector state;
+  `execution_enabled` always False) and an `IBKRClient` whose
   `place_order`/`cancel_order` always raise. No OAuth, no stored credentials.
+- `tws/` (read-only TWS connector, separate process, talks to the API only
+  through the `tws_*` tables):
+  - `sdk.py`: finds the official `ibapi` from IBKR's installer
+    (`C:\TWS API\source\pythonclient`, `SAPIENT_TWS_API_DIR`, or a chosen
+    folder) and loads it; never a PyPI copy.
+  - `transport.py`: `IbapiTransport`, host fixed to 127.0.0.1, request
+    allowlist `READ_ONLY_REQUESTS` (anything else, e.g. placeOrder, raises
+    `ReadOnlyViolation`), callbacks queued as events.
+  - `session.py`: handshake (nextValidId + managedAccounts), account summary,
+    positions, open orders, executions, delayed market snapshot; tracks
+    326/502/504/1100/1101/1102/2103/2105 health.
+  - `diagnostics.py`: staged Test connection (SDK, port, handshake, client ID,
+    IBKR link, account, snapshot, market data, reconnect) with plain-language fixes.
+  - `worker.py`: state machine NOT_CONFIGURED / SDK_MISSING / OFFLINE /
+    CLIENT_ID_IN_USE / ACCOUNT_MISMATCH / IBKR_DISCONNECTED / SYNCHRONIZING /
+    READY / ERROR, backoff 5–30 s, snapshots every 60 s, commands first.
+  - `store.py`: the SQLite tables above.
 
 ## 7. Frontend details
 
@@ -157,6 +198,12 @@ off and reports `broker_confirmed: False`.
   or `/api` + `VITE_SAPIENT_API_TOKEN` (dev). No login pages or auth context.
 - Logo imported from `src/assets/logo.png`; favicon `./favicon.png`.
 - External links go through `window.sapient.openExternal` when present.
+- `lib/profile.tsx`: `ProfileProvider`; `App` shows `pages/Onboarding.tsx`
+  (Welcome → name → light/dark → TWS now/later → done) until `onboarded`.
+- `pages/BrokerageSettings.tsx`: live TWS status, setup guide
+  (`components/TwsSetupGuide.tsx`), settings form, Test connection with
+  per-step fixes, read-only account view; `components/TwsStatusPill.tsx` in
+  the sidebar.
 - Unused API functions include backtest, compareStrategies, trade.
 - Dashboard does an N+1 fetch (list → detail per portfolio → info per
   position); the Yahoo cache softens it, a batch endpoint is still TODO.
@@ -173,10 +220,17 @@ off and reports `broker_confirmed: False`.
   concurrent claims/limits/reservations via threads, trigger-injected rollback,
   a subprocess killed mid-transaction, backup/restore, migration checksums,
   upgrade backups, exact decimals, immunity to global sqlite3 registrations.
+- `test_tws.py` — scripted fake TWS: diagnostics, read-only transport against a
+  fake ibapi package, worker states/commands.
+- `test_upgrades.py` — fresh install vs upgrade from 0.1.0 (data kept, no
+  wizard, one backup) and future migrations keep profile + TWS settings.
+- `desktop/e2e/smoke.mjs --mode fresh|seed|upgraded` — packaged-app checks;
+  CI installs the latest release, seeds a portfolio, upgrades, verifies.
 
 ## 9. TWS probe (`scripts/tws_readonly_check.py`)
 
 Official `ibapi` (EClient/EWrapper), lazy import only with `--connect`,
 127.0.0.1, default port 7497, client ID 71 (0 forbidden), explicit paper/
 read-only/licence confirmations, request allowlist with no order calls, two
-sessions, sanitised JSON report. Target TWS 10.51.1a. Not wired into the app.
+sessions, sanitised JSON report. Target TWS 10.51.1a. Operator tool; the app
+uses `core/tws/` instead.

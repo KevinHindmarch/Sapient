@@ -10,6 +10,9 @@ hiddenimports = (
     collect_submodules("uvicorn")
     + collect_submodules("backend")
     + collect_submodules("core")
+    # The official IBKR API is loaded from the user's install at runtime; recent
+    # versions import protobuf, so ship it inside the engine.
+    + collect_submodules("google.protobuf")
 )
 datas = collect_data_files("yfinance") + collect_data_files("curl_cffi")
 

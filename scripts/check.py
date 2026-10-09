@@ -17,6 +17,8 @@ TEST_PATTERNS = (
     "test_execution_safety_unit.py",
     "test_execution_safety_sqlite.py",
     "test_local_api.py",
+    "test_tws.py",
+    "test_upgrades.py",
 )
 
 

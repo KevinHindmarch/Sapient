@@ -280,6 +280,31 @@ Exit: the roadmap phase 0 compatibility evidence table filled in on the user's
 PC, and restart / disconnect / wrong port / wrong account / duplicate worker /
 journal failure tests pass with zero order calls.
 
+**Done in code (2026-10-09), awaiting the test on the user's PC:** `core/tws/`
+read-only connector (official `ibapi` from the user's IBKR install, request
+allowlist, 127.0.0.1 only, fixed client ID 71, worker state machine with
+backoff) running as a second engine process (`sapient-api --worker`) supervised
+by Electron; migration 3 (`tws_*` tables) and `/api/tws` routes; new
+Interactive Brokers page (status, guide, settings, staged Test connection with
+fixes, read-only account summary/positions/orders/fills) and a sidebar status
+pill. Also added: first-run welcome wizard (name, theme, TWS now/later;
+migration 4) and upgrade guarantees — the desktop CI job installs the latest
+published release, saves a portfolio, upgrades to the new build and checks the
+portfolio and profile are still there and the wizard does not re-appear.
+Deferred to Phase F: journal/incarnation tables, sleep/clock-jump recovery,
+account-to-portfolio allocation screen.
+
+### Roadmap after Phase E (agreed 2026-10-09)
+
+- **E sign-off (user):** install TWS + the IBKR API on the PC, log in to
+  Paper Trading, run **Test connection**, send the result.
+- **F — Paper orders:** only after the user says "authorise paper trading" and
+  unticks Read-Only on the paper TWS. Real paper orders through
+  `IntentService` → outbox → connector; approvals inbox, desktop notifications,
+  scheduler for RSI scans, tray Emergency stop, AI Trading rebuilt around TWS.
+- **G — Paper trial:** ≥5 trading days, restart/sleep/internet-loss rehearsals.
+- **H — Live pilot:** separate explicit sign-off, low limits, manual approval first.
+
 ### Phase F — Paper trading lifecycle (roadmap phases 3–4)
 
 Starts only after explicit user authorisation to untick Read-Only on a **paper**
