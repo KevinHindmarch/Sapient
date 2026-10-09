@@ -13,7 +13,6 @@ extraResources:
   - from: ../packaging/dist/sapient-api
     to: engine
 asar: true
-electronDist: node_modules/electron/dist
 win:
   target:
     - target: nsis
