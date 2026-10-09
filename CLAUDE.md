@@ -13,6 +13,8 @@ Installer + first-run TWS setup wizard + Test connection UX: [docs/install-and-s
 Paper trading (authorisation record, rules, submit protocol): [docs/paper-trading.md](docs/paper-trading.md).
 Live (real-money) trading (user decisions, rules): [docs/live-trading.md](docs/live-trading.md).
 Audit after v0.5.0 and the G-phase plan: [docs/audit-2026-10.md](docs/audit-2026-10.md).
+IBKR TWS API facts we rely on + how to download IBKR's full guide locally (check it before
+guessing TWS behaviour): [docs/ibkr-tws-api-notes.md](docs/ibkr-tws-api-notes.md).
 
 ## Working agreement with the user
 
