@@ -10,6 +10,7 @@ Active migration plan (Replit web app → Windows desktop app): [docs/desktop-mi
 Target trading lifecycle (RSI entry → Sharpe weights → IBKR orders → RSI exits →
 autonomous/semi-autonomous management, paper + live): [docs/trading-workflow.md](docs/trading-workflow.md).
 Installer + first-run TWS setup wizard + Test connection UX: [docs/install-and-setup.md](docs/install-and-setup.md).
+Paper trading (authorisation record, rules, submit protocol): [docs/paper-trading.md](docs/paper-trading.md).
 
 ## Working agreement with the user
 
@@ -28,6 +29,10 @@ read-only GitHub token (DPAPI-encrypted via safeStorage, main process only)
 is supported in case it is made private later. No Replit data is migrated.
 The old `.replit` key was fake.
 
+Paper trading authorised by the user on 2026-10-09 for their TWS **paper**
+account (DUT146393) using **delayed prices with cautious limit orders**. Live
+trading is NOT authorised and does not exist in the code.
+
 ## Current state (October 2026)
 
 - Runs today as **React SPA + FastAPI + a local SQLite file**. It was built on
@@ -36,18 +41,19 @@ The old `.replit` key was fake.
   self-contained **Electron + React/Tailwind desktop app on Windows** talking to
   Yahoo Finance and a locally installed **IBKR Trader Workstation (TWS)**.
   The Electron shell and Windows installer exist (Phase D). Phase E (read-only
-  TWS connection) is built: a separate connector process reads account,
-  positions, orders and fills from TWS; it can never send orders. Waiting on
-  the user's real-PC Test connection before Phase F (paper orders).
+  TWS connection) passed on the user's PC. Phase F: market-hours scheduler,
+  stop-loss/take-profit, notifications, tray Emergency stop, and **paper
+  orders** (F2): once the user authorises in Brokerage → Step 4, approvals and
+  paper tickets become real orders in the TWS paper account (ASX only).
 - First run shows a welcome wizard (name, light/dark, TWS now/later). Upgrades
   keep everything (data lives in %APPDATA%\Sapient, never the install folder)
   and never repeat the wizard; CI proves it by upgrading from the latest release.
-- **No real broker orders are possible.** `core/ibkr_client.py` is a simulation stub
-  (`place_order`/`cancel_order` always raise). All order paths go through the
-  durable "safety admission" in `core/execution_safety.py`, which only records
-  simulation intents; accounts start halted/recovery-locked and there is no
-  HTTP route to configure simulation facts, so ordinary submissions are refused.
-  Do not claim live/paper readiness.
+- **No live orders are possible.** Paper orders exist only through
+  `core/tws/paper.py` (admission) → `core/tws/execution.py` (connector sends).
+  Without paper authorisation every order path still goes through the
+  simulation "safety admission" in `core/execution_safety.py` (simulation
+  intents only). `core/ibkr_client.py` refuses all direct place/cancel.
+  Never claim live readiness.
 - Research features (optimisers, scanners, indicators, portfolio bookkeeping)
   work end-to-end.
 
@@ -98,13 +104,14 @@ backend/             FastAPI app (thin HTTP layer), 127.0.0.1 only
                      --worker runs the TWS connector instead
   routers/           stocks, portfolio, indicators, broker (status + simulation
                      orders), ai_trading, execution (intents/halt/resume),
-                     tws (settings/status/test/account)
+                     tws (settings/status/test/account/compare), paper (authorise,
+                     limits, orders, cancel, resolve unknown)
   schemas/           pydantic request/response models
 core/                Service layer (all business logic)
   db.py              SQLite connection layer (WAL, FULL sync, BEGIN IMMEDIATE,
                      %s→? placeholders, Sapient-specific column-type converters)
   migrations.py      versioned checksummed schema (1 core, 2 safety, 3 tws,
-                     4 profile, 5 strategy); migrate()
+                     4 profile, 5 strategy, 6 paper); migrate()
                      runs at API startup after backing up the DB
   database.py        User (local profile)/Portfolio/AITradingSettings/AISignal/
                      BrokerOrder/AIAudit services (SQL via core.db)
@@ -128,7 +135,9 @@ core/                Service layer (all business logic)
   tws/               read-only TWS connector: sdk (find official ibapi), transport
                      (127.0.0.1, READ_ONLY_REQUESTS allowlist), session, diagnostics
                      (Test connection steps + fixes), worker (state machine), store,
-                     compare (model holdings vs TWS positions, read-only)
+                     compare (model holdings vs TWS positions, read-only),
+                     paper (authorisation, order admission, cancel, status),
+                     execution (connector-side submit protocol, fills, cancels)
 desktop/             Electron shell (TypeScript): src/main (window, app:// protocol,
                      CSP, EngineSupervisor, updater.ts = manual GitHub-release
                      updates + encrypted token, alerts.ts = tray icon, proposal
@@ -155,7 +164,9 @@ React UI --axios + Bearer <per-launch token>--> FastAPI on 127.0.0.1 (one local 
         --> core/execution_safety.IntentService.admit[_batch]
         --> safety_* tables (intents, reservations, outbox, audit) — never a broker
    TWS connector (separate process, sapient-api --worker) <--tws_* tables--> API
-        reads TWS on 127.0.0.1 with an allowlist of read-only requests; no orders
+        reads TWS on 127.0.0.1 with an allowlist of read-only requests; when paper
+        trading is authorised for that exact account it also sends queued paper
+        orders (paper_orders table) and records fills; never reqGlobalCancel
 ```
 
 - Every /api route except /api/health needs the launch token; there are no
@@ -199,6 +210,7 @@ python -m unittest discover -s tests -p 'test_local_api.py' -v   # token/Host ch
 python -m unittest discover -s tests -p 'test_tws.py' -v         # fake TWS: diagnostics, read-only transport, worker
 python -m unittest discover -s tests -p 'test_upgrades.py' -v    # fresh install vs upgrade keeps data, no repeat wizard
 python -m unittest discover -s tests -p 'test_strategy.py' -v    # calendar, rules, sizing, scheduler
+python -m unittest discover -s tests -p 'test_paper.py' -v       # paper admission, submit protocol, fills, cancel, halt
 python -m compileall -q core backend
 cd frontend && npm run build && npm run lint
 ```

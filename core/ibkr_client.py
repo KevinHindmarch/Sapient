@@ -1,12 +1,10 @@
-"""Broker boundary placeholder until the local TWS worker exists.
+"""Broker boundary for the legacy order routes.
 
-There is no broker transport in this build. Orders are admitted only as durable
-simulation intents through ``core.execution_safety.IntentService``; they are not
-broker orders or fills. Direct placement and cancellation always refuse.
-
-The TWS connection will live in a separate local worker process using the
-official IBKR API (see docs/desktop-migration-plan.md, Phase E). The old Client
-Portal OAuth/RSA credential path was removed: TWS keeps the IBKR login itself.
+This client never places or cancels anything: direct placement always refuses.
+Simulation orders are admitted as durable intents through
+``core.execution_safety.IntentService``. Real paper orders exist only through
+``core.tws.paper`` (authorised paper account, checked admission) and are sent
+by the TWS connector process (``core.tws.execution``). Live trading does not exist.
 """
 
 from __future__ import annotations
@@ -27,14 +25,23 @@ def connection_status() -> dict:
     except Exception:  # database not migrated yet
         tws, settings = {"state": "NOT_CONFIGURED", "worker_running": False}, {"enabled": False}
     connected = tws.get("state") == "READY"
+    try:
+        from core.tws import paper
+        paper_on = paper.active()
+    except Exception:
+        paper_on = False
     return {
         "mode": "simulation",
         "tws_configured": bool(settings.get("enabled")),
         "tws_state": tws.get("state"),
         "tws_connected_read_only": connected,
         "worker": "running" if tws.get("worker_running") else "not_running",
-        "execution_enabled": False,
-        "message": ("Connected to TWS read-only. Orders are still recorded as simulation intents only."
+        "execution_enabled": False,  # this legacy route; paper orders use /api/paper
+        "paper_trading_enabled": paper_on,
+        "live_trading_enabled": False,
+        "message": ("Paper trading is on: approvals and paper tickets go to your TWS paper account. "
+                    "Live trading is off." if paper_on else
+                    "Connected to TWS read-only. Orders are still recorded as simulation intents only."
                     if connected else
                     "Interactive Brokers TWS is not connected. Orders are recorded as simulation intents only."),
     }

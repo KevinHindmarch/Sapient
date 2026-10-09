@@ -375,13 +375,22 @@ class IntentService:
             cur.execute("""SELECT count(*) AS n FROM broker_orders WHERE user_id=%s
                 AND status IN ('Submitted','PendingSubmit','PreSubmitted','PartiallyFilled')""", (user_id,))
             residual = cur.fetchone()["n"]
-            self._audit(cur, user_id, "halt_persisted", {"legacy_unconfirmed_orders": residual})
+            from core.tws import paper
+            paper_working = paper.halt(cur)  # stop paper trading; cancel Sapient's own working paper orders
+            self._audit(cur, user_id, "halt_persisted", {"legacy_unconfirmed_orders": residual,
+                                                         "paper_orders_to_cancel": paper_working})
+            message = "Halt persisted. No broker cancellations confirmed. Use TWS/IBKR for broker orders."
+            if paper_working:
+                message = (f"Halt persisted. Cancel requested for {paper_working} working paper order(s); "
+                           "TWS confirms each cancel separately (see Paper orders). Orders can fill before "
+                           "the cancel arrives. Check TWS if in doubt.")
             return {"halt_persisted": True, "worker_acknowledged": False,
                     "cancel_requested": True, "broker_confirmed": False,
                     "cancelled_signals": signals, "cancelled_orders": 0,
-                    "remaining_unconfirmed_orders": residual,
-                    "cancellation_available": False,
-                    "message": "Halt persisted. No broker cancellations confirmed. Use TWS/IBKR for broker orders."}
+                    "paper_orders_cancel_requested": paper_working,
+                    "remaining_unconfirmed_orders": residual + paper_working,
+                    "cancellation_available": paper_working > 0,
+                    "message": message}
 
     def resume(self, user_id):
         with self._tx() as cur:

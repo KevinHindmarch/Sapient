@@ -303,7 +303,12 @@ account-to-portfolio allocation screen.
   notifications for new proposals, tray icon with Emergency stop, optional
   keep-running-in-tray, answer-by times in the AI Inbox, model-vs-IBKR
   holdings card on Portfolio Detail.
-- **F — Paper orders:** only after the user says "authorise paper trading" and
+- **F2 (built 2026-10-09, user authorised paper trading with delayed prices):**
+  paper order admission, connector submit protocol (persist-before-send,
+  unknown never resent), fills/commissions, cancel, Emergency stop cancels
+  own orders, Brokerage Step 4 and the Paper orders page. ASX only. See
+  [paper-trading.md](paper-trading.md).
+- **F — Paper orders (original plan):** only after the user says "authorise paper trading" and
   unticks Read-Only on the paper TWS. Real paper orders through
   `IntentService` → outbox → connector; approvals inbox, desktop notifications,
   scheduler for RSI scans, tray Emergency stop, AI Trading rebuilt around TWS.

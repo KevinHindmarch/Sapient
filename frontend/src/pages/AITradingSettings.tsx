@@ -1,6 +1,7 @@
 import { useEffect, useState, ReactNode } from 'react'
 import { aiApi, AISettingsUpdate, apiErrorMessage, SchedulerStatus } from '../lib/api'
 import { useTheme } from '../lib/theme'
+import AutonomyChecklist from '../components/AutonomyChecklist'
 import { toast } from 'sonner'
 import {
   Bot,
@@ -171,7 +172,7 @@ export default function AITradingSettings() {
           <div>
             <h1 className="page-title">AI Trading</h1>
             <p className="page-subtitle">
-              Configure AI trade proposals. Order execution is disabled in this phase.
+              Configure AI trade proposals. Live trading is off; paper orders need your authorisation.
             </p>
           </div>
         </div>
@@ -185,7 +186,9 @@ export default function AITradingSettings() {
           <Shield className="w-5 h-5 shrink-0 mt-0.5" />
           <div className="flex-1">
             <p className="text-sm font-medium">
-              Live and paper broker execution are blocked regardless of this setting. Simulation intents may be queued but are not orders or fills.
+              Live trading is off. If you authorised paper trading (Brokerage → Step 4), approved proposals become
+              practice orders in your TWS paper account; Autonomous mode only places them if you also allowed that
+              there. Otherwise approvals queue simulation intents, which are not orders or fills.
             </p>
           </div>
       </div>
@@ -215,7 +218,7 @@ export default function AITradingSettings() {
             onClick={() => update('mode', 'suggestions')}
             icon={<Lightbulb className="w-5 h-5" />}
             title="Suggestions"
-            description="AI proposes trades. Approval may queue an intent; it does not place or fill an order."
+            description="AI proposes trades and waits for you. Approving sends a paper order if paper trading is on."
             tone="sky"
             isDark={isDark}
           />
@@ -224,13 +227,15 @@ export default function AITradingSettings() {
             onClick={() => update('mode', 'autonomous')}
             icon={<Bot className="w-5 h-5" />}
             title="Autonomous"
-            description="AI may propose simulation intents under guardrails; broker execution is disabled."
+            description="AI acts within your guardrails. Paper orders only if you allowed automatic paper orders."
             tone="purple"
-            badge="No execution"
+            badge="Paper only"
             isDark={isDark}
           />
         </div>
       </section>
+
+      <AutonomyChecklist />
 
       {/* Signal Thresholds */}
       <section className="card space-y-6">
@@ -267,7 +272,7 @@ export default function AITradingSettings() {
         <div className={`pt-4 border-t ${isDark ? 'border-slate-700/50' : 'border-slate-200'}`}>
           <ToggleRow
             label="Paper trading only"
-            description="Preference only. Live execution is blocked regardless of this toggle."
+            description="Live trading does not exist in Sapient yet; this stays on."
             checked={settings.paper_only}
             onChange={(v) => update('paper_only', v)}
           />

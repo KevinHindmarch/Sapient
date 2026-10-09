@@ -18,7 +18,28 @@ interface Proposal {
   expires_at?: string | null
 }
 
+interface PaperOrder {
+  id: string
+  origin: string
+  symbol: string
+  side: string
+  quantity: string
+  state: string
+  filled_quantity: string
+  avg_fill_price: string | null
+  limit_price: string | null
+  detail: string | null
+}
+
 interface DesktopSettings { closeToTray: boolean }
+
+// Paper order changes worth a notification (automatic trades must never be silent).
+const ORDER_NOTICES: Record<string, (o: PaperOrder) => string> = {
+  FILLED: (o) => `Paper ${o.side.toLowerCase()} filled: ${Number(o.filled_quantity)} ${o.symbol} at A$${o.avg_fill_price ?? '?'}`,
+  PARTIALLY_FILLED: (o) => `Paper ${o.side.toLowerCase()} partly filled: ${Number(o.filled_quantity)} of ${Number(o.quantity)} ${o.symbol}`,
+  REJECTED: (o) => `TWS refused the paper ${o.side.toLowerCase()} of ${o.symbol}`,
+  UNKNOWN: (o) => `Check TWS: outcome of the paper ${o.side.toLowerCase()} of ${o.symbol} is unknown`,
+}
 
 const POLL_MS = 30_000
 
@@ -26,6 +47,8 @@ export class Alerts {
   private tray: Tray | null = null
   private seen = new Set<number>()
   private seeded = false
+  private orderStates = new Map<string, string>()
+  private ordersSeeded = false
   private pending = 0
   private timer: NodeJS.Timeout | null = null
   private settings: DesktopSettings
@@ -108,6 +131,7 @@ export class Alerts {
     this.tray.setContextMenu(Menu.buildFromTemplate([
       { label: 'Open Sapient', click: () => this.showWindow() },
       { label: this.pending ? `AI Inbox (${this.pending})` : 'AI Inbox', click: () => this.openInbox() },
+      { label: 'Paper orders', click: () => this.openPage('#/paper-orders') },
       { type: 'separator' },
       { label: 'Emergency stop…', click: () => { void this.emergencyStop(true) } },
       { type: 'separator' },
@@ -116,8 +140,12 @@ export class Alerts {
   }
 
   private openInbox(): void {
+    this.openPage('#/ai-inbox')
+  }
+
+  private openPage(hash: '#/ai-inbox' | '#/paper-orders'): void {
     this.showWindow()
-    void this.window()?.webContents.executeJavaScript("location.hash = '#/ai-inbox'").catch(() => undefined)
+    void this.window()?.webContents.executeJavaScript(`location.hash = '${hash}'`).catch(() => undefined)
   }
 
   // -- engine calls -------------------------------------------------------
@@ -147,6 +175,40 @@ export class Alerts {
       return
     }
     if (fresh.length && Notification.isSupported()) this.notify(fresh)
+    await this.pollOrders()
+  }
+
+  private async pollOrders(): Promise<void> {
+    let orders: PaperOrder[]
+    try {
+      orders = await this.call<PaperOrder[]>('/paper/orders')
+    } catch {
+      return
+    }
+    const notices: { title: string; body: string }[] = []
+    for (const order of orders) {
+      const before = this.orderStates.get(order.id)
+      this.orderStates.set(order.id, order.state)
+      if (!this.ordersSeeded || before === order.state) continue
+      if (before === undefined && order.origin === 'ai_autonomous') {
+        notices.push({ title: `Sapient is placing a paper ${order.side.toLowerCase()}: ${Number(order.quantity)} ${order.symbol}`,
+          body: 'Automatic (Autonomous mode). Paper account only. Press Emergency stop in the tray to stop.' })
+      }
+      const describe = ORDER_NOTICES[order.state]
+      if (describe) notices.push({ title: describe(order), body: order.detail ?? 'See Paper orders in Sapient.' })
+    }
+    this.ordersSeeded = true
+    if (!Notification.isSupported()) return
+    for (const notice of notices.slice(0, 3)) {
+      const note = new Notification(notice)
+      note.on('click', () => this.openPage('#/paper-orders'))
+      note.show()
+    }
+    if (notices.length > 3) {
+      const note = new Notification({ title: `Sapient: ${notices.length - 3} more paper order updates`, body: 'Open Paper orders to see them.' })
+      note.on('click', () => this.openPage('#/paper-orders'))
+      note.show()
+    }
   }
 
   private notify(fresh: Proposal[]): void {
@@ -171,8 +233,9 @@ export class Alerts {
         type: 'warning',
         title: 'Emergency stop',
         message: 'Stop all AI trading now?',
-        detail: 'This switches AI Trading off for every portfolio, expires all waiting proposals and blocks '
-          + 'queued simulation intents. You can switch it back on later in AI Trading (after a 24-hour cooldown).',
+        detail: 'This switches AI Trading and paper trading off, expires all waiting proposals, blocks queued orders '
+          + 'and asks TWS to cancel Sapient\'s own working paper orders (never your own TWS orders). '
+          + 'You can switch things back on later (after a 24-hour cooldown).',
         buttons: ['Stop now', 'Cancel'],
         defaultId: 0,
         cancelId: 1,
@@ -180,10 +243,14 @@ export class Alerts {
       if (choice.response !== 0) return { ok: false, message: 'Cancelled' }
     }
     try {
-      const result = await this.call<{ cancelled_signals: number }>('/ai/kill-switch', 'POST')
-      const message = `Stopped. AI Trading is off and ${result.cancelled_signals} waiting proposal(s) were expired. `
-        + 'Sapient cannot place broker orders yet, so nothing at Interactive Brokers needed cancelling — '
-        + 'check TWS yourself if you placed orders there.'
+      const result = await this.call<{ cancelled_signals: number; paper_orders_cancel_requested?: number }>(
+        '/ai/kill-switch', 'POST')
+      const paperOrders = result.paper_orders_cancel_requested ?? 0
+      const message = `Stopped. AI Trading and paper trading are off and ${result.cancelled_signals} waiting proposal(s) were expired. `
+        + (paperOrders
+          ? `Cancel requested for ${paperOrders} working paper order(s); TWS confirms each one on the Paper orders page. `
+            + 'An order can still fill before its cancel arrives. Check TWS if in doubt.'
+          : 'Sapient had no working orders at Interactive Brokers. Orders you placed yourself in TWS are not touched.')
       await this.poll()
       if (confirm) await dialog.showMessageBox({ type: 'info', title: 'Emergency stop', message: 'AI trading stopped', detail: message })
       return { ok: true, message }

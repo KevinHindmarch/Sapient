@@ -211,6 +211,7 @@ export interface BrokerCompare {
   account: string | null
   positions_taken_at: string | null
   available: boolean
+  paper_started_at: string | null
   rows: { symbol: string; model_quantity: number | null; broker_quantity: number | null; difference: number;
     status: 'match' | 'differs' | 'model_only' | 'broker_only' }[]
 }
@@ -253,7 +254,8 @@ export const aiApi = {
   scheduler: () => api.get<SchedulerStatus>('/ai/scheduler'),
   listSignals: (status: string = 'pending') =>
     api.get(`/ai/signals?status=${status}`),
-  approveSignal: (id: number) => api.post<{ intent: QueuedIntent; execution_enabled: false; message: string }>(`/ai/signals/${id}/approve`),
+  approveSignal: (id: number) => api.post<{ intent?: QueuedIntent; paper_order?: PaperOrder; environment?: 'tws_paper';
+    execution_enabled: boolean; message: string }>(`/ai/signals/${id}/approve`),
   rejectSignal: (id: number) => api.post(`/ai/signals/${id}/reject`),
   snoozeSignal: (id: number, snooze_minutes: number = 60) =>
     api.post(`/ai/signals/${id}/snooze`, { snooze_minutes }),
@@ -264,3 +266,87 @@ export const aiApi = {
 }
 
 export default api
+
+// ---- Paper trading through TWS ------------------------------------------------
+export interface PaperBinding {
+  account_id: string | null
+  enabled: boolean
+  authorised_at: string | null
+  halted: boolean
+  halted_at: string | null
+  max_order_value: number
+  max_orders_per_day: number
+  max_value_per_day: number
+  max_price_gap_pct: number
+  autonomous_allowed: boolean
+}
+
+export interface PaperStatus {
+  binding: PaperBinding
+  ready: boolean
+  blockers: { code: string; message: string }[]
+  authorisation_text: string
+}
+
+export type PaperOrderState = 'QUEUED' | 'SUBMITTING' | 'SUBMITTED' | 'PARTIALLY_FILLED' | 'FILLED'
+  | 'CANCEL_REQUESTED' | 'CANCELLED' | 'REJECTED' | 'EXPIRED' | 'BLOCKED' | 'UNKNOWN'
+
+export interface PaperFill {
+  exec_id: string
+  shares: string
+  price: string
+  exec_time: string
+  commission: string | null
+  commission_currency: string | null
+}
+
+export interface PaperOrder {
+  id: string
+  origin: 'manual' | 'ai_approval' | 'ai_autonomous'
+  account_id: string
+  portfolio_id: number | null
+  portfolio_name?: string | null
+  symbol: string
+  side: 'BUY' | 'SELL'
+  quantity: string
+  reference_price: string
+  limit_price: string | null
+  quote: { delayed?: boolean; market_data_type?: number } | null
+  state: PaperOrderState
+  detail: string | null
+  api_order_id: number | null
+  filled_quantity: string
+  avg_fill_price: string | null
+  broker_status: string | null
+  created_at: string
+  submitted_at: string | null
+  updated_at: string
+  fills: PaperFill[]
+}
+
+export type PaperLimits = Partial<Pick<PaperBinding, 'max_order_value' | 'max_orders_per_day' | 'max_value_per_day'
+  | 'max_price_gap_pct' | 'autonomous_allowed'>>
+
+export const UNKNOWN_CHECK_TEXT = 'I checked TWS: this order is not there and did not fill.'
+
+export const paperApi = {
+  status: () => api.get<PaperStatus>('/paper/status'),
+  authorise: (account_id: string, confirmation: string, limits: PaperLimits) =>
+    api.post<PaperBinding>('/paper/authorise', { account_id, confirmation, limits }),
+  updateLimits: (limits: PaperLimits) => api.put<PaperBinding>('/paper/limits', limits),
+  disable: () => api.post<PaperBinding>('/paper/disable'),
+  orders: () => api.get<PaperOrder[]>('/paper/orders'),
+  place: (ticket: { symbol: string; side: 'BUY' | 'SELL'; quantity: number; portfolio_id?: number; idempotency_key: string }) =>
+    api.post<PaperOrder>('/paper/orders', ticket),
+  cancel: (id: string) => api.post<PaperOrder>(`/paper/orders/${id}/cancel`),
+  resolveUnknown: (id: string) => api.post<PaperOrder>(`/paper/orders/${id}/resolve`, { confirmation: UNKNOWN_CHECK_TEXT }),
+  startPortfolio: (id: number) => api.post<{ started: boolean; results: { symbol: string; ok: boolean; quantity?: number;
+    message?: string }[] }>(`/paper/portfolios/${id}/start`),
+  autonomy: () => api.get<AutonomyChecklist>('/paper/autonomy'),
+}
+
+export interface ChecklistItem { key: string; ok: boolean; text: string }
+export interface AutonomyChecklist {
+  shared: ChecklistItem[]
+  portfolios: { portfolio_id: number; name: string; items: ChecklistItem[]; autonomous: boolean }[]
+}

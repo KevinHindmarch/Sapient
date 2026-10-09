@@ -251,10 +251,33 @@ def _maybe_autonomous_execute(
     portfolio_id: int,
     persisted_signals: list[dict],
 ) -> list[dict]:
-    """Admit durable proposals only; central policy applies to every signal."""
+    """Admit durable proposals only; central policy applies to every signal.
+
+    With paper trading on, autonomous proposals become paper orders only if the
+    user also allowed automatic paper orders; otherwise they wait for approval.
+    """
+    from core.tws import paper
+    if paper.active():
+        results: list[dict] = []
+        if not paper.get_binding()["autonomous_allowed"]:
+            for sig in persisted_signals:
+                results.append({"signal_id": sig["id"], "status": "awaiting_approval",
+                                "detail": "Automatic paper orders are off; approve it in the AI Inbox."})
+            return results
+        for sig in persisted_signals:
+            try:
+                order = paper.admit(paper.signal_order(sig, "ai_autonomous"), user_id)
+                results.append({"signal_id": sig["id"], "paper_order_id": order["id"], "status": order["state"],
+                                "execution_enabled": True})
+            except paper.PaperError as e:
+                AIAuditService.log(user_id=user_id, event_type="autonomous_failed", portfolio_id=portfolio_id,
+                                   signal_id=sig["id"], payload={"symbol": sig["symbol"], "action": sig["action"],
+                                                                 "error": str(e), "code": e.code})
+                results.append({"signal_id": sig["id"], "status": "failed", "error": str(e)})
+        return results
     from core.execution_safety import IntentService, signal_request
     service = IntentService()
-    results: list[dict] = []
+    results = []
     for sig in persisted_signals:
         try:
             intent = service.admit(user_id, signal_request(user_id, sig, origin="ai_autonomous"))
