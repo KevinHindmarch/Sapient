@@ -179,7 +179,8 @@ class RebalanceTests(Helpers, PaperTestCase):
                 again = client.post(f"/api/portfolio/{traded}/execute-rebalance", headers=auth,
                                     json={"legs": [leg], "idempotency_key": key}).json()
                 self.assertEqual((again["queued"], again["results"][0]["code"]), (0, "order_open"))
-            plan = client.get(f"/api/portfolio/{traded}/rebalance-plan", headers=auth).json()
+            with mock.patch("core.ledger.latest_prices", return_value={"BHP.AX": 40.0}):  # no Yahoo in tests
+                plan = client.get(f"/api/portfolio/{traded}/rebalance-plan", headers=auth).json()
             self.assertEqual(plan["legs"], [])                       # the open order's stock is left out
             self.assertIn("still working in TWS", plan["notes"])
             self.sql("UPDATE paper_orders SET state='CANCELLED'")
