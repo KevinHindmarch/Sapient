@@ -100,7 +100,12 @@ if (mode === 'fresh') {
   await page.waitForSelector("text=You're all set, CI Tester!")
   await shot('wizard-done')
   await page.click('button:has-text("Open Sapient")')
-  const profileAfter = await api('/profile')
+  // The wizard saves when "Open Sapient" is clicked: wait for that save instead of racing it.
+  let profileAfter = await api('/profile')
+  for (let i = 0; i < 50 && !profileAfter.onboarded; i++) {
+    await new Promise((r) => setTimeout(r, 200))
+    profileAfter = await api('/profile')
+  }
   check(profileAfter.onboarded && profileAfter.display_name === 'CI Tester' && profileAfter.theme === 'dark',
     'wizard saved name and theme')
 }
