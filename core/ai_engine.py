@@ -130,13 +130,12 @@ def _fit_order(candidate: dict, *, held_value: float, total_value: float, cash: 
     price = float(candidate["price_at_signal"])
     qty = math.floor(float(candidate["quantity"]) + 1e-9)
     notes = []
-    if binding:
+    if binding and candidate["action"] == "BUY":  # money limits are for buying only (user decision 2026-10-09)
         gap = 1 + float(binding["max_price_gap_pct"]) / 100.0
         fits = math.floor(float(binding["max_order_value"]) / (price * gap) + 1e-9)
         if fits < qty:
             qty = fits
-            notes.append(f"limited to your A${float(binding['max_order_value']):,.0f} per-order limit"
-                         + ("; the rest at the next check" if candidate["action"] == "SELL" else ""))
+            notes.append(f"limited to your A${float(binding['max_order_value']):,.0f} per-order limit")
     if candidate["action"] == "BUY":
         if cash is not None:
             affordable = math.floor(max(cash, 0.0) / (price * 1.01) + 1e-9)

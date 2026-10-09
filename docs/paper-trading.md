@@ -110,3 +110,5 @@ explicit authorisation after a paper trial).
 - Broker messages for another API client's order id (or another permId) are ignored.
 - Market-data refusals (354, 10089, 10090, 10091, 10168, 10186, 10197) are
   explained instead of "no price in time".
+
+- Limits apply to buying only (user decision 2026-10-09); see docs/live-trading.md.

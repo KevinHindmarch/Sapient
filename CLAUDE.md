@@ -35,7 +35,8 @@ Paper trading authorised by the user on 2026-10-09 for their TWS **paper**
 account (DUT146393) using **delayed prices with cautious limit orders**.
 Live (real-money) trading was requested by the user on 2026-10-09 (account
 U29239702, real-time prices only, per-portfolio semi/fully automatic, limits
-A$1,000/order and A$5,000/day to start). The code exists but stays locked until
+A$1,000/order and A$5,000/day to start; these limits apply to buys only —
+user decision 2026-10-09 — so exits can sell a whole holding). The code exists but stays locked until
 the user ticks the live authorisation in the app; never bypass that.
 
 ## Current state (October 2026)

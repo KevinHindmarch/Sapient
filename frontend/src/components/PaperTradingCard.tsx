@@ -64,11 +64,14 @@ export default function PaperTradingCard({ status, account, paperConfirmed, onCh
 
   const limitFields = (
     <div className="grid sm:grid-cols-2 gap-4">
-      <LimitField label="Most per order (A$)" help={`Sapient refuses bigger ${word} orders.`} step={100}
+      <p className="sm:col-span-2 text-xs theme-text-secondary">These limits apply to <strong>buying</strong>. Selling
+        (including stop-loss and take-profit) can sell a whole holding at once, but only shares Sapient bought for
+        that portfolio.</p>
+      <LimitField label="Most per order (A$)" help={`Sapient refuses bigger ${word} buys (sells aren't limited).`} step={100}
         value={limits.max_order_value} onChange={(v) => set('max_order_value', v)} />
-      <LimitField label="Orders per day" help={`Counts every ${word} order Sapient queues.`} value={limits.max_orders_per_day}
+      <LimitField label="Orders per day" help={`Counts ${word} buys only.`} value={limits.max_orders_per_day}
         onChange={(v) => set('max_orders_per_day', Math.round(v))} />
-      <LimitField label="Most per day (A$)" help={`Total value of the day's ${word} orders.`} step={500}
+      <LimitField label="Most per day (A$)" help={`Total value of the day's ${word} buys.`} step={500}
         value={limits.max_value_per_day} onChange={(v) => set('max_value_per_day', v)} />
       <LimitField label="Price check (%)" help={`Max gap between TWS's ${live ? 'real-time' : 'delayed'} price and Yahoo's before Sapient refuses.`}
         step={0.5} value={limits.max_price_gap_pct} onChange={(v) => set('max_price_gap_pct', v)} />

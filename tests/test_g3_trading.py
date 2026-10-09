@@ -5,6 +5,7 @@ import unittest
 from unittest import mock
 
 from core import ai_engine
+from core.tws import paper
 from core.database import AITradingSettingsService
 
 import test_paper
@@ -26,9 +27,8 @@ class FitOrderTests(unittest.TestCase):
         qty, note = self.fit("BUY", 20, 100)                      # 20 x 100 x 1.02 > 1000
         self.assertEqual(qty, 9.0)
         self.assertIn("per-order limit", note)
-        qty, note = self.fit("SELL", 20, 100)
-        self.assertEqual(qty, 9.0)
-        self.assertIn("rest at the next check", note)
+        qty, note = self.fit("SELL", 20, 100)                     # limits are for buying only
+        self.assertEqual((qty, note), (20.0, None))
 
     def test_buys_fit_the_cash_and_the_stock_weight_cap(self):
         self.assertEqual(self.fit("BUY", 9, 100, cash=350)[0], 3.0)
@@ -36,6 +36,26 @@ class FitOrderTests(unittest.TestCase):
         self.assertEqual(qty, 2.0)
         self.assertIn("40%", note)
         self.assertEqual(self.fit("BUY", 9, 100, held_value=8000)[0], 0.0)
+
+
+class SellsAreNotMoneyLimitedTests(Helpers, PaperTestCase):
+    """User decision 2026-10-09: per-order, daily and count limits apply to buys only."""
+
+    def setUp(self):
+        super().setUp()
+        self.authorise(max_order_value=300, max_value_per_day=300, max_orders_per_day=1)
+        self.pid = self.portfolio(("BHP.AX", 0, 40, 1.0), environment="paper")
+        entry = paper.admit({"origin": "entry", "idempotency_key": "e", "symbol": "BHP.AX", "side": "BUY",
+                             "quantity": 5, "reference_price": "40", "portfolio_id": self.pid}, self.user["id"])
+        self.submitted(entry["id"], 950)
+        self.fill(self.executor(), entry["id"], "e.01", "5", "40")         # the account snapshot holds 10 BHP
+
+    def test_a_whole_holding_can_be_sold_past_the_buy_limits(self):
+        sell = self.order(key="s", symbol="BHP.AX", side="SELL", quantity=5, price="40", portfolio_id=self.pid)
+        self.assertEqual(sell["state"], "QUEUED")      # the entry buy used today's only order; sells don't count
+        self.refused("daily_order_limit", self.order, key="b", symbol="CBA.AX", quantity=1, price="45")
+        self.refused("portfolio_shares", self.order, key="s2", symbol="BHP.AX", side="SELL", quantity=1,
+                     price="40", portfolio_id=self.pid)                    # still only what it bought
 
 
 class ScanTests(Helpers, PaperTestCase):
