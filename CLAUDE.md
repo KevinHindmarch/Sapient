@@ -23,9 +23,10 @@ are manual — published with the **Release** workflow (Actions → Release → 
 workflow, version X.Y.Z) to GitHub Releases, installed either by running the
 new `Sapient-Setup-X.Y.Z.exe` (in-place upgrade, data kept) or via Settings →
 Updates (electron-updater, user-initiated only, differential download). The
-repository is private, so the in-app updater uses a read-only fine-grained
-GitHub token the user pastes once (encrypted with DPAPI via safeStorage, main
-process only). No Replit data is migrated. The old `.replit` key was fake.
+repository stays **public** for now, so updates need no token; an optional
+read-only GitHub token (DPAPI-encrypted via safeStorage, main process only)
+is supported in case it is made private later. No Replit data is migrated.
+The old `.replit` key was fake.
 
 ## Current state (October 2026)
 

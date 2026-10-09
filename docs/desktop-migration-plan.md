@@ -354,9 +354,9 @@ for development and CI.
 - **Q5** Manual updates from GitHub Releases: Release workflow publishes
   `Sapient-Setup-X.Y.Z.exe` + `latest.yml` + blockmap; the installer upgrades in
   place and keeps data; Settings → Updates checks/downloads/installs only when
-  the user clicks (differential download when possible). The repository is
-  private, so the updater uses a user-supplied read-only GitHub token stored with
-  Windows DPAPI.
+  the user clicks (differential download when possible). The repository stays
+  public for now (no token needed); an optional read-only GitHub token stored with
+  Windows DPAPI is supported if it is made private later.
 - **Q6** Windows 10/11 x64. **Q7** TWS (paper first), TWS 10.51.1a reported.
 - The committed `.replit` key was a fake value.
 
