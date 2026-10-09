@@ -1,6 +1,6 @@
 # Sapient codebase reference
 
-Snapshot of the code as of 2026-10-09 (commit 88d984d). Summary and rules live in
+Snapshot of the code as of 2026-10-09 (after migration Phases A–B). Summary and rules live in
 [CLAUDE.md](../CLAUDE.md). Line numbers drift; re-check before relying on them.
 
 ## 1. Backend entry (`backend/main.py`)
@@ -93,30 +93,36 @@ Device-token routes (`X-Device-Token`, no JWT): POST `/worker/{uid}/lease`,
 GET `/worker/{uid}/commands` (halt/cancel only), POST `/worker/{uid}/evidence`
 (quarantined). Not called by the frontend.
 
-## 4. Database (PostgreSQL, `core/database.py`)
+## 4. Database (SQLite, `core/db.py` + `core/migrations.py`)
 
-psycopg2, new connection per call, `RealDictCursor`, commit/rollback context
-manager. Legacy DDL in `init_database()` (never called by the app):
+One file at `SAPIENT_DB_PATH` or `<SAPIENT_DATA_DIR>/sapient.db` (default
+`%APPDATA%\Sapient` on Windows). Every connection: WAL, `synchronous=FULL`,
+`foreign_keys=ON`, 30 s busy timeout. Every transaction is `BEGIN IMMEDIATE`
+(serializes writers; replaces Postgres `FOR UPDATE`/`FOR SHARE`/advisory locks).
+`Cursor.execute` rewrites `%s` to `?` when params are given and converts params
+with `core.db.adapt` (datetime → UTC text, Decimal → string, dict/list → JSON).
 
-- `users`, `portfolios` (+`ai_mode`, `market`), `portfolio_positions`,
-  `portfolio_snapshots`, `position_snapshots`, `transactions`, `strategy_signals`
-  (unused), `broker_credentials`, `ai_trading_settings`, `ai_signals`
-  (`rationale JSONB`), `broker_orders`, `ai_audit_log` (`payload JSONB`).
+Declared column types choose converters on read: `UTCTIME` (aware UTC
+datetime), `ISODATE`, `DECNUM` (legacy amounts, numeric affinity → Decimal),
+`DECTEXT` (exact decimal strings → Decimal, used for safety notional/quantity),
+`JSONTEXT`, `FLAG` (bool). Names are Sapient-specific because pandas re-registers
+sqlite3's global "timestamp"/"date" converters. SQL helpers registered per
+connection: `clock_timestamp()`/`now()` (canonical UTC text) and the exact
+aggregate `decimal_sum()`.
 
-Safety schema (`core/safety_migrations.py` SCHEMA_V1, applied only by tests with
-`disposable=True`, advisory-locked, checksummed in `safety_schema_versions`):
-`safety_accounts` (policy/facts JSONB, halted, recovery_required, epoch),
-`safety_intents`, `safety_reservations`, `safety_batches` (`intent_ids TEXT[]`),
-`safety_outbox`, `safety_audit`, `safety_pairings`, `safety_devices`
-(`scopes TEXT[]`), `safety_leases`, `safety_evidence`.
+Migrations (append-only, checksummed in `schema_versions`), applied by
+`migrate()` at API startup after an automatic backup into `<data>/backups/`;
+a changed checksum or an unknown newer version refuses to start:
 
-Postgres-only constructs to translate for SQLite: `%s` placeholders,
-RealDictCursor, `psycopg2.extras.Json`, `UniqueViolation`, SERIAL/BIGSERIAL,
-JSONB, TEXT[] + `= ANY()`, NUMERIC/DECIMAL exactness, TIMESTAMPTZ,
-`ADD COLUMN IF NOT EXISTS`, `FOR UPDATE`/`FOR SHARE`, `pg_advisory_xact_lock`,
-`clock_timestamp()`, `NOW()`, `date_trunc`, `AT TIME ZONE`, `::date`,
-`interval '…'`, `to_regclass`. Already portable to modern SQLite: `ON CONFLICT`,
-`RETURNING` (3.35+), aggregate `FILTER` (3.30+), partial indexes, CHECK.
+1. `core` — `users`, `portfolios` (incl. `ai_mode`, `market`),
+   `portfolio_positions`, `portfolio_snapshots`, `position_snapshots`,
+   `transactions`, `strategy_signals` (unused), `broker_credentials`,
+   `ai_trading_settings`, `ai_signals` (`rationale` JSON), `broker_orders`,
+   `ai_audit_log` (`payload` JSON).
+2. `safety` — `safety_accounts` (policy/facts JSON, halted, recovery_required,
+   epoch), `safety_intents`, `safety_reservations`, `safety_batches`
+   (`intent_ids` JSON array), `safety_outbox`, `safety_audit`, `safety_pairings`,
+   `safety_devices` (`scopes` JSON array), `safety_leases`, `safety_evidence`.
 
 ## 5. Safety admission (`core/execution_safety.py`)
 
@@ -162,8 +168,10 @@ off and reports `broker_confirmed: False`.
 - `test_safety_spec.py` — 46 tests of the SQLite reference model (S01–S32).
 - `test_tws_readonly_check.py` — 11 offline tests with mocked ibapi.
 - `test_execution_safety_unit.py` — normalisation + simulation client refusal.
-- `test_execution_safety_postgres.py` — ~29 tests on a disposable PG16 cluster
-  (initdb/pg_ctl, crash + pg_dump restore). Needs PostgreSQL binaries.
+- `test_execution_safety_sqlite.py` — 36 tests on disposable SQLite files:
+  concurrent claims/limits/reservations via threads, trigger-injected rollback,
+  a subprocess killed mid-transaction, backup/restore, migration checksums,
+  upgrade backups, exact decimals, immunity to global sqlite3 registrations.
 
 ## 9. TWS probe (`scripts/tws_readonly_check.py`)
 

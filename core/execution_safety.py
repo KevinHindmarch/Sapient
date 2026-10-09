@@ -1,18 +1,20 @@
 """Durable phase-one admission control. No broker transport or fill projector.
 
 Only explicitly identified simulation accounts can be admitted. Queueing is not
-execution; outbox commands cannot be sent by this phase. All mutations serialize
-on the user/account row, including halt, admission, pairing and lease changes.
+execution; outbox commands cannot be sent by this phase. Every service call runs
+in one SQLite BEGIN IMMEDIATE transaction, so all mutations (halt, admission,
+pairing, lease changes) are serialized.
 """
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 import hashlib
 import json
 import secrets
 import uuid
 
-from psycopg2.extras import RealDictCursor, Json
+from core import db
+from core.migrations import SAFETY_SCHEMA_VERSION
 
 
 class SafetyError(ValueError):
@@ -112,11 +114,11 @@ class IntentService:
         conn = self.connection_factory()
         try:
             with conn:
-                with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                    cur.execute("SELECT to_regclass('safety_schema_versions') AS schema")
-                    if not cur.fetchone()["schema"]:
+                with conn.cursor() as cur:
+                    if not db.table_exists(cur, "schema_versions"):
                         raise SafetyError("migration_required", "Safety schema unavailable; execution refused")
-                    cur.execute("SELECT version FROM safety_schema_versions WHERE version=1")
+                    cur.execute("SELECT version FROM schema_versions WHERE version=%s",
+                                (SAFETY_SCHEMA_VERSION,))
                     if not cur.fetchone():
                         raise SafetyError("migration_required")
                     yield cur
@@ -124,7 +126,7 @@ class IntentService:
             conn.close()
 
     def _account(self, cur, user_id):
-        cur.execute("SELECT * FROM safety_accounts WHERE user_id=%s FOR UPDATE", (user_id,))
+        cur.execute("SELECT * FROM safety_accounts WHERE user_id=%s", (user_id,))
         account = cur.fetchone()
         if not account:
             raise SafetyError("account_not_bound", "Explicit simulation account binding required")
@@ -133,12 +135,11 @@ class IntentService:
     @staticmethod
     def _audit(cur, user_id, kind, payload):
         cur.execute("INSERT INTO safety_audit(user_id,kind,payload) VALUES(%s,%s,%s)",
-                    (user_id, kind, Json(payload)))
+                    (user_id, kind, payload))
 
     @staticmethod
     def _now(cur):
-        cur.execute("SELECT clock_timestamp() AS now")
-        return cur.fetchone()["now"]
+        return datetime.now(timezone.utc)
 
     def bind_simulation(self, user_id):
         """Explicit simulation identity; never converts a legacy paper/live row."""
@@ -163,13 +164,13 @@ class IntentService:
             self._invalidate(cur, user_id)
             cur.execute("""UPDATE safety_accounts SET policy=%s,facts=%s,
                 facts_until=%s,policy_revision=policy_revision+1,halted=TRUE,recovery_required=TRUE
-                WHERE user_id=%s""", (Json(policy), Json(facts), expiry, user_id))
+                WHERE user_id=%s""", (policy, facts, expiry, user_id))
             self._audit(cur, user_id, "simulation_policy_configured", {})
 
     def _owned(self, cur, user_id, r, *, retry=False):
         portfolio = None
         if r["portfolio_id"]:
-            cur.execute("SELECT * FROM portfolios WHERE id=%s AND user_id=%s FOR SHARE",
+            cur.execute("SELECT * FROM portfolios WHERE id=%s AND user_id=%s",
                         (r["portfolio_id"], user_id))
             portfolio = cur.fetchone()
             if not portfolio:
@@ -177,7 +178,7 @@ class IntentService:
             if portfolio.get("status", "active") != "active":
                 raise SafetyError("portfolio_inactive")
         if r["signal_id"]:
-            cur.execute("SELECT * FROM ai_signals WHERE id=%s AND user_id=%s FOR UPDATE",
+            cur.execute("SELECT * FROM ai_signals WHERE id=%s AND user_id=%s",
                         (r["signal_id"], user_id))
             signal = cur.fetchone()
             if not signal or signal["portfolio_id"] != r["portfolio_id"]:
@@ -212,7 +213,7 @@ class IntentService:
                      "cash_settled", "fx_fresh", "loss_ok", "news_ok", "volatility_ok", "sector_ok"):
             if f.get(flag) is not True:
                 raise SafetyError("protection_unavailable", flag + " is missing or unsafe")
-        cur.execute("SELECT * FROM ai_trading_settings WHERE user_id=%s FOR SHARE", (user_id,))
+        cur.execute("SELECT * FROM ai_trading_settings WHERE user_id=%s", (user_id,))
         legacy = cur.fetchone()
         if not legacy:
             raise SafetyError("legacy_policy_missing")
@@ -239,17 +240,16 @@ class IntentService:
             cap = min(cap, allocated * pct / 100)
         if notional > cap:
             raise SafetyError("trade_limit")
-        cur.execute("""SELECT count(*) AS n,coalesce(sum(notional),0) AS turnover
-            FROM safety_intents WHERE user_id=%s
-            AND (created_at AT TIME ZONE 'UTC')::date=(%s AT TIME ZONE 'UTC')::date""", (user_id, now))
+        today = now.astimezone(timezone.utc).date().isoformat()
+        cur.execute("""SELECT count(*) AS n,coalesce(decimal_sum(notional),'0') AS turnover
+            FROM safety_intents WHERE user_id=%s AND substr(created_at,1,10)=%s""", (user_id, today))
         day = cur.fetchone()
         # Preserve the legacy user-wide scope conservatively. Historical orders
         # are evidence, never rewritten/reclassified into the simulation account.
         cur.execute("""SELECT count(*) AS n,
-            coalesce(sum(abs(quantity)*coalesce(limit_price,avg_fill_price)),0) AS turnover,
+            coalesce(decimal_sum(abs(quantity)*coalesce(limit_price,avg_fill_price)),'0') AS turnover,
             count(*) FILTER(WHERE limit_price IS NULL AND avg_fill_price IS NULL) AS unknown
-            FROM broker_orders WHERE user_id=%s
-            AND submitted_at::date=(%s AT TIME ZONE 'UTC')::date""", (user_id, now))
+            FROM broker_orders WHERE user_id=%s AND substr(submitted_at,1,10)=%s""", (user_id, today))
         historical = cur.fetchone()
         if historical["unknown"]:
             raise SafetyError("legacy_turnover_unknown")
@@ -257,12 +257,13 @@ class IntentService:
             raise SafetyError("daily_trade_limit")
         turnover_pct = min(_decimal(p.get("max_daily_turnover_pct"), "turnover_pct", zero=True),
                            _decimal(legacy["max_daily_turnover_pct"], "legacy_turnover_pct", zero=True))
-        if day["turnover"] + historical["turnover"] + notional > nav * turnover_pct / 100:
+        if (Decimal(day["turnover"]) + Decimal(historical["turnover"]) + notional
+                > nav * turnover_pct / 100):
             raise SafetyError("daily_turnover_limit")
-        cur.execute("""SELECT coalesce(sum(notional) FILTER(WHERE side='BUY'),0) AS cash,
-            coalesce(sum(quantity) FILTER(WHERE side='SELL' AND symbol=%s),0) AS shares
+        cur.execute("""SELECT coalesce(decimal_sum(notional) FILTER(WHERE side='BUY'),'0') AS cash,
+            coalesce(decimal_sum(quantity) FILTER(WHERE side='SELL' AND symbol=%s),'0') AS shares
             FROM safety_reservations WHERE user_id=%s AND released_at IS NULL""", (r["symbol"], user_id))
-        reserved = cur.fetchone()
+        reserved = {k: Decimal(v) for k, v in cur.fetchone().items()}
         if r["side"] == "BUY" and reserved["cash"] + notional > cash:
             raise SafetyError("insufficient_cash")
         if r["side"] == "SELL":
@@ -295,14 +296,14 @@ class IntentService:
                 payload,payload_hash,portfolio_id,signal_id,policy_revision,incarnation,notional,expires_at)
                 VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *""",
                         (intent_id, user_id, account["account_id"], r["origin"], r["idempotency_key"],
-                         Json(r), digest, r["portfolio_id"], r["signal_id"], account["policy_revision"],
+                         r, digest, r["portfolio_id"], r["signal_id"], account["policy_revision"],
                          account["incarnation"], notional, _date(r["expires_at"])))
             result = dict(cur.fetchone())
             cur.execute("""INSERT INTO safety_reservations(intent_id,user_id,symbol,side,quantity,notional)
                 VALUES(%s,%s,%s,%s,%s,%s)""",
                         (intent_id, user_id, r["symbol"], r["side"], r["quantity"], notional))
             cur.execute("INSERT INTO safety_outbox(user_id,intent_id,kind,payload) VALUES(%s,%s,'intent',%s)",
-                        (user_id, intent_id, Json({"intent_id": intent_id, "execution_enabled": False})))
+                        (user_id, intent_id, {"intent_id": intent_id, "execution_enabled": False}))
             if r["signal_id"]:
                 cur.execute("""UPDATE ai_signals SET status='claimed',decided_at=clock_timestamp(),
                     decided_by='intent_service' WHERE id=%s""", (r["signal_id"],))
@@ -341,8 +342,8 @@ class IntentService:
             results = [scoped.admit(user_id, r) for r in normalized]
             if not old:
                 for intent in results:
-                    cur.execute("SELECT 1 FROM safety_batches WHERE user_id=%s AND %s=ANY(intent_ids)",
-                                (user_id, intent["id"]))
+                    cur.execute("""SELECT 1 FROM safety_batches, json_each(safety_batches.intent_ids) AS leg
+                        WHERE safety_batches.user_id=%s AND leg.value=%s""", (user_id, intent["id"]))
                     if cur.fetchone():
                         raise SafetyError("leg_already_in_batch")
                 cur.execute("""INSERT INTO safety_batches(user_id,idempotency_key,payload_hash,intent_ids)
@@ -370,7 +371,7 @@ class IntentService:
                 updated_at=clock_timestamp() WHERE user_id=%s""", (user_id,))
             cur.execute("UPDATE portfolios SET ai_mode='off' WHERE user_id=%s", (user_id,))
             cur.execute("""INSERT INTO safety_outbox(user_id,kind,payload)
-                VALUES(%s,'halt',%s)""", (user_id, Json({"cancel_owned_orders": True})))
+                VALUES(%s,'halt',%s)""", (user_id, {"cancel_owned_orders": True}))
             cur.execute("""SELECT count(*) AS n FROM broker_orders WHERE user_id=%s
                 AND status IN ('Submitted','PendingSubmit','PreSubmitted','PartiallyFilled')""", (user_id,))
             residual = cur.fetchone()["n"]
@@ -431,7 +432,7 @@ class IntentService:
                             (intent_id,))
             else:
                 cur.execute("INSERT INTO safety_outbox(user_id,intent_id,kind,payload) VALUES(%s,%s,'cancel',%s)",
-                            (user_id, intent_id, Json({"broker_confirmed": False})))
+                            (user_id, intent_id, {"broker_confirmed": False}))
             self._audit(cur, user_id, "cancel_requested", {"intent_id": intent_id})
             return {"intent_id": intent_id, "cancel_requested": True, "broker_confirmed": False}
 
@@ -445,8 +446,8 @@ class IntentService:
         with self._tx() as cur:
             self._account(cur, user_id)
             cur.execute("""INSERT INTO safety_pairings(token_hash,user_id,expires_at)
-                VALUES(%s,%s,clock_timestamp()+interval '5 minutes')""",
-                        (hashlib.sha256(token.encode()).hexdigest(), user_id))
+                VALUES(%s,%s,%s)""", (hashlib.sha256(token.encode()).hexdigest(), user_id,
+                                      self._now(cur) + timedelta(minutes=5)))
             self._audit(cur, user_id, "pairing_created", {})
         return {"pairing_token": token, "expires_in": 300}
 
@@ -500,9 +501,9 @@ class IntentService:
                 # Expiry is NOT isolation evidence. No takeover or expired renewal.
                 raise SafetyError("executor_isolation_required")
             cur.execute("""INSERT INTO safety_leases(user_id,device_id,epoch,incarnation,expires_at)
-                VALUES(%s,%s,%s,%s,clock_timestamp()+interval '30 seconds')
+                VALUES(%s,%s,%s,%s,%s)
                 ON CONFLICT(user_id) DO UPDATE SET expires_at=EXCLUDED.expires_at RETURNING *""",
-                        (user_id, d["id"], a["epoch"], incarnation))
+                        (user_id, d["id"], a["epoch"], incarnation, self._now(cur) + timedelta(seconds=30)))
             result = dict(cur.fetchone())
             result["execution_enabled"] = False
             return result
@@ -562,7 +563,7 @@ class IntentService:
             cur.execute("""INSERT INTO safety_evidence(user_id,device_id,journal_incarnation,sequence,
                 payload_hash,payload) VALUES(%s,%s,%s,%s,%s,%s)""",
                         (user_id, d["id"], evidence["journal_incarnation"], evidence["sequence"],
-                         digest, Json(evidence)))
+                         digest, evidence))
             self._audit(cur, user_id, "evidence_quarantined",
                         {"device_id": d["id"], "sequence": evidence["sequence"]})
             return {"stored": True, "sequence": evidence["sequence"], "quarantined": True}

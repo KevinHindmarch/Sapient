@@ -11,12 +11,11 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-# Suites that need no external services. The PostgreSQL suite needs initdb/pg_ctl
-# and is run separately until the SQLite port replaces it.
 TEST_PATTERNS = (
     "test_safety_spec.py",
     "test_tws_readonly_check.py",
     "test_execution_safety_unit.py",
+    "test_execution_safety_sqlite.py",
 )
 
 

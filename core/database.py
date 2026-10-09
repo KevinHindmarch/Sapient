@@ -2,248 +2,27 @@
 Core database module
 """
 
-import os
-import psycopg2
-from psycopg2.extras import RealDictCursor
-from contextlib import contextmanager
 from datetime import datetime
 import bcrypt
+import sqlite3
+
+from core import db
 
 
 def get_db_connection():
-    """Get a database connection using environment variables."""
-    return psycopg2.connect(
-        host=os.environ.get('PGHOST'),
-        database=os.environ.get('PGDATABASE'),
-        user=os.environ.get('PGUSER'),
-        password=os.environ.get('PGPASSWORD'),
-        port=os.environ.get('PGPORT')
-    )
+    """Open a connection to the local SQLite database."""
+    return db.connect()
 
 
-@contextmanager
 def get_db_cursor(dict_cursor=True):
-    """Context manager for database cursor."""
-    conn = get_db_connection()
-    try:
-        cursor_factory = RealDictCursor if dict_cursor else None
-        cur = conn.cursor(cursor_factory=cursor_factory)
-        yield cur, conn
-        conn.commit()
-    except Exception as e:
-        conn.rollback()
-        raise e
-    finally:
-        cur.close()
-        conn.close()
+    """Context manager yielding ``(cursor, connection)`` in one write transaction."""
+    return db.transaction()
 
 
 def init_database():
-    """Initialize database schema."""
-    conn = get_db_connection()
-    cur = conn.cursor()
-    
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id SERIAL PRIMARY KEY,
-            email VARCHAR(255) UNIQUE NOT NULL,
-            password_hash VARCHAR(255) NOT NULL,
-            display_name VARCHAR(100),
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            last_login TIMESTAMP
-        );
-        
-        CREATE TABLE IF NOT EXISTS portfolios (
-            id SERIAL PRIMARY KEY,
-            user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-            name VARCHAR(255) NOT NULL,
-            mode VARCHAR(20) DEFAULT 'auto',
-            initial_investment DECIMAL(15, 2) NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            status VARCHAR(20) DEFAULT 'active',
-            benchmark_symbol VARCHAR(20) DEFAULT '^AXJO',
-            expected_return DECIMAL(8, 4),
-            expected_volatility DECIMAL(8, 4),
-            expected_sharpe DECIMAL(8, 4),
-            expected_dividend_yield DECIMAL(8, 4),
-            risk_tolerance VARCHAR(20) DEFAULT 'moderate',
-            market VARCHAR(10) DEFAULT 'ASX'
-        );
-        
-        CREATE TABLE IF NOT EXISTS portfolio_positions (
-            id SERIAL PRIMARY KEY,
-            portfolio_id INTEGER REFERENCES portfolios(id) ON DELETE CASCADE,
-            symbol VARCHAR(20) NOT NULL,
-            quantity DECIMAL(15, 6) NOT NULL,
-            avg_cost DECIMAL(15, 4) NOT NULL,
-            weight_at_creation DECIMAL(8, 4),
-            allocation_amount DECIMAL(15, 2),
-            status VARCHAR(20) DEFAULT 'active',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            closed_at TIMESTAMP
-        );
-        
-        CREATE TABLE IF NOT EXISTS portfolio_snapshots (
-            id SERIAL PRIMARY KEY,
-            portfolio_id INTEGER REFERENCES portfolios(id) ON DELETE CASCADE,
-            snapshot_date DATE NOT NULL,
-            total_value DECIMAL(15, 2),
-            cash_balance DECIMAL(15, 2) DEFAULT 0,
-            daily_return DECIMAL(8, 4),
-            cumulative_return DECIMAL(8, 4),
-            benchmark_return DECIMAL(8, 4),
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(portfolio_id, snapshot_date)
-        );
-        
-        CREATE TABLE IF NOT EXISTS position_snapshots (
-            id SERIAL PRIMARY KEY,
-            portfolio_position_id INTEGER REFERENCES portfolio_positions(id) ON DELETE CASCADE,
-            snapshot_date DATE NOT NULL,
-            price DECIMAL(15, 4),
-            market_value DECIMAL(15, 2),
-            return_pct DECIMAL(8, 4),
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(portfolio_position_id, snapshot_date)
-        );
-        
-        CREATE TABLE IF NOT EXISTS transactions (
-            id SERIAL PRIMARY KEY,
-            portfolio_id INTEGER REFERENCES portfolios(id) ON DELETE CASCADE,
-            portfolio_position_id INTEGER REFERENCES portfolio_positions(id) ON DELETE SET NULL,
-            txn_type VARCHAR(20) NOT NULL,
-            symbol VARCHAR(20) NOT NULL,
-            quantity DECIMAL(15, 6) NOT NULL,
-            price DECIMAL(15, 4) NOT NULL,
-            total_amount DECIMAL(15, 2) NOT NULL,
-            fees DECIMAL(10, 2) DEFAULT 0,
-            notes TEXT,
-            txn_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        
-        CREATE TABLE IF NOT EXISTS strategy_signals (
-            id SERIAL PRIMARY KEY,
-            portfolio_id INTEGER REFERENCES portfolios(id) ON DELETE CASCADE,
-            symbol VARCHAR(20) NOT NULL,
-            indicator VARCHAR(20) NOT NULL,
-            signal VARCHAR(20) NOT NULL,
-            indicator_value DECIMAL(15, 4),
-            price_at_signal DECIMAL(15, 4),
-            generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            acknowledged BOOLEAN DEFAULT FALSE,
-            notes TEXT
-        );
-        
-        CREATE INDEX IF NOT EXISTS idx_portfolios_user_id ON portfolios(user_id);
-        CREATE INDEX IF NOT EXISTS idx_positions_portfolio_id ON portfolio_positions(portfolio_id);
-        CREATE INDEX IF NOT EXISTS idx_snapshots_portfolio_date ON portfolio_snapshots(portfolio_id, snapshot_date);
-        CREATE INDEX IF NOT EXISTS idx_transactions_portfolio_id ON transactions(portfolio_id);
-        CREATE INDEX IF NOT EXISTS idx_signals_portfolio_id ON strategy_signals(portfolio_id);
-
-        -- ============================================================
-        -- IBKR / AI trading additions
-        -- ============================================================
-
-        ALTER TABLE portfolios
-            ADD COLUMN IF NOT EXISTS ai_mode VARCHAR(20) DEFAULT 'off';
-
-        CREATE TABLE IF NOT EXISTS broker_credentials (
-            id SERIAL PRIMARY KEY,
-            user_id INTEGER REFERENCES users(id) ON DELETE CASCADE UNIQUE,
-            broker VARCHAR(20) NOT NULL DEFAULT 'IBKR',
-            environment VARCHAR(10) NOT NULL DEFAULT 'paper',
-            consumer_key_enc TEXT NOT NULL,
-            access_token_enc TEXT NOT NULL,
-            access_token_secret_enc TEXT NOT NULL,
-            private_key_pem_enc TEXT NOT NULL,
-            consumer_key_masked VARCHAR(64),
-            connected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            last_test_at TIMESTAMP,
-            last_test_ok BOOLEAN
-        );
-
-        CREATE TABLE IF NOT EXISTS ai_trading_settings (
-            id SERIAL PRIMARY KEY,
-            user_id INTEGER REFERENCES users(id) ON DELETE CASCADE UNIQUE,
-            mode VARCHAR(20) DEFAULT 'off',
-            rsi_buy_threshold DECIMAL(5, 2) DEFAULT 30.00,
-            rsi_sell_threshold DECIMAL(5, 2) DEFAULT 70.00,
-            max_trade_pct DECIMAL(5, 2) DEFAULT 5.00,
-            max_daily_trades INTEGER DEFAULT 8,
-            max_daily_turnover_pct DECIMAL(5, 2) DEFAULT 20.00,
-            sector_cap_pct DECIMAL(5, 2) DEFAULT 35.00,
-            paper_only BOOLEAN DEFAULT TRUE,
-            breaker_on_loss_pct DECIMAL(5, 2) DEFAULT 3.00,
-            breaker_on_volatility_spike BOOLEAN DEFAULT TRUE,
-            breaker_on_news_event BOOLEAN DEFAULT TRUE,
-            last_kill_switch_at TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-
-        CREATE TABLE IF NOT EXISTS ai_signals (
-            id SERIAL PRIMARY KEY,
-            user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-            portfolio_id INTEGER REFERENCES portfolios(id) ON DELETE CASCADE,
-            symbol VARCHAR(20) NOT NULL,
-            company_name VARCHAR(255),
-            market VARCHAR(10) DEFAULT 'ASX',
-            action VARCHAR(8) NOT NULL,
-            quantity DECIMAL(15, 6) NOT NULL,
-            price_at_signal DECIMAL(15, 4) NOT NULL,
-            confidence DECIMAL(4, 3) DEFAULT 0.5,
-            rationale JSONB DEFAULT '{}'::jsonb,
-            rule_summary TEXT,
-            status VARCHAR(20) DEFAULT 'pending',
-            generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            decided_at TIMESTAMP,
-            decided_by VARCHAR(20),
-            expires_at TIMESTAMP,
-            executed_order_id INTEGER
-        );
-
-        CREATE TABLE IF NOT EXISTS broker_orders (
-            id SERIAL PRIMARY KEY,
-            user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-            portfolio_id INTEGER REFERENCES portfolios(id) ON DELETE SET NULL,
-            signal_id INTEGER REFERENCES ai_signals(id) ON DELETE SET NULL,
-            broker_order_id VARCHAR(64) NOT NULL,
-            broker VARCHAR(20) DEFAULT 'IBKR',
-            account_id VARCHAR(32),
-            symbol VARCHAR(20) NOT NULL,
-            side VARCHAR(8) NOT NULL,
-            quantity DECIMAL(15, 6) NOT NULL,
-            order_type VARCHAR(8) NOT NULL,
-            limit_price DECIMAL(15, 4),
-            status VARCHAR(20) DEFAULT 'Submitted',
-            filled_qty DECIMAL(15, 6) DEFAULT 0,
-            avg_fill_price DECIMAL(15, 4),
-            fees DECIMAL(10, 2) DEFAULT 0,
-            sim BOOLEAN DEFAULT TRUE,
-            submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-
-        CREATE TABLE IF NOT EXISTS ai_audit_log (
-            id SERIAL PRIMARY KEY,
-            user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-            event_type VARCHAR(40) NOT NULL,
-            portfolio_id INTEGER,
-            signal_id INTEGER,
-            order_id INTEGER,
-            payload JSONB DEFAULT '{}'::jsonb,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_ai_signals_user_status ON ai_signals(user_id, status);
-        CREATE INDEX IF NOT EXISTS idx_ai_signals_portfolio ON ai_signals(portfolio_id);
-        CREATE INDEX IF NOT EXISTS idx_broker_orders_user ON broker_orders(user_id, submitted_at DESC);
-        CREATE INDEX IF NOT EXISTS idx_broker_orders_portfolio ON broker_orders(portfolio_id);
-        CREATE INDEX IF NOT EXISTS idx_audit_user_created ON ai_audit_log(user_id, created_at DESC);
-    """)
-    
-    conn.commit()
-    cur.close()
-    conn.close()
+    """Create or upgrade the schema (backs up an existing database first)."""
+    from core.migrations import migrate
+    return migrate()
 
 
 class UserService:
@@ -275,7 +54,7 @@ class UserService:
                 user = dict(cur.fetchone())
                 conn.commit()
                 return {'success': True, 'user': user}
-            except psycopg2.errors.UniqueViolation:
+            except sqlite3.IntegrityError:
                 return {'success': False, 'error': 'Email already registered'}
             except Exception as e:
                 return {'success': False, 'error': str(e)}
@@ -892,11 +671,10 @@ class AITradingSettingsService:
         sets.append("updated_at = CURRENT_TIMESTAMP")
         params.append(user_id)
         with get_db_cursor() as (cur, conn):
-            # Match admission's account -> settings lock order. Policy changes
+            # Same write transaction as admission (BEGIN IMMEDIATE). Policy changes
             # never leave old queued authority or reservations usable.
-            cur.execute("SELECT to_regclass('safety_accounts') AS safety_table")
-            if cur.fetchone()["safety_table"]:
-                cur.execute("SELECT user_id FROM safety_accounts WHERE user_id=%s FOR UPDATE", (user_id,))
+            if db.table_exists(cur, "safety_accounts"):
+                cur.execute("SELECT user_id FROM safety_accounts WHERE user_id=%s", (user_id,))
                 if cur.fetchone():
                     from core.execution_safety import IntentService
                     IntentService()._invalidate(cur, user_id)

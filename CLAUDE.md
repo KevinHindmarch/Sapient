@@ -19,16 +19,17 @@ are genuinely theirs (trading authorisation, money, licences, accounts).
 
 ## Current state (October 2026)
 
-- Runs today as **React SPA + FastAPI + PostgreSQL**. It was built on Replit;
-  Replit files and the legacy Streamlit app have been removed (Phase A). Target:
-  a self-contained **Electron + React/Tailwind desktop app on Windows** talking
-  to Yahoo Finance and a locally installed **IBKR Trader Workstation (TWS)**.
-  Phases B onward of the migration plan are not yet implemented.
+- Runs today as **React SPA + FastAPI + a local SQLite file**. It was built on
+  Replit with PostgreSQL; Replit, Streamlit (Phase A) and PostgreSQL (Phase B)
+  are gone. Target: a self-contained **Electron + React/Tailwind desktop app on
+  Windows** talking to Yahoo Finance and a locally installed **IBKR Trader
+  Workstation (TWS)**. Phases C onward of the migration plan are not yet done.
 - **No real broker orders are possible.** `core/ibkr_client.py` is a simulation stub
   (`place_order`/`cancel_order` always raise). All order paths go through the
   durable "safety admission" in `core/execution_safety.py`, which only records
-  simulation intents and is unreachable on a fresh database (safety tables are
-  never migrated at startup). Do not claim live/paper readiness.
+  simulation intents; accounts start halted/recovery-locked and there is no
+  HTTP route to configure simulation facts, so ordinary submissions are refused.
+  Do not claim live/paper readiness.
 - Research features (optimisers, scanners, indicators, portfolio bookkeeping)
   work end-to-end.
 
@@ -70,16 +71,19 @@ backend/             FastAPI app (thin HTTP layer)
   routers/           auth, stocks, portfolio, indicators, broker, ai_trading, execution
   schemas/           pydantic request/response models
 core/                Service layer (all business logic)
-  database.py        psycopg2 (PG* env vars), legacy schema DDL, User/Portfolio/
-                     BrokerCredential/AITradingSettings/AISignal/BrokerOrder/AIAudit services
+  db.py              SQLite connection layer (WAL, FULL sync, BEGIN IMMEDIATE,
+                     %s→? placeholders, Sapient-specific column-type converters)
+  migrations.py      versioned checksummed schema (1 core, 2 safety); migrate()
+                     runs at API startup after backing up the DB
+  database.py        User/Portfolio/BrokerCredential/AITradingSettings/AISignal/
+                     BrokerOrder/AIAudit services (SQL via core.db)
   stocks.py          StockDataService + static ASX200 (~299) and S&P 500 (~149) lists
   optimizer.py       PortfolioOptimizerService (scipy max-Sharpe, backtest, compare)
   fundamentals.py    FundamentalsService (yfinance .info/financials, threadpool scan)
   capm.py            CAPMService (beta vs ^AXJO, CAPM expected returns)
   indicators.py      TechnicalIndicatorService (RSI/MACD/BB/SMA/EMA/Stoch, RSI screener)
   ai_engine.py       scan_portfolio → signals; autonomous → IntentService.admit
-  execution_safety.py IntentService: the single order admission boundary (Postgres)
-  safety_migrations.py versioned SCHEMA_V1 for safety_* tables (tests only)
+  execution_safety.py IntentService: the single order admission boundary
   ibkr_client.py     simulation-only client + unused OAuth1 signing helpers
   crypto.py          Fernet with BROKER_ENCRYPTION_KEY
 safety_spec/         stdlib-only SQLite reference model of the TWS worker protocol
@@ -95,7 +99,7 @@ server.py / run_dev.py  temporary launchers (127.0.0.1) until the Electron shell
 ```text
 Browser (React SPA) --axios /api + Bearer JWT--> FastAPI routers
    routers --> core services --> yfinance (Yahoo HTTP, no caching)
-                             --> PostgreSQL via psycopg2 (new connection per call)
+                             --> SQLite file via core.db (new connection per call)
    order-like routes (broker/orders, ai approve, rebalance, autonomous engine)
         --> core/execution_safety.IntentService.admit[_batch]
         --> safety_* tables (intents, reservations, outbox, audit) — never a broker
@@ -104,11 +108,15 @@ Browser (React SPA) --axios /api + Bearer JWT--> FastAPI routers
 
 - Public (no auth): `/api/stocks/*`, `/api/indicators/*`, optimise/backtest/
   fundamentals/CAPM under `/api/portfolio/*`. Everything user-owned needs JWT.
-- Env vars read: `PGHOST PGDATABASE PGUSER PGPASSWORD PGPORT SESSION_SECRET
-  CORS_ORIGINS BROKER_ENCRYPTION_KEY PORT`. `DATABASE_URL` is NOT read.
-- Startup does no DB work (`backend/main.py` lifespan is empty by design);
-  `core.database.init_database()` and `core.safety_migrations.apply_migrations`
-  are never called by the app.
+- Env vars read: `SAPIENT_DATA_DIR` (default %APPDATA%\Sapient /
+  ~/.local/share/sapient), `SAPIENT_DB_PATH`, `SAPIENT_SKIP_MIGRATIONS`,
+  `SESSION_SECRET`, `CORS_ORIGINS`, `BROKER_ENCRYPTION_KEY`, `PORT`.
+- API startup runs `core.migrations.migrate()`: backup to `<data>/backups/`
+  before upgrading, refuses changed checksums or a newer schema.
+- Database rules: money/quantities in safety tables are exact decimal strings
+  (DECTEXT, `decimal_sum()`), timestamps UTC text (UTCTIME). Never rely on
+  sqlite3's global adapters/converters (pandas overrides them); use `core.db`.
+  Never edit an applied migration; append a new one.
 
 ## Commands
 
@@ -125,7 +133,7 @@ cd frontend && npm run build && cd .. && python server.py
 python -m unittest discover -s tests -p 'test_safety_spec.py' -v          # SQLite model, fast
 python -m unittest discover -s tests -p 'test_tws_readonly_check.py' -v   # mocked ibapi
 python -m unittest discover -s tests -p 'test_execution_safety_unit.py' -v
-python -m unittest discover -s tests -p 'test_execution_safety_postgres.py' -v  # needs initdb/pg_ctl 16
+python -m unittest discover -s tests -p 'test_execution_safety_sqlite.py' -v  # admission on real SQLite
 python -m compileall -q core backend
 cd frontend && npm run build && npm run lint
 ```

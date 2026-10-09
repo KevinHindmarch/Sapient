@@ -75,7 +75,7 @@ def _signals_today_count(user_id: int) -> int:
             SELECT COUNT(*) AS c
             FROM ai_signals
             WHERE user_id = %s
-              AND generated_at >= date_trunc('day', NOW() AT TIME ZONE 'UTC')
+              AND generated_at >= date('now')
             """,
             (user_id,),
         )
@@ -91,7 +91,7 @@ def _turnover_today(user_id: int) -> float:
             SELECT COALESCE(SUM(quantity * price_at_signal), 0) AS v
             FROM ai_signals
             WHERE user_id = %s
-              AND generated_at >= date_trunc('day', NOW() AT TIME ZONE 'UTC')
+              AND generated_at >= date('now')
             """,
             (user_id,),
         )
@@ -102,7 +102,7 @@ def _turnover_today(user_id: int) -> float:
             SELECT COALESCE(SUM(filled_qty * COALESCE(avg_fill_price, limit_price, 0)), 0) AS v
             FROM broker_orders
             WHERE user_id = %s
-              AND submitted_at >= date_trunc('day', NOW() AT TIME ZONE 'UTC')
+              AND submitted_at >= date('now')
             """,
             (user_id,),
         )
