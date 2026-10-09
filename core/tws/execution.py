@@ -532,9 +532,12 @@ class PaperExecutor:
                 cur.execute("UPDATE portfolio_positions SET quantity=%s, avg_cost=%s WHERE id=%s",
                             (float(new_qty), float(new_cost), position_id))
             else:
-                cur.execute("""INSERT INTO portfolio_positions(portfolio_id, symbol, quantity, avg_cost, allocation_amount)
-                               VALUES (%s,%s,%s,%s,%s) RETURNING id""",
-                            (pid, symbol, float(delta), float(price), float(delta * price)))
+                # A stock bought back after an exit keeps its target weight.
+                cur.execute("""INSERT INTO portfolio_positions(portfolio_id, symbol, quantity, avg_cost, allocation_amount,
+                                 weight_at_creation)
+                               VALUES (%s,%s,%s,%s,%s,(SELECT weight_at_creation FROM portfolio_positions
+                                 WHERE portfolio_id=%s AND symbol=%s ORDER BY id DESC LIMIT 1)) RETURNING id""",
+                            (pid, symbol, float(delta), float(price), float(delta * price), pid, symbol))
                 position_id = cur.fetchone()["id"]
         elif position:  # SELL
             realised = delta * (price - old_cost)

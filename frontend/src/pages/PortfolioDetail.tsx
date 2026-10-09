@@ -128,6 +128,27 @@ export default function PortfolioDetail() {
     }
   }
 
+  const [scanning, setScanning] = useState(false)
+  const handleScanNow = async () => {
+    if (!id) return
+    setScanning(true)
+    try {
+      const res = await aiApi.scan(Number(id))
+      const created = (res.data?.new_signals || []).length
+      if (created) {
+        toast.success(`${created} new proposal(s). Review them in the AI Inbox.`, {
+          action: { label: 'Open', onClick: () => navigate('/ai-inbox') } })
+      } else {
+        const why = (res.data?.skipped || [])[0]?.reason
+        toast.info(why ? `No new proposals (${why}).` : 'No new proposals: nothing meets your rules right now.')
+      }
+    } catch (e: unknown) {
+      toast.error(apiErrorMessage(e, 'The check could not run'))
+    } finally {
+      setScanning(false)
+    }
+  }
+
   const openRebalanceDrawer = async () => {
     if (!id) return
     setShowRebalanceDrawer(true)
@@ -560,6 +581,12 @@ export default function PortfolioDetail() {
             </p>
           </div>
         </div>
+        <div className="flex flex-wrap items-center gap-2">
+        <button onClick={handleScanNow} disabled={scanning || aiMode === 'off'} data-testid="scan-now"
+          title={aiMode === 'off' ? 'Turn AI Trading on for this portfolio first' : 'Check this portfolio against your rules now'}
+          className="btn-secondary text-sm flex items-center gap-1.5 disabled:opacity-50">
+          {scanning ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Activity className="w-4 h-4" />} Check now
+        </button>
         <div className={`inline-flex p-1 rounded-xl border ${isDark ? 'bg-slate-900/50 border-slate-700/50' : 'bg-slate-100 border-slate-200'}`}>
           {(['off', 'suggestions', 'autonomous'] as const).map((m) => {
             const active = aiMode === m
@@ -582,6 +609,7 @@ export default function PortfolioDetail() {
               </button>
             )
           })}
+        </div>
         </div>
       </div>
 

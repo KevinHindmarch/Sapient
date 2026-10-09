@@ -290,7 +290,7 @@ export default function AITradingSettings() {
 
         <ToggleRow
           label="Check automatically during market hours"
-          description="Off: checks only run when you press Scan on a portfolio."
+          description="Off: checks only run when you press “Check now” on a portfolio."
           checked={settings.scheduler_enabled}
           onChange={(v) => update('scheduler_enabled', v)}
         />
