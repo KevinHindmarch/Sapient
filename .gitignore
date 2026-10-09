@@ -9,3 +9,4 @@ release/
 *.db-shm
 packaging/dist/
 packaging/build/
+docs/ibkr-tws-api/
