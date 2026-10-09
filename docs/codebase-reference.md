@@ -103,7 +103,9 @@ changes, sdk_folder), GET `/sdk` (where the official IBKR API was found),
 GET `/status` (state + `worker_running`, stale after 60 s), POST `/test`
 (queues a Test connection, 503 if the connector isn't running), GET
 `/test/{id}`, POST `/reconnect`, GET `/account` (latest summary, positions,
-open orders, executions snapshots).
+open orders, executions snapshots), GET `/compare/{portfolio_id}` (model
+holdings vs the latest TWS positions: match / differs / model_only /
+broker_only; symbols mapped BHP→BHP.AX for AUD/ASX, "BRK B"→BRK-B).
 
 ## 4. Database (SQLite, `core/db.py` + `core/migrations.py`)
 
@@ -241,6 +243,7 @@ off and reports `broker_confirmed: False`.
 - `test_strategy.py` — calendar (DST, holidays, early close), rules, sizing,
   settings halting rules, scheduler (once per window, missed windows, close cap,
   failures isolated, crash not retried, expiry).
+- `test_strategy.py` also covers broker symbol mapping and the compare route.
 - `test_upgrades.py` — fresh install vs upgrade from 0.1.0 (data kept, no
   wizard, one backup) and future migrations keep profile + TWS settings.
 - `desktop/e2e/smoke.mjs --mode fresh|seed|upgraded` — packaged-app checks;

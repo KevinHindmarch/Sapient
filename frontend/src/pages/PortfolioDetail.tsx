@@ -5,6 +5,7 @@ import { Portfolio, Position, Transaction } from '../types'
 import { toast } from 'sonner'
 import { ArrowLeft, TrendingUp, TrendingDown, DollarSign, Pencil, Trash2, Plus, X, Search, RefreshCw, Sparkles, Send, Zap, Activity, Link2 } from 'lucide-react'
 import HelpTooltip from '../components/HelpTooltip'
+import BrokerCompareCard from '../components/BrokerCompareCard'
 import { format } from 'date-fns'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, LineChart, Line, XAxis, YAxis, CartesianGrid } from 'recharts'
 import { differenceInDays } from 'date-fns'
@@ -897,6 +898,8 @@ export default function PortfolioDetail() {
           )}
         </div>
       </div>
+
+      {id && <BrokerCompareCard portfolioId={Number(id)} />}
 
       <div className="card">
         <h2 className={`text-lg font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'} mb-4`}>Recent Transactions</h2>

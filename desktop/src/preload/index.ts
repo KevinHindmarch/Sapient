@@ -14,6 +14,11 @@ contextBridge.exposeInMainWorld('sapient', {
   apiToken: config.apiToken,
   appVersion: config.appVersion,
   openExternal: (url: string) => ipcRenderer.send('sapient:open-external', url),
+  desktop: {
+    settings: () => ipcRenderer.invoke('sapient:desktop-settings'),
+    setCloseToTray: (value: boolean) => ipcRenderer.invoke('sapient:set-close-to-tray', value),
+    emergencyStop: () => ipcRenderer.invoke('sapient:emergency-stop'),
+  },
   updates: {
     check: () => ipcRenderer.invoke('sapient:update-check'),
     download: () => ipcRenderer.invoke('sapient:update-download'),

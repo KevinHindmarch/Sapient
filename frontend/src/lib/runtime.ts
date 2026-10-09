@@ -18,6 +18,11 @@ export interface SapientBridge {
   apiToken: string
   appVersion?: string
   openExternal?: (url: string) => void
+  desktop?: {
+    settings: () => Promise<{ closeToTray: boolean }>
+    setCloseToTray: (value: boolean) => Promise<{ closeToTray: boolean }>
+    emergencyStop: () => Promise<{ ok: boolean; message: string }>
+  }
   updates?: {
     check: () => Promise<UpdateCheck>
     download: () => Promise<{ downloaded: boolean }>

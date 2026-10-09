@@ -203,6 +203,16 @@ export const twsApi = {
   testResult: (id: number) => api.get<TwsCommand>(`/tws/test/${id}`),
   reconnect: () => api.post('/tws/reconnect'),
   account: () => api.get<TwsAccount>('/tws/account'),
+  compare: (portfolioId: number) => api.get<BrokerCompare>(`/tws/compare/${portfolioId}`),
+}
+
+export interface BrokerCompare {
+  state: string
+  account: string | null
+  positions_taken_at: string | null
+  available: boolean
+  rows: { symbol: string; model_quantity: number | null; broker_quantity: number | null; difference: number;
+    status: 'match' | 'differs' | 'model_only' | 'broker_only' }[]
 }
 
 export interface AISettingsUpdate {

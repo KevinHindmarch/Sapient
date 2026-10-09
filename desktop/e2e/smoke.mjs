@@ -137,6 +137,12 @@ check(sched?.running && sched.markets.length === 2, `scheduler is running (${sch
 // Attached, not visible: a narrow window hides the sidebar (the pill is then in the menu).
 await page.waitForSelector('[data-testid="tws-pill"]', { state: 'attached', timeout: 30_000 })
 
+if (!(await portfolioNames()).includes(PORTFOLIO)) await savePortfolio()
+const saved = (await api('/portfolio/list')).find((p) => p.name === PORTFOLIO)
+await page.evaluate((id) => { location.hash = `#/portfolios/${id}` }, saved.id)
+await page.waitForSelector('[data-testid="broker-compare"]', { timeout: 30_000 })
+check(true, 'portfolio page compares Sapient holdings with IBKR (read-only)')
+
 await page.evaluate(() => { location.hash = '#/brokerage' })
 await page.waitForSelector('[data-testid="tws-status"]', { timeout: 30_000 })
 await page.waitForSelector('text=Step 3 — Test the connection', { timeout: 30_000 })
@@ -148,6 +154,8 @@ await page.waitForSelector('h2:has-text("Local profile")', { timeout: 30_000 })
 await page.waitForSelector('[data-testid="data-dir"]', { timeout: 30_000 })
 const shownDir = (await page.locator('[data-testid="data-dir"]').textContent())?.trim()
 check(shownDir === userData, `Settings shows the data folder (${shownDir})`)
+await page.waitForSelector('[data-testid="background-card"]', { timeout: 30_000 })
+check(true, 'Settings offers keeping Sapient running in the tray')
 check(fs.existsSync(path.join(userData, 'sapient.db')), 'database created in the data folder')
 const version = await app.evaluate(({ app }) => app.getVersion())
 await page.waitForSelector(`text=You have Sapient ${version}`, { timeout: 30_000 })
@@ -157,10 +165,7 @@ await page.evaluate(() => { window.location.href = 'https://example.com' }).catc
 await page.waitForTimeout(1000)
 check(page.url().startsWith('app://sapient/'), 'navigation to external sites is blocked')
 
-if (mode === 'fresh' && !(await portfolioNames()).includes(PORTFOLIO)) {
-  await savePortfolio()
-  check((await portfolioNames()).includes(PORTFOLIO), `saved "${PORTFOLIO}" for the upgrade check`)
-}
+if (mode === 'fresh') check((await portfolioNames()).includes(PORTFOLIO), `saved "${PORTFOLIO}" for the upgrade check`)
 
 await app.close()
 await new Promise((resolve) => setTimeout(resolve, 3000))

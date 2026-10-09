@@ -325,6 +325,9 @@ const SignalCard: React.FC<SignalCardProps> = ({
     minsAgo < 1 ? 'just now' : minsAgo < 60 ? `${minsAgo} min ago` : `${Math.round(minsAgo / 60)}h ago`
 
   const reasons = buildReasons(signal)
+  // Unanswered proposals expire at this time and are never acted on.
+  const answerBy = signal.expires_at ? new Date(signal.expires_at) : null
+  const minsLeft = answerBy ? Math.round((answerBy.getTime() - Date.now()) / 60000) : null
 
   return (
     <div className="card relative overflow-hidden">
@@ -374,6 +377,16 @@ const SignalCard: React.FC<SignalCardProps> = ({
           <span className="text-xs theme-text-muted font-medium flex items-center gap-1">
             <Clock className="w-3 h-3" /> {ago}
           </span>
+          {isPending && answerBy && minsLeft !== null && (
+            <span
+              className={`text-xs font-medium ${minsLeft <= 5 ? 'text-red-500' : 'theme-text-muted'}`}
+              title="If you don't answer by then, the proposal expires and nothing happens."
+              data-testid="answer-by"
+            >
+              answer by {answerBy.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              {minsLeft > 0 && minsLeft < 120 ? ` (${minsLeft} min)` : ''}
+            </span>
+          )}
           <span className="badge badge-sky flex items-center gap-1.5">
             <BrainCircuit className="w-3.5 h-3.5" />
             {Math.round((signal.confidence || 0) * 100)}%
