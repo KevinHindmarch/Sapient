@@ -29,6 +29,12 @@ class AITradingSettings(BaseModel):
     breaker_on_volatility_spike: bool = True
     breaker_on_news_event: bool = True
     last_kill_switch_at: datetime | None = None
+    stop_loss_pct: float | None = Field(None, description="Sell if price falls this % below average cost (None = off)")
+    take_profit_pct: float | None = Field(None, description="Sell if price rises this % above average cost (None = off)")
+    approval_timeout_minutes: int = 15
+    scheduler_enabled: bool = False
+    check_after_open_minutes: int = 15
+    check_before_close_minutes: int = 30
 
 
 class AITradingSettingsUpdate(BaseModel):
@@ -43,6 +49,12 @@ class AITradingSettingsUpdate(BaseModel):
     breaker_on_loss_pct: float | None = Field(None, ge=0.5, le=20)
     breaker_on_volatility_spike: bool | None = None
     breaker_on_news_event: bool | None = None
+    stop_loss_pct: float | None = Field(None, ge=0, le=50, description="0 turns the stop-loss off")
+    take_profit_pct: float | None = Field(None, ge=0, le=500, description="0 turns take-profit off")
+    approval_timeout_minutes: int | None = Field(None, ge=1, le=1440)
+    scheduler_enabled: bool | None = None
+    check_after_open_minutes: int | None = Field(None, ge=0, le=300)
+    check_before_close_minutes: int | None = Field(None, ge=5, le=300)
 
 
 class KillSwitchResponse(BaseModel):

@@ -8,6 +8,7 @@ dependencies = [
     "numpy>=2.3.3",
     "pandas>=2.3.3",
     "protobuf>=5.29",  # imported by recent official IBKR TWS API versions (loaded from the user's install)
+    "tzdata>=2024.1",  # time zones for market hours (Windows has no system tz database)
     "scipy>=1.16.2",
     "uvicorn>=0.40.0",
     "yfinance>=0.2.66",

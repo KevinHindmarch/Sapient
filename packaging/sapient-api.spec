@@ -14,7 +14,7 @@ hiddenimports = (
     # versions import protobuf, so ship it inside the engine.
     + collect_submodules("google.protobuf")
 )
-datas = collect_data_files("yfinance") + collect_data_files("curl_cffi")
+datas = collect_data_files("yfinance") + collect_data_files("curl_cffi") + collect_data_files("tzdata")
 
 a = Analysis(
     [ROOT + "/backend/desktop_main.py"],

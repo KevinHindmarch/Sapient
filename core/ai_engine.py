@@ -38,6 +38,7 @@ from core.database import (
     get_db_cursor,
 )
 from core.indicators import TechnicalIndicatorService
+from core.strategy import rules
 
 
 SIGNAL_TTL_HOURS = 12
@@ -162,6 +163,7 @@ def _build_signal(
     analysis: dict,
     settings: dict,
     portfolio_value: float,
+    expires_at: datetime | None = None,
 ) -> dict | None:
     """
     Decide whether the analyzed position should yield a BUY/SELL signal.
@@ -182,41 +184,37 @@ def _build_signal(
     rsi_buy = float(settings.get("rsi_buy_threshold") or 30)
     rsi_sell = float(settings.get("rsi_sell_threshold") or 70)
 
-    action: str | None = None
-    confidence = 0.5
-    rule_summary = ""
-
     qty_held = float(position.get("quantity") or 0)
+    avg_cost = float(position.get("avg_cost") or 0)
     symbol = position["symbol"]
+    max_trade_pct = float(settings.get("max_trade_pct") or 5.0)
 
-    if rsi_value <= rsi_buy:
-        action = "BUY"
+    decision = rules.exit_decision(rsi=rsi_value, price=current_price, avg_cost=avg_cost,
+                                   held=qty_held, settings=settings)
+    if decision is None:
+        decision = rules.entry_decision(rsi=rsi_value, settings=settings)
+    if decision is None:
+        return None
+
+    action = decision.action
+    if action == "BUY":
         depth = max(0.0, (rsi_buy - rsi_value) / max(rsi_buy, 1.0))
         confidence = min(0.95, 0.55 + depth * 0.4 + (0.05 if macd_signal in ("buy", "bullish") else 0.0))
-        max_trade_pct = float(settings.get("max_trade_pct") or 5.0)
-        target_value = portfolio_value * (max_trade_pct / 100.0) * min(1.0, 0.6 + depth)
+        target_value = portfolio_value * (max_trade_pct / 100.0) * decision.fraction
         quantity = max(round(target_value / current_price, 4), 0.0001)
-        rule_summary = (
-            f"RSI {rsi_value:.1f} ≤ buy threshold {rsi_buy:.1f}"
-            + (" + MACD bullish" if macd_signal in ("buy", "bullish") else "")
-        )
-    elif rsi_value >= rsi_sell and qty_held > 0:
-        action = "SELL"
-        depth = max(0.0, (rsi_value - rsi_sell) / max(100.0 - rsi_sell, 1.0))
-        confidence = min(0.95, 0.55 + depth * 0.4 + (0.05 if macd_signal in ("sell", "bearish") else 0.0))
-        max_trade_pct = float(settings.get("max_trade_pct") or 5.0)
-        max_value_to_sell = portfolio_value * (max_trade_pct / 100.0)
-        max_qty_by_value = max_value_to_sell / current_price if current_price else qty_held
-        sell_fraction = min(1.0, 0.4 + depth * 0.6)
-        quantity = round(min(qty_held * sell_fraction, max_qty_by_value, qty_held), 4)
+        confirm = " + MACD bullish" if macd_signal in ("buy", "bullish") else ""
+    else:
+        if decision.rule == "rsi_overbought":
+            depth = max(0.0, (rsi_value - rsi_sell) / max(100.0 - rsi_sell, 1.0))
+            confidence = min(0.95, 0.55 + depth * 0.4 + (0.05 if macd_signal in ("sell", "bearish") else 0.0))
+        else:
+            confidence = 0.9  # stop-loss / take-profit are rule hits, not estimates
+        max_qty_by_value = portfolio_value * (max_trade_pct / 100.0) / current_price
+        quantity = round(min(qty_held * decision.fraction, max_qty_by_value, qty_held), 4)
         if quantity <= 0:
             return None
-        rule_summary = (
-            f"RSI {rsi_value:.1f} ≥ sell threshold {rsi_sell:.1f}"
-            + (" + MACD bearish" if macd_signal in ("sell", "bearish") else "")
-        )
-    else:
-        return None
+        confirm = " + MACD bearish" if decision.rule == "rsi_overbought" and macd_signal in ("sell", "bearish") else ""
+    rule_summary = decision.reason + confirm
 
     rationale: dict[str, Any] = {
         "rsi": rsi_value,
@@ -226,6 +224,8 @@ def _build_signal(
         "trend": analysis.get("trend"),
         "current_price": current_price,
         "portfolio_value": portfolio_value,
+        "rule": decision.rule,
+        "avg_cost": avg_cost,
     }
     bb = (indicators.get("bollinger") or {})
     if bb:
@@ -242,7 +242,7 @@ def _build_signal(
         "confidence": float(round(confidence, 3)),
         "rationale": rationale,
         "rule_summary": rule_summary,
-        "expires_at": datetime.now(timezone.utc) + timedelta(hours=SIGNAL_TTL_HOURS),
+        "expires_at": expires_at or datetime.now(timezone.utc) + timedelta(hours=SIGNAL_TTL_HOURS),
     }
 
 
@@ -272,10 +272,12 @@ def _maybe_autonomous_execute(
     return results
 
 
-def scan_portfolio(user_id: int, portfolio_id: int) -> dict:
+def scan_portfolio(user_id: int, portfolio_id: int, expires_at: datetime | None = None) -> dict:
     """
     Run a fresh signal scan for one portfolio. Honours the user's AI settings
     and the portfolio's per-portfolio ai_mode (most-restrictive wins).
+    `expires_at` sets the answer-by time for new proposals (the scheduler uses
+    the approval timeout, capped at market close); default 12 hours.
     """
     details = PortfolioService.get_portfolio_details(portfolio_id, user_id)
     if not details:
@@ -339,6 +341,7 @@ def scan_portfolio(user_id: int, portfolio_id: int) -> dict:
             analysis=analysis,
             settings=settings,
             portfolio_value=portfolio_value,
+            expires_at=expires_at,
         )
         if candidate is None:
             continue

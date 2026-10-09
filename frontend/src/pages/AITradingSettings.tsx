@@ -1,5 +1,5 @@
 import { useEffect, useState, ReactNode } from 'react'
-import { aiApi, AISettingsUpdate, apiErrorMessage } from '../lib/api'
+import { aiApi, AISettingsUpdate, apiErrorMessage, SchedulerStatus } from '../lib/api'
 import { useTheme } from '../lib/theme'
 import { toast } from 'sonner'
 import {
@@ -28,6 +28,12 @@ interface Settings {
   breaker_on_volatility_spike: boolean
   breaker_on_news_event: boolean
   last_kill_switch_at: string | null
+  stop_loss_pct: number | null
+  take_profit_pct: number | null
+  approval_timeout_minutes: number
+  scheduler_enabled: boolean
+  check_after_open_minutes: number
+  check_before_close_minutes: number
 }
 
 const DEFAULTS: Settings = {
@@ -43,7 +49,16 @@ const DEFAULTS: Settings = {
   breaker_on_volatility_spike: true,
   breaker_on_news_event: true,
   last_kill_switch_at: null,
+  stop_loss_pct: null,
+  take_profit_pct: null,
+  approval_timeout_minutes: 15,
+  scheduler_enabled: false,
+  check_after_open_minutes: 15,
+  check_before_close_minutes: 30,
 }
+
+const when = (value: string | null | undefined) =>
+  value ? new Date(value).toLocaleString(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' }) : '—'
 
 export default function AITradingSettings() {
   const { theme } = useTheme()
@@ -55,9 +70,14 @@ export default function AITradingSettings() {
   const [saving, setSaving] = useState(false)
   const [showKillModal, setShowKillModal] = useState(false)
   const [killing, setKilling] = useState(false)
+  const [scheduler, setScheduler] = useState<SchedulerStatus | null>(null)
 
   useEffect(() => {
     load()
+    const refresh = () => aiApi.scheduler().then((res) => setScheduler(res.data)).catch(() => undefined)
+    refresh()
+    const timer = window.setInterval(refresh, 30000)
+    return () => window.clearInterval(timer)
   }, [])
 
   const load = async () => {
@@ -96,6 +116,13 @@ export default function AITradingSettings() {
         breaker_on_loss_pct: settings.breaker_on_loss_pct,
         breaker_on_volatility_spike: settings.breaker_on_volatility_spike,
         breaker_on_news_event: settings.breaker_on_news_event,
+        // 0 tells the API to switch a rule off
+        stop_loss_pct: settings.stop_loss_pct ?? 0,
+        take_profit_pct: settings.take_profit_pct ?? 0,
+        approval_timeout_minutes: settings.approval_timeout_minutes,
+        scheduler_enabled: settings.scheduler_enabled,
+        check_after_open_minutes: settings.check_after_open_minutes,
+        check_before_close_minutes: settings.check_before_close_minutes,
       }
       const res = await aiApi.updateSettings(payload)
       const data = { ...DEFAULTS, ...res.data }
@@ -245,6 +272,103 @@ export default function AITradingSettings() {
             onChange={(v) => update('paper_only', v)}
           />
         </div>
+      </section>
+
+      {/* Automatic checks and exit rules */}
+      <section className="card space-y-5" data-testid="ai-schedule">
+        <div>
+          <h2 className={`text-xl font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+            Automatic checks and exit rules
+          </h2>
+          <p className="text-sm theme-text-muted mt-1">
+            While the market is open, Sapient checks every portfolio that has AI Trading on: shortly after the
+            open and shortly before the close. It only creates proposals for the AI Inbox. Sapient must be running
+            and the PC awake.
+          </p>
+        </div>
+
+        <ToggleRow
+          label="Check automatically during market hours"
+          description="Off: checks only run when you press Scan on a portfolio."
+          checked={settings.scheduler_enabled}
+          onChange={(v) => update('scheduler_enabled', v)}
+        />
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+          <NumberField
+            label="First check (minutes after open)"
+            help="ASX opens 10:00 Sydney, US 9:30 New York"
+            value={settings.check_after_open_minutes}
+            min={0}
+            max={300}
+            step={5}
+            onChange={(v) => update('check_after_open_minutes', Math.round(v))}
+          />
+          <NumberField
+            label="Second check (minutes before close)"
+            help="ASX closes 16:00, US 16:00 local time"
+            value={settings.check_before_close_minutes}
+            min={5}
+            max={300}
+            step={5}
+            onChange={(v) => update('check_before_close_minutes', Math.round(v))}
+          />
+          <NumberField
+            label="Answer within (minutes)"
+            help="unanswered proposals expire and are never acted on"
+            value={settings.approval_timeout_minutes}
+            min={1}
+            max={1440}
+            step={5}
+            onChange={(v) => update('approval_timeout_minutes', Math.round(v))}
+          />
+          <NumberField
+            label="Stop-loss (%)"
+            help="propose selling if price falls this far below your average cost; 0 = off"
+            value={settings.stop_loss_pct ?? 0}
+            min={0}
+            max={50}
+            step={1}
+            onChange={(v) => update('stop_loss_pct', v > 0 ? v : null)}
+          />
+          <NumberField
+            label="Take-profit (%)"
+            help="propose selling if price rises this far above your average cost; 0 = off"
+            value={settings.take_profit_pct ?? 0}
+            min={0}
+            max={500}
+            step={5}
+            onChange={(v) => update('take_profit_pct', v > 0 ? v : null)}
+          />
+        </div>
+
+        {scheduler && (
+          <div className={`rounded-xl border p-4 text-sm space-y-2 ${isDark ? 'border-slate-700/50' : 'border-slate-200'}`}>
+            <p className="theme-text">
+              <strong>Status:</strong>{' '}
+              {scheduler.running ? scheduler.detail : 'Not running — the automatic checks run inside the Sapient desktop app.'}
+              {scheduler.running && scheduler.next_check_at && <> · next check {when(scheduler.next_check_at)}</>}
+            </p>
+            <div className="flex flex-wrap gap-4 theme-text-secondary">
+              {scheduler.markets.map((m) => (
+                <span key={m.code}>
+                  {m.name}: {m.open_now ? 'open now' : `opens ${when(m.next_open)}`}
+                  {!m.calendar_up_to_date && ' (holiday list needs an update)'}
+                </span>
+              ))}
+            </div>
+            {scheduler.recent_runs.length > 0 && (
+              <ul className="theme-text-secondary space-y-1">
+                {scheduler.recent_runs.slice(0, 5).map((r) => (
+                  <li key={`${r.portfolio_id}-${r.window_key}`}>
+                    {when(r.started_at)} · {r.portfolio_name} · {r.window_key.endsWith('after_open') ? 'after open' : 'before close'} ·{' '}
+                    {r.outcome === 'done' ? `${r.result?.new_signals ?? 0} new proposal(s)` : r.outcome}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
       </section>
 
       {/* Risk Guardrails */}

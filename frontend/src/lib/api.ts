@@ -217,12 +217,30 @@ export interface AISettingsUpdate {
   breaker_on_loss_pct?: number
   breaker_on_volatility_spike?: boolean
   breaker_on_news_event?: boolean
+  stop_loss_pct?: number
+  take_profit_pct?: number
+  approval_timeout_minutes?: number
+  scheduler_enabled?: boolean
+  check_after_open_minutes?: number
+  check_before_close_minutes?: number
+}
+
+export interface SchedulerStatus {
+  running: boolean
+  detail: string | null
+  heartbeat_at: string | null
+  next_check_at: string | null
+  markets: { code: string; name: string; open_now: boolean; next_open: string | null; calendar_up_to_date: boolean;
+    today: { open: string; close: string } | null }[]
+  recent_runs: { portfolio_id: number; portfolio_name: string; window_key: string; outcome: string;
+    result: { new_signals?: number; error?: string } | null; started_at: string; finished_at: string | null }[]
 }
 
 export const aiApi = {
   getSettings: () => api.get('/ai/settings'),
   updateSettings: (payload: AISettingsUpdate) => api.put('/ai/settings', payload),
   killSwitch: () => api.post('/ai/kill-switch'),
+  scheduler: () => api.get<SchedulerStatus>('/ai/scheduler'),
   listSignals: (status: string = 'pending') =>
     api.get(`/ai/signals?status=${status}`),
   approveSignal: (id: number) => api.post<{ intent: QueuedIntent; execution_enabled: false; message: string }>(`/ai/signals/${id}/approve`),

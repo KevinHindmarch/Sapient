@@ -86,7 +86,10 @@ The OAuth credential vault (`/credentials`, `/test`, `/account`) was removed.
 GET/PUT `/settings` (PUT also halts + invalidates the safety account),
 POST `/kill-switch` (IntentService.halt), GET `/signals?status&limit`,
 POST `/signals/{id}/approve` (202, admit origin ai_approval), `/reject`,
-`/snooze`, POST `/scan/{portfolio_id}` (ai_engine.scan_portfolio), GET `/audit`.
+`/snooze`, POST `/scan/{portfolio_id}` (ai_engine.scan_portfolio), GET `/audit`,
+GET `/scheduler` (running, detail, next check, ASX/US market hours, last 20 runs).
+Settings changes halt the safety account only for policy keys (mode,
+thresholds, guardrails), not for schedule or stop-loss/take-profit changes.
 
 ### `/api/execution`
 SafetyError → 409 `{code,message}`. POST `/simulation/bind`, GET `/intents`,
@@ -135,6 +138,11 @@ a changed checksum or an unknown newer version refuses to start:
 3. `tws` — `tws_settings` (single row; port 7497, client ID 71, disabled by
    default), `tws_status` (state, detail, heartbeat), `tws_snapshots`
    (kind → JSON), `tws_commands` (test_connection / reconnect queue with result).
+5. `strategy` — `ai_trading_settings` gains stop_loss_pct, take_profit_pct
+   (NULL = off), approval_timeout_minutes, scheduler_enabled,
+   check_after_open_minutes, check_before_close_minutes; `scheduler_runs`
+   (UNIQUE portfolio + window key, outcome running/done/failed/missed/abandoned),
+   `scheduler_status` (heartbeat, next check).
 4. `profile` — `users.theme` (NULL until saved, so upgrades keep the theme on
    screen) and `users.onboarded_at`; existing users are marked onboarded so an
    upgrade never re-runs the welcome wizard.
@@ -169,6 +177,14 @@ off and reports `broker_confirmed: False`.
 - `indicators.py`: RSI/MACD/SMA/EMA/Bollinger/Stochastic, 15-thread RSI screener.
 - `ai_engine.py`: RSI buy/sell with MACD confidence boost, 12h signal TTL,
   guardrails, autonomous → `IntentService.admit` (docstring still stale).
+- `strategy/`: `calendar.py` (ASX 10:00–16:00 Sydney, US 9:30–16:00 New York,
+  holidays/early closes for 2026–27; unknown years assume weekdays open and are
+  flagged), `rules.py` (exit: stop-loss → take-profit → RSI overbought; entry:
+  RSI oversold), `sizing.py` (weights + budget + trusted prices → whole shares,
+  cash buffer, top-up pass), `scheduler.py` (runs in the connector process
+  thread; two windows per trading day; only the latest missed window runs;
+  answer-by = approval timeout capped at market close; crashed runs are
+  abandoned, not retried; expires unanswered proposals every tick).
 - `ibkr_client.py`: `connection_status()` (reports the TWS connector state;
   `execution_enabled` always False) and an `IBKRClient` whose
   `place_order`/`cancel_order` always raise. No OAuth, no stored credentials.
@@ -222,6 +238,9 @@ off and reports `broker_confirmed: False`.
   upgrade backups, exact decimals, immunity to global sqlite3 registrations.
 - `test_tws.py` — scripted fake TWS: diagnostics, read-only transport against a
   fake ibapi package, worker states/commands.
+- `test_strategy.py` — calendar (DST, holidays, early close), rules, sizing,
+  settings halting rules, scheduler (once per window, missed windows, close cap,
+  failures isolated, crash not retried, expiry).
 - `test_upgrades.py` — fresh install vs upgrade from 0.1.0 (data kept, no
   wizard, one backup) and future migrations keep profile + TWS settings.
 - `desktop/e2e/smoke.mjs --mode fresh|seed|upgraded` — packaged-app checks;
