@@ -1,5 +1,12 @@
 # Phase-one application safety boundary
 
+> Update 2026-10-09 (desktop migration Phase B): storage moved from PostgreSQL
+> to a local SQLite file. Row locks became `BEGIN IMMEDIATE` transactions, the
+> safety schema is migration 2 in `core/migrations.py` and is applied at API
+> startup (after a backup), and the PostgreSQL suite was replaced by
+> `tests/test_execution_safety_sqlite.py`. The safety rules below are unchanged;
+> references to PostgreSQL describe the earlier implementation.
+
 The application now routes manual orders, AI approval, autonomous AI and reviewed
 rebalance batches through `core/execution_safety.py`. This is production-path
 software, not an import of the SQLite reference model. It **does not execute

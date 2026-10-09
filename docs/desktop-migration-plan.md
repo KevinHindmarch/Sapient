@@ -163,6 +163,14 @@ pre-existing errors (react-hooks v7 rules); CI runs tests + build, not lint, unt
 Exit: full unittest suite green on SQLite on Windows and Linux; manual smoke of
 every page against SQLite.
 
+**Done (2026-10-09):** `core/db.py`, `core/migrations.py` (migrations live in
+Python strings rather than a `migrations/` folder so PyInstaller needs no data
+files), all SQL ported, startup migration with backup, `psycopg2` removed, the
+Postgres suite replaced by `tests/test_execution_safety_sqlite.py` (36 tests).
+Item 5 (Postgres importer) skipped per the start-fresh default. API smoke-tested
+on SQLite (auth, portfolios, AI settings, kill switch, safety bind); Yahoo
+calls could not be exercised from the build sandbox.
+
 ### Phase C — Single-user local backend (≈3–4 days)
 
 1. Remove `/api/auth/*`, `auth_utils.py` JWT, Login/Register pages, AuthProvider.

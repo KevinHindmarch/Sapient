@@ -16,8 +16,11 @@ from backend.routers import auth, stocks, portfolio, indicators, broker, ai_trad
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Schema changes require an explicit reviewed provisioning operation.
-    # In particular startup must never mutate a production financial database.
+    # Local desktop database: create/upgrade the schema at startup. migrate()
+    # backs up an existing database first and refuses unknown/changed schemas.
+    if os.environ.get("SAPIENT_SKIP_MIGRATIONS") != "1":
+        from core.migrations import migrate
+        migrate()
     yield
 
 

@@ -1,129 +1,53 @@
-"""Real PostgreSQL tests; never read application DB configuration or use TCP.
+"""Safety admission against real SQLite databases (disposable temp files).
 
-Run: python -m unittest discover -s tests -p test_execution_safety_postgres.py -v
-The cluster, synthetic legacy fixtures, sockets and logs are disposable.
+Run: python -m unittest discover -s tests -p test_execution_safety_sqlite.py -v
+Never touches the user's application database or a broker.
 """
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
-import os
-import shutil
+from unittest import mock
+import sqlite3
 import subprocess
+import sys
 import tempfile
+import textwrap
 import threading
 import unittest
 
-import psycopg2
-
+from core import db, migrations
 from core.execution_safety import IntentService, SafetyError
-from core.safety_migrations import apply_migrations
 
+ROOT = Path(__file__).resolve().parent.parent
 
-class DisposablePostgres:
-    def __enter__(self):
-        self.temp = tempfile.TemporaryDirectory(prefix="safety-pg-", dir="/tmp")
-        self.root = Path(self.temp.name)
-        self.data = self.root / "data"
-        self.socket = self.root / "socket"
-        self.socket.mkdir(mode=0o700)
-        self.env = {k: v for k, v in os.environ.items()
-                    if not k.startswith("PG") and k != "DATABASE_URL"}
-        try:
-            for binary in ("initdb", "pg_ctl"):
-                if not shutil.which(binary):
-                    raise RuntimeError(f"Required PostgreSQL binary missing: {binary}")
-            subprocess.run(["initdb", "-D", str(self.data), "-U", "safety_test",
-                            "--auth=trust", "--no-locale", "--encoding=UTF8"],
-                           env=self.env, check=True, capture_output=True, timeout=30)
-            subprocess.run(["pg_ctl", "-D", str(self.data), "-l", str(self.root / "postgres.log"),
-                            "-o", f"-c listen_addresses='' -c unix_socket_directories='{self.socket}'",
-                            "-w", "start"], env=self.env, check=True, capture_output=True, timeout=30)
-        except BaseException:
-            self.__exit__(None, None, None)
-            raise
-        return self
-
-    def connect(self):
-        # All parameters explicit; a missing local socket must fail, not fall back.
-        return psycopg2.connect(host=str(self.socket), port=5432, dbname="postgres",
-                                user="safety_test", password="", connect_timeout=3)
-
-    def restart_after_crash(self):
-        subprocess.run(["pg_ctl", "-D", str(self.data), "-m", "immediate", "-w", "stop"],
-                       env=self.env, check=True, capture_output=True, timeout=30)
-        subprocess.run(["pg_ctl", "-D", str(self.data), "-l", str(self.root / "postgres.log"),
-                        "-o", f"-c listen_addresses='' -c unix_socket_directories='{self.socket}'",
-                        "-w", "start"], env=self.env, check=True, capture_output=True, timeout=30)
-
-    def dump_restore(self):
-        connection = ["-h", str(self.socket), "-p", "5432", "-U", "safety_test", "-d", "postgres"]
-        dump = subprocess.run(["pg_dump", *connection, "--clean", "--if-exists"],
-                              env=self.env, check=True, capture_output=True, timeout=30)
-        subprocess.run(["psql", *connection, "-v", "ON_ERROR_STOP=1"],
-                       input=dump.stdout, env=self.env, check=True, capture_output=True, timeout=30)
-
-    def __exit__(self, *args):
-        if (self.data / "postmaster.pid").exists():
-            subprocess.run(["pg_ctl", "-D", str(self.data), "-m", "immediate", "-w", "stop"],
-                           env=self.env, check=True, capture_output=True, timeout=30)
-        self.temp.cleanup()
-
-
-# Minimal synthetic legacy tables, not application initialization.
-LEGACY = """
-CREATE TABLE users(id INTEGER PRIMARY KEY);
-CREATE TABLE portfolios(id INTEGER PRIMARY KEY,user_id INTEGER REFERENCES users(id),ai_mode TEXT);
-CREATE TABLE ai_signals(id INTEGER PRIMARY KEY,user_id INTEGER REFERENCES users(id),
- portfolio_id INTEGER REFERENCES portfolios(id),symbol TEXT,action TEXT,quantity NUMERIC,
- price_at_signal NUMERIC,status TEXT,expires_at TIMESTAMPTZ,decided_at TIMESTAMPTZ,decided_by TEXT);
-CREATE TABLE ai_trading_settings(user_id INTEGER PRIMARY KEY REFERENCES users(id),
- mode TEXT DEFAULT 'suggestions',max_daily_trades INTEGER DEFAULT 100,
- max_trade_pct NUMERIC DEFAULT 100,max_daily_turnover_pct NUMERIC DEFAULT 100,
- last_kill_switch_at TIMESTAMPTZ,updated_at TIMESTAMPTZ);
-CREATE TABLE broker_orders(id INTEGER PRIMARY KEY,user_id INTEGER,status TEXT,
- quantity DECIMAL(15,6) NOT NULL,limit_price DECIMAL(15,4),avg_fill_price DECIMAL(15,4),
- submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
-INSERT INTO users VALUES(1),(2);
-INSERT INTO portfolios VALUES(11,1,'autonomous'),(12,1,'autonomous'),(21,2,'autonomous');
-INSERT INTO ai_trading_settings(user_id,mode) VALUES(1,'autonomous'),(2,'autonomous');
+FIXTURES = """
+INSERT INTO users(id,email,password_hash) VALUES(1,'one@example.test','x'),(2,'two@example.test','x');
+INSERT INTO portfolios(id,user_id,name,initial_investment,ai_mode)
+ VALUES(11,1,'p11',10000,'autonomous'),(12,1,'p12',10000,'autonomous'),(21,2,'p21',10000,'autonomous');
+INSERT INTO ai_trading_settings(user_id,mode,max_daily_trades,max_trade_pct,max_daily_turnover_pct)
+ VALUES(1,'autonomous',100,100,100),(2,'autonomous',100,100,100);
 INSERT INTO ai_signals(id,user_id,portfolio_id,symbol,action,quantity,price_at_signal,status,expires_at)
- VALUES(101,1,11,'ABC','BUY',2,10,'pending',clock_timestamp()+interval '1 hour'),
-       (102,1,12,'ABC','BUY',2,10,'snoozed',clock_timestamp()+interval '1 hour'),
-       (201,2,21,'ABC','BUY',2,10,'pending',clock_timestamp()+interval '1 hour');
-INSERT INTO broker_orders VALUES
- (1,1,'Submitted',2,10,NULL,CURRENT_TIMESTAMP-interval '2 days'),
- (2,2,'Submitted',2,10,NULL,CURRENT_TIMESTAMP-interval '2 days');
+ VALUES(101,1,11,'ABC','BUY',2,10,'pending',%(expiry)s),
+       (102,1,12,'ABC','BUY',2,10,'snoozed',%(expiry)s),
+       (201,2,21,'ABC','BUY',2,10,'pending',%(expiry)s);
+INSERT INTO broker_orders(id,user_id,broker_order_id,symbol,side,quantity,order_type,status,
+ limit_price,avg_fill_price,submitted_at)
+ VALUES(1,1,'legacy-1','ABC','BUY',2,'LMT','Submitted',10,NULL,%(old)s),
+       (2,2,'legacy-2','ABC','BUY',2,'LMT','Submitted',10,NULL,%(old)s);
 """
 
 
-class PostgresSafetyTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.cluster = DisposablePostgres().__enter__()
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.cluster.__exit__(None, None, None)
-
-    def sql(self, statement, params=(), fetch=False):
-        conn = self.cluster.connect()
-        try:
-            with conn, conn.cursor() as cur:
-                cur.execute(statement, params)
-                return cur.fetchall() if fetch else None
-        finally:
-            conn.close()
-
+class SQLiteSafetyTests(unittest.TestCase):
     def setUp(self):
-        self.sql("DROP SCHEMA public CASCADE; CREATE SCHEMA public;" + LEGACY)
-        conn = self.cluster.connect()
-        try:
-            apply_migrations(conn, disposable=True)
-        finally:
-            conn.close()
-        self.service = IntentService(self.cluster.connect)
-        self.expiry = (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat()
+        self.temp = tempfile.TemporaryDirectory(prefix="safety-sqlite-")
+        self.path = Path(self.temp.name) / "sapient.db"
+        migrations.migrate(self.path)
+        now = datetime.now(timezone.utc)
+        self.script(FIXTURES % {"expiry": repr(db.utc_text(now + timedelta(hours=1))),
+                                "old": repr(db.utc_text(now - timedelta(days=2)))})
+        self.service = IntentService(self.connect)
+        self.expiry = (now + timedelta(minutes=30)).isoformat()
         self.facts = dict.fromkeys(("reconciled", "market_open", "quote_fresh",
             "contract_qualified", "cash_settled", "fx_fresh", "loss_ok", "news_ok",
             "volatility_ok", "sector_ok"), True)
@@ -134,6 +58,28 @@ class PostgresSafetyTests(unittest.TestCase):
         for user in (1, 2):
             self.identities[user] = self.service.bind_simulation(user)["incarnation"]
             self.configure(user)
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def connect(self, path=None):
+        return db.connect(path or self.path)
+
+    def script(self, sql, path=None):
+        conn = self.connect(path)
+        try:
+            conn.executescript(sql)
+        finally:
+            conn.close()
+
+    def sql(self, statement, params=None, fetch=False):
+        conn = self.connect()
+        try:
+            with conn, conn.cursor() as cur:
+                cur.execute(statement, params)
+                return [tuple(row.values()) for row in cur.fetchall()] if fetch else None
+        finally:
+            conn.close()
 
     def configure(self, user=1):
         self.service.configure_simulation(user, policy=self.policy, facts=self.facts,
@@ -153,6 +99,7 @@ class PostgresSafetyTests(unittest.TestCase):
 
     def race(self, calls):
         barrier = threading.Barrier(len(calls))
+
         def run(call):
             barrier.wait(timeout=10)
             try:
@@ -166,9 +113,27 @@ class PostgresSafetyTests(unittest.TestCase):
         return [self.sql(f"SELECT count(*) FROM {table}", fetch=True)[0][0]
                 for table in ("safety_intents", "safety_reservations", "safety_outbox")]
 
-    def test_cluster_is_postgres16_and_tcp_disabled(self):
-        self.assertEqual(self.sql("SHOW server_version_num", fetch=True)[0][0][:2], "16")
-        self.assertEqual(self.sql("SHOW listen_addresses", fetch=True)[0][0], "")
+    def test_database_durability_settings(self):
+        conn = self.connect()
+        try:
+            cur = conn.cursor()
+            self.assertEqual(cur.execute("PRAGMA journal_mode").fetchone()["journal_mode"], "wal")
+            self.assertEqual(cur.execute("PRAGMA synchronous").fetchone()["synchronous"], 2)  # FULL
+            self.assertEqual(cur.execute("PRAGMA foreign_keys").fetchone()["foreign_keys"], 1)
+        finally:
+            conn.close()
+
+    def test_storage_ignores_other_libraries_global_sqlite_registrations(self):
+        # pandas (via yfinance) registers generic converters/adapters process-wide.
+        hostile = datetime(2030, 1, 2, 3, 4, 5, tzinfo=timezone(timedelta(hours=10)))
+        with mock.patch.dict(sqlite3.converters, {"TIMESTAMP": lambda raw: "hijacked",
+                                                  "DATE": lambda raw: "hijacked"}), \
+                mock.patch.dict(sqlite3.adapters, {(datetime, sqlite3.PrepareProtocol): lambda v: "hijacked"}):
+            self.sql("UPDATE ai_trading_settings SET last_kill_switch_at=%s WHERE user_id=1", (hostile,))
+            stored = self.sql("""SELECT last_kill_switch_at, CAST(last_kill_switch_at AS TEXT)
+                                 FROM ai_trading_settings WHERE user_id=1""", fetch=True)
+        self.assertEqual(stored, [(hostile, "2030-01-01 17:04:05")])
+        self.assertEqual(stored[0][0].tzinfo, timezone.utc)
 
     def test_concurrent_idempotent_approval_claims_once(self):
         r = self.request(origin="ai_approval", portfolio_id=11, signal_id=101)
@@ -213,7 +178,8 @@ class PostgresSafetyTests(unittest.TestCase):
                              lambda: self.service.halt(1)])
         self.assertTrue(any(isinstance(r, dict) and r.get("halt_persisted") for r in results))
         self.assertEqual(self.sql("SELECT count(*) FROM safety_intents WHERE state='QUEUED'", fetch=True), [(0,)])
-        self.assertEqual(self.sql("SELECT count(*) FROM safety_reservations WHERE released_at IS NULL", fetch=True), [(0,)])
+        self.assertEqual(self.sql("SELECT count(*) FROM safety_reservations WHERE released_at IS NULL",
+                                  fetch=True), [(0,)])
         self.refused("account_halted", self.service.admit, 1, self.request(idempotency_key="later"))
         self.assertEqual(self.sql("SELECT status FROM broker_orders WHERE id=1", fetch=True), [("Submitted",)])
 
@@ -222,7 +188,7 @@ class PostgresSafetyTests(unittest.TestCase):
         self.assertFalse(result["worker_acknowledged"])
         self.assertFalse(result["broker_confirmed"])
         self.assertEqual(result["remaining_unconfirmed_orders"], 1)
-        self.assertEqual(self.sql("SELECT status FROM ai_signals WHERE user_id=1", fetch=True),
+        self.assertEqual(self.sql("SELECT status FROM ai_signals WHERE user_id=1 ORDER BY id", fetch=True),
                          [("expired",), ("expired",)])
         self.refused("kill_cooldown", self.service.resume, 1)
 
@@ -248,8 +214,14 @@ class PostgresSafetyTests(unittest.TestCase):
                      self.request(side="SELL", quantity=6, idempotency_key="second"))
         self.service.cancel(1, first["id"])
         self.service.admit(1, self.request(side="SELL", quantity=6, idempotency_key="second"))
-        self.assertEqual(self.sql("SELECT sum(quantity) FROM safety_reservations WHERE released_at IS NULL",
-                                  fetch=True), [(Decimal(6),)])
+        self.assertEqual(self.sql("""SELECT decimal_sum(quantity) FROM safety_reservations
+                                     WHERE released_at IS NULL""", fetch=True), [("6",)])
+
+    def test_reservation_amounts_are_exact_decimals(self):
+        intent = self.service.admit(1, self.request(quantity=3, limit_price="0.1"))
+        self.assertEqual(intent["notional"], Decimal("0.3"))
+        self.assertEqual(self.sql("SELECT notional, typeof(notional) FROM safety_reservations", fetch=True),
+                         [(Decimal("0.3"), "text")])
 
     def test_daily_turnover_counts_cancelled_intents(self):
         self.policy["max_daily_turnover_pct"] = .2
@@ -260,31 +232,41 @@ class PostgresSafetyTests(unittest.TestCase):
                      self.request(idempotency_key="second"))
 
     def test_transaction_failure_rolls_back_claim_reservation_outbox_and_audit(self):
-        self.sql("""CREATE FUNCTION fail_audit() RETURNS trigger LANGUAGE plpgsql AS $$
-            BEGIN IF NEW.kind='intent_admitted' THEN RAISE EXCEPTION 'synthetic crash'; END IF;
-            RETURN NEW; END $$;
-            CREATE TRIGGER fail_audit BEFORE INSERT ON safety_audit FOR EACH ROW EXECUTE FUNCTION fail_audit()""")
-        with self.assertRaises(psycopg2.Error):
+        self.script("""CREATE TRIGGER fail_audit BEFORE INSERT ON safety_audit
+            WHEN NEW.kind='intent_admitted' BEGIN SELECT RAISE(ABORT, 'synthetic crash'); END;""")
+        with self.assertRaises(sqlite3.Error):
             self.service.admit(1, self.request(origin="ai_approval", portfolio_id=11, signal_id=101))
         self.assertEqual(self.counts(), [0, 0, 0])
         self.assertEqual(self.sql("SELECT status FROM ai_signals WHERE id=101", fetch=True), [("pending",)])
 
     def test_committed_response_loss_retries_from_new_service_without_duplicate(self):
         self.service.admit(1, self.request())
-        fresh = IntentService(self.cluster.connect)
+        fresh = IntentService(self.connect)
         result = fresh.admit(1, self.request())
         self.assertEqual(result["state"], "QUEUED")
         self.assertEqual(self.counts(), [1, 1, 1])
         self.assertEqual(self.sql("SELECT delivered_at FROM safety_outbox", fetch=True), [(None,)])
 
-    def test_immediate_postgres_crash_preserves_committed_outbox_and_deduplication(self):
+    def test_process_killed_mid_transaction_preserves_committed_state(self):
         intent = self.service.admit(1, self.request(origin="ai_approval", portfolio_id=11, signal_id=101))
-        self.cluster.restart_after_crash()
-        fresh = IntentService(self.cluster.connect)
+        # A separate process takes the write lock, writes, and dies without commit.
+        crash = textwrap.dedent(f"""
+            import os, sys
+            sys.path.insert(0, {str(ROOT)!r})
+            from core import db
+            conn = db.connect({str(self.path)!r})
+            conn.begin()
+            conn.cursor().execute("INSERT INTO safety_audit(user_id,kind,payload) VALUES(1,'torn','{{}}')")
+            conn.cursor().execute("UPDATE safety_outbox SET delivered_at=clock_timestamp()")
+            os._exit(9)
+        """)
+        self.assertEqual(subprocess.run([sys.executable, "-c", crash], timeout=60).returncode, 9)
+        fresh = IntentService(self.connect)
         retried = fresh.admit(1, self.request(origin="ai_approval", portfolio_id=11, signal_id=101))
         self.assertEqual(retried["id"], intent["id"])
         self.assertEqual(self.counts(), [1, 1, 1])
         self.assertEqual(self.sql("SELECT delivered_at FROM safety_outbox", fetch=True), [(None,)])
+        self.assertEqual(self.sql("SELECT count(*) FROM safety_audit WHERE kind='torn'", fetch=True), [(0,)])
 
     def device(self):
         token = self.service.create_pairing(1)["pairing_token"]
@@ -296,7 +278,7 @@ class PostgresSafetyTests(unittest.TestCase):
         self.assertEqual(self.service.poll_commands(1, device["device_token"]), [])
         self.service.halt(1)
         first = self.service.poll_commands(1, device["device_token"])
-        second = IntentService(self.cluster.connect).poll_commands(1, device["device_token"])
+        second = IntentService(self.connect).poll_commands(1, device["device_token"])
         self.assertEqual(first, second)
         self.assertEqual([r["kind"] for r in first], ["halt"])
         self.assertIsNone(first[0]["delivered_at"])
@@ -320,25 +302,50 @@ class PostgresSafetyTests(unittest.TestCase):
     def test_expired_lease_does_not_allow_takeover_or_renewal(self):
         one, two = self.device(), self.device()
         lease = self.service.renew_lease(1, one["device_token"], incarnation=self.identities[1])
-        self.sql("UPDATE safety_leases SET expires_at=clock_timestamp()-interval '1 second'")
+        self.sql("UPDATE safety_leases SET expires_at=%s",
+                 (datetime.now(timezone.utc) - timedelta(seconds=1),))
         for device in (one, two):
             self.refused("executor_isolation_required", self.service.renew_lease,
                          1, device["device_token"], incarnation=self.identities[1], epoch=lease["epoch"])
 
-    def test_additive_migration_twice_preserves_legacy_and_history_identity(self):
+    def test_migrations_are_idempotent_and_preserve_history(self):
         intent = self.service.admit(1, self.request())
-        before = self.sql("SELECT row_to_json(t) FROM ai_signals t ORDER BY id", fetch=True)
-        conn = self.cluster.connect()
+        before = self.sql("SELECT * FROM ai_signals ORDER BY id", fetch=True)
+        self.assertEqual(migrations.migrate(self.path), [])
+        self.assertEqual(migrations.migrate(self.path), [])
+        self.assertEqual(before, self.sql("SELECT * FROM ai_signals ORDER BY id", fetch=True))
+        self.assertEqual(self.service.list_intents(1)[0], intent)
+        self.assertEqual(self.sql("SELECT version FROM schema_versions ORDER BY version", fetch=True),
+                         [(1,), (2,)])
+
+    def test_migration_refuses_changed_or_newer_schema(self):
+        self.sql("UPDATE schema_versions SET checksum='tampered' WHERE version=2")
+        with self.assertRaises(migrations.MigrationError):
+            migrations.migrate(self.path)
+        self.sql("UPDATE schema_versions SET checksum=%s WHERE version=2",
+                 (migrations._checksum(migrations.SAFETY_V1),))
+        self.sql("INSERT INTO schema_versions(version,name,checksum) VALUES(99,'future','x')")
+        with self.assertRaises(migrations.MigrationError):
+            migrations.migrate(self.path)
+
+    def test_upgrade_backs_up_existing_database_first(self):
+        path = Path(self.temp.name) / "upgrade.db"
+        with mock.patch.object(migrations, "MIGRATIONS", migrations.MIGRATIONS[:1]):
+            self.assertEqual(migrations.migrate(path), [1])
+        self.assertEqual(migrations.migrate(path), [2])
+        backups = list((path.parent / "backups").glob("upgrade-pre-v2-*.db"))
+        self.assertEqual(len(backups), 1)
+        conn = db.connect(backups[0])
         try:
-            apply_migrations(conn, disposable=True)
-            apply_migrations(conn, disposable=True)
-            with self.assertRaises(ValueError):
-                apply_migrations(conn)
+            self.assertEqual(migrations.applied_versions(conn).keys(), {1})
         finally:
             conn.close()
-        self.assertEqual(before, self.sql("SELECT row_to_json(t) FROM ai_signals t ORDER BY id", fetch=True))
-        self.assertEqual(self.service.list_intents(1)[0], intent)
-        self.assertEqual(self.sql("SELECT count(*) FROM safety_schema_versions", fetch=True), [(1,)])
+
+    def test_safety_service_refuses_without_safety_schema(self):
+        path = Path(self.temp.name) / "core-only.db"
+        with mock.patch.object(migrations, "MIGRATIONS", migrations.MIGRATIONS[:1]):
+            migrations.migrate(path)
+        self.refused("migration_required", IntentService(lambda: db.connect(path)).halt, 1)
 
     def test_restore_rotates_authority_preserves_history_and_revokes_device(self):
         intent = self.service.admit(1, self.request())
@@ -357,11 +364,12 @@ class PostgresSafetyTests(unittest.TestCase):
         self.assertEqual(self.sql("SELECT count(*) FROM safety_leases", fetch=True), [(0,)])
         self.assertEqual(self.counts(), [1, 1, 1])
 
-    def test_actual_pg_dump_restore_then_explicit_lock_preserves_history_identity(self):
+    def test_backup_restore_then_explicit_lock_preserves_history_identity(self):
         intent = self.service.admit(1, self.request())
         device = self.device()
-        self.cluster.dump_restore()
-        restored = IntentService(self.cluster.connect)
+        restored_path = Path(self.temp.name) / "restored.db"
+        migrations.backup(self.path, restored_path)
+        restored = IntentService(lambda: db.connect(restored_path))
         result = restored.restore_lock(1)
         self.assertNotEqual(result["incarnation"], intent["incarnation"])
         history = restored.list_intents(1)[0]
@@ -372,14 +380,14 @@ class PostgresSafetyTests(unittest.TestCase):
         self.assertEqual(self.counts(), [1, 1, 1])
 
     def test_legacy_orders_consume_daily_cap_across_origins(self):
-        self.sql("UPDATE broker_orders SET submitted_at=CURRENT_TIMESTAMP WHERE user_id=1")
+        self.sql("UPDATE broker_orders SET submitted_at=clock_timestamp() WHERE user_id=1")
         self.policy["max_daily_trades"] = 1
         self.configure()
         self.refused("daily_trade_limit", self.service.admit, 1, self.request())
         self.assertEqual(self.counts(), [0, 0, 0])
 
     def test_legacy_unknown_turnover_fails_closed(self):
-        self.sql("""UPDATE broker_orders SET submitted_at=CURRENT_TIMESTAMP,
+        self.sql("""UPDATE broker_orders SET submitted_at=clock_timestamp(),
                     limit_price=NULL,avg_fill_price=NULL WHERE user_id=1""")
         self.refused("legacy_turnover_unknown", self.service.admit, 1, self.request())
 
@@ -412,6 +420,11 @@ class PostgresSafetyTests(unittest.TestCase):
         changed = self.batch()
         changed[1]["quantity"] = 3
         self.refused("batch_idempotency_conflict", self.service.admit_batch, 1, "batch", changed)
+
+    def test_leg_cannot_join_a_second_batch(self):
+        legs = self.batch()
+        self.service.admit_batch(1, "first", legs)
+        self.refused("leg_already_in_batch", self.service.admit_batch, 1, "second", legs)
 
     def evidence(self, **changes):
         return dict(dict(journal_incarnation="synthetic-journal", sequence=1, epoch=0,
@@ -448,15 +461,12 @@ class PostgresSafetyTests(unittest.TestCase):
 
     def test_evidence_ack_is_not_returned_when_commit_transaction_fails(self):
         device = self.device()
-        self.sql("""CREATE FUNCTION fail_evidence_audit() RETURNS trigger LANGUAGE plpgsql AS $$
-            BEGIN IF NEW.kind='evidence_quarantined' THEN RAISE EXCEPTION 'synthetic failure'; END IF;
-            RETURN NEW; END $$;
-            CREATE TRIGGER fail_evidence_audit BEFORE INSERT ON safety_audit
-            FOR EACH ROW EXECUTE FUNCTION fail_evidence_audit()""")
-        with self.assertRaises(psycopg2.Error):
+        self.script("""CREATE TRIGGER fail_evidence_audit BEFORE INSERT ON safety_audit
+            WHEN NEW.kind='evidence_quarantined' BEGIN SELECT RAISE(ABORT, 'synthetic failure'); END;""")
+        with self.assertRaises(sqlite3.Error):
             self.service.upload_evidence(1, device["device_token"], self.evidence())
         self.assertEqual(self.sql("SELECT count(*) FROM safety_evidence", fetch=True), [(0,)])
-        self.sql("DROP TRIGGER fail_evidence_audit ON safety_audit")
+        self.script("DROP TRIGGER fail_evidence_audit")
         self.assertTrue(self.service.upload_evidence(1, device["device_token"], self.evidence())["stored"])
 
 
