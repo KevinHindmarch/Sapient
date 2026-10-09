@@ -34,6 +34,9 @@ REQ_LEDGER = 2_100_000_005
 REQUEST_IDS = {REQ_SUMMARY, REQ_EXECUTIONS, REQ_CONTRACT, REQ_MARKET, REQ_LEDGER}
 # Per-currency values Sapient needs (US buys: US$ cash; A$ limits: TWS's exchange rate).
 CURRENCY_KEYS = ("CashBalance", "ExchangeRate")
+# TWS setting "Prepend $LEDGER- prefix to per-currency account values" (on by default for
+# new TWS users) renames per-currency values, e.g. "$LEDGER-CashBalance". Both forms are read.
+LEDGER_PREFIX = "$LEDGER-"
 
 # Broker evidence about orders. These are kept for the order projector no matter
 # which request the session happened to be waiting for when they arrived.
@@ -233,6 +236,8 @@ class TwsSession:
                 refused.append(fields)
             if name == "accountSummary" and fields.get("reqId") == req_id:
                 tag, currency = str(fields.get("tag")), _plain(fields.get("currency"))
+                if keyed:
+                    tag = tag.removeprefix(LEDGER_PREFIX)
                 entry = {"value": _plain(fields.get("value")), "currency": currency,
                          "account": _plain(fields.get("account"))}
                 values[f"{tag}:{currency}" if keyed or tag not in STANDARD_TAGS else tag] = entry
@@ -250,21 +255,28 @@ class TwsSession:
         return values
 
     def account_values(self, account: str, timeout: float = 20.0) -> dict:
-        """Cash and exchange rate per currency from TWS's account updates (read-only)."""
-        values: dict[str, dict] = {}
+        """Cash and exchange rate per currency from TWS's account updates (read-only).
+
+        With TWS's "$LEDGER-" prefix setting on, per-currency rows are the
+        prefixed ones (unprefixed rows are account totals), so they win.
+        """
+        plain: dict[str, dict] = {}
+        prefixed: dict[str, dict] = {}
 
         def collect(name, fields):
             if name == "updateAccountValue" and fields.get("accountName") in (account, "", None):
                 key, currency = str(fields.get("key")), _plain(fields.get("currency"))
+                target = prefixed if key.startswith(LEDGER_PREFIX) else plain
+                key = key.removeprefix(LEDGER_PREFIX)
                 if key in CURRENCY_KEYS and currency and currency != "BASE":
-                    values[f"{key}:{currency}"] = {"value": _plain(fields.get("val")), "currency": currency,
+                    target[f"{key}:{currency}"] = {"value": _plain(fields.get("val")), "currency": currency,
                                                    "account": account}
         self.transport.request("reqAccountUpdates", True, account)
         try:
             self._wait(lambda n, f: n == "accountDownloadEnd", timeout, collect)
         finally:
             self.transport.request("reqAccountUpdates", False, account)
-        return values
+        return prefixed or plain
 
     def positions(self, timeout: float = 20.0) -> list[dict]:
         rows: list[dict] = []
