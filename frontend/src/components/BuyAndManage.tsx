@@ -1,0 +1,119 @@
+import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { toast } from 'sonner'
+import { apiErrorMessage, BrokerCompare, liveApi, paperApi, tradingApiFor, TradingEnv } from '../lib/api'
+
+type Mode = 'suggestions' | 'autonomous'
+
+/**
+ * "Buy on paper & manage" / "Buy for real & manage": buys the portfolio's holdings once in the chosen
+ * account and sets how Sapient manages it afterwards (you approve each trade, or fully automatic).
+ */
+export default function BuyAndManage({ portfolioId, data, onDone }: {
+  portfolioId: number; data: BrokerCompare; onDone: () => void
+}) {
+  const [available, setAvailable] = useState<Record<TradingEnv, boolean>>({ paper: false, live: false })
+  const [env, setEnv] = useState<TradingEnv | null>(null)
+  const [mode, setMode] = useState<Mode>('suggestions')
+  const [understood, setUnderstood] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [results, setResults] = useState<{ symbol: string; ok: boolean; quantity?: number; message?: string }[] | null>(null)
+
+  useEffect(() => {
+    const on = (b: { enabled: boolean; authorised_at: string | null; halted: boolean }) => b.enabled && !!b.authorised_at && !b.halted
+    Promise.all([paperApi.status(), liveApi.status()])
+      .then(([p, l]) => setAvailable({ paper: on(p.data.binding), live: on(l.data.binding) }))
+      .catch(() => undefined)
+  }, [])
+
+  if (data.trading_environment) {
+    const live = data.trading_environment === 'live'
+    const since = live ? data.live_started_at : data.paper_started_at
+    return (
+      <p className={`text-sm mt-3 ${live ? 'text-red-600' : 'text-emerald-600'}`} data-testid="paper-started">
+        {live ? 'Trading with REAL MONEY' : 'Trading on paper'}{since ? ` since ${new Date(since).toLocaleDateString()}` : ''} ·{' '}
+        {data.ai_mode === 'autonomous' ? 'fully automatic' : data.ai_mode === 'suggestions' ? 'you approve each trade' : 'AI Trading off'}.
+        Fills update this portfolio's holdings automatically. Change how it is managed with the AI Trading Mode above.
+      </p>
+    )
+  }
+  if (!available.paper && !available.live) {
+    return (
+      <p className="text-sm theme-text-secondary mt-3">
+        To buy this portfolio through Interactive Brokers, first authorise paper or real-money trading in{' '}
+        <Link to="/brokerage" className="text-sky-500 hover:underline">Brokerage → Step 4</Link>.
+      </p>
+    )
+  }
+
+  const go = async () => {
+    if (!env) return
+    setBusy(true)
+    try {
+      const res = await tradingApiFor(env).startPortfolio(portfolioId, mode)
+      setResults(res.data.results)
+      toast[res.data.started ? 'success' : 'error'](res.data.started
+        ? `${env === 'live' ? 'REAL-MONEY' : 'Paper'} buy orders queued. Sapient manages this portfolio from now on.`
+        : 'No orders could be queued; see the reasons below.')
+      onDone()
+    } catch (err) {
+      toast.error(apiErrorMessage(err, 'Could not start'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const live = env === 'live'
+  return (
+    <div className={`mt-3 rounded-xl border p-3 text-sm space-y-3 ${live ? 'border-red-500/50' : 'theme-border'}`} data-testid="buy-and-manage">
+      <p className="theme-text"><strong>Buy this portfolio and let Sapient manage it.</strong> Sapient buys the holdings
+        listed above (whole shares) and then, during market hours, buys and sells them for you within your limits.</p>
+      <div className="flex flex-wrap gap-2">
+        <button className={env === 'paper' ? 'btn-primary' : 'btn-secondary'} disabled={!available.paper}
+          onClick={() => { setEnv('paper'); setUnderstood(false) }} data-testid="choose-paper">Buy on paper & manage</button>
+        <button className={env === 'live' ? 'btn-primary !bg-red-600 !from-red-600 !to-red-700' : 'btn-secondary'}
+          disabled={!available.live} onClick={() => { setEnv('live'); setUnderstood(false) }} data-testid="choose-live"
+          title={available.live ? '' : 'Authorise real-money trading first (Brokerage → Live → Step 4)'}>
+          Buy for real & manage</button>
+      </div>
+      {env && (
+        <>
+          <fieldset className="space-y-1">
+            <legend className="theme-text font-medium mb-1">How should Sapient manage it?</legend>
+            <label className="flex items-start gap-2 theme-text">
+              <input type="radio" name="mode" className="mt-1" checked={mode === 'suggestions'} onChange={() => setMode('suggestions')} />
+              <span><strong>Semi-automatic:</strong> Sapient finds buys and sells and asks you first (pop-up and AI Inbox).</span>
+            </label>
+            <label className="flex items-start gap-2 theme-text">
+              <input type="radio" name="mode" className="mt-1" checked={mode === 'autonomous'} onChange={() => setMode('autonomous')} />
+              <span><strong>Fully automatic:</strong> Sapient trades on its own within your limits and tells you after each trade
+                (needs “Allow fully automatic {live ? 'real-money' : 'paper'} orders” ticked in Brokerage, automatic checks on and
+                AI Trading mode Autonomous; the checklist on the AI Trading page shows what is missing).</span>
+            </label>
+          </fieldset>
+          {live && (
+            <label className="flex items-start gap-2 text-red-600">
+              <input type="checkbox" className="mt-1" checked={understood} onChange={(e) => setUnderstood(e.target.checked)}
+                data-testid="live-understood" />
+              <span>I understand Sapient will spend <strong>my real money</strong> buying these shares now, and will keep
+                buying and selling them {mode === 'autonomous' ? 'without asking me' : 'when I approve'}.</span>
+            </label>
+          )}
+          <button className={live ? 'btn-primary !bg-red-600 !from-red-600 !to-red-700' : 'btn-primary'}
+            disabled={busy || (live && !understood)} onClick={go}>
+            {live ? 'Buy with real money now' : 'Buy on paper now'}
+          </button>
+        </>
+      )}
+      {results && (
+        <ul className="space-y-1">
+          {results.map((r) => (
+            <li key={r.symbol} className={r.ok ? 'text-emerald-600' : 'text-amber-600'}>
+              {r.symbol}: {r.ok ? `buy ${r.quantity} queued` : r.message}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}

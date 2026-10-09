@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useLocation } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -86,6 +86,7 @@ const formSchema = z.object({
 type FormData = z.infer<typeof formSchema>
 
 export default function ManualBuilder() {
+  const navigate = useNavigate()
   const { theme } = useTheme()
   const isDark = theme === 'dark'
 
@@ -209,8 +210,9 @@ export default function ManualBuilder() {
     setSaving(true)
     try {
       const resultToSave = editedWeights ? { ...result, weights: editedWeights } : result
-      await portfolioApi.save(portfolioName.trim(), resultToSave, investmentAmount, 'manual', riskTolerance, market)
-      toast.success('Portfolio saved successfully!')
+      const saved = await portfolioApi.save(portfolioName.trim(), resultToSave, investmentAmount, 'manual', riskTolerance, market)
+      toast.success('Portfolio saved. Buy it on paper or for real from its page.')
+      if (saved.data?.portfolio_id) navigate(`/portfolios/${saved.data.portfolio_id}`)
       setShowSaveModal(false)
       setPortfolioName('')
     } catch (error: unknown) {

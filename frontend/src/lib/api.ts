@@ -64,7 +64,7 @@ export const portfolioApi = {
   compareStrategies: (symbols: string[], investment_amount: number, period: string = '2y') =>
     api.post('/portfolio/compare-strategies', { symbols, investment_amount, period }),
   save: (name: string, optimization_results: object, investment_amount: number, mode: string, risk_tolerance: string, market: string = 'ASX') =>
-    api.post('/portfolio/save', { name, optimization_results, investment_amount, mode, risk_tolerance, market }),
+    api.post<{ success: boolean; portfolio_id?: number }>('/portfolio/save', { name, optimization_results, investment_amount, mode, risk_tolerance, market }),
   list: () => api.get('/portfolio/list'),
   detail: (id: number) => api.get(`/portfolio/${id}`),
   trade: (portfolioId: number, symbol: string, txn_type: string, quantity: number, price: number, notes?: string) =>
@@ -158,9 +158,14 @@ export interface TwsSettings {
   port: number
   client_id: number
   expected_account: string | null
-  paper_confirmed: boolean
+  paper_confirmed?: boolean      // paper profile column
+  live_confirmed?: boolean       // live profile column
+  account_confirmed: boolean     // either: the user confirmed which kind of account this login is
   sdk_folder: string | null
+  profile?: TradingEnv
 }
+
+export type TradingEnv = 'paper' | 'live'
 
 export interface TwsStatus {
   state: string
@@ -194,17 +199,21 @@ export interface TwsAccount {
   snapshots: Record<string, { data: unknown; taken_at: string }>
 }
 
-export const twsApi = {
-  settings: () => api.get<TwsSettings>('/tws/settings'),
-  saveSettings: (changes: Partial<TwsSettings>) => api.put<TwsSettings>('/tws/settings', changes),
-  sdk: () => api.get<{ found: boolean; folder: string | null; version: string | null }>('/tws/sdk'),
-  status: () => api.get<TwsStatus>('/tws/status'),
-  startTest: () => api.post<{ id: number }>('/tws/test'),
-  testResult: (id: number) => api.get<TwsCommand>(`/tws/test/${id}`),
-  reconnect: () => api.post('/tws/reconnect'),
-  account: () => api.get<TwsAccount>('/tws/account'),
+// One TWS login: '/tws' is the paper login, '/tws-live' the live (real-money) login.
+const makeTwsApi = (base: string) => ({
+  settings: () => api.get<TwsSettings>(`${base}/settings`),
+  saveSettings: (changes: Partial<TwsSettings>) => api.put<TwsSettings>(`${base}/settings`, changes),
+  sdk: () => api.get<{ found: boolean; folder: string | null; version: string | null }>(`${base}/sdk`),
+  status: () => api.get<TwsStatus>(`${base}/status`),
+  startTest: () => api.post<{ id: number }>(`${base}/test`),
+  testResult: (id: number) => api.get<TwsCommand>(`${base}/test/${id}`),
+  reconnect: () => api.post(`${base}/reconnect`),
+  account: () => api.get<TwsAccount>(`${base}/account`),
   compare: (portfolioId: number) => api.get<BrokerCompare>(`/tws/compare/${portfolioId}`),
-}
+})
+export const twsApi = makeTwsApi('/tws')
+export const twsLiveApi = makeTwsApi('/tws-live')
+export const twsApiFor = (env: TradingEnv) => (env === 'live' ? twsLiveApi : twsApi)
 
 export interface BrokerCompare {
   state: string
@@ -212,6 +221,9 @@ export interface BrokerCompare {
   positions_taken_at: string | null
   available: boolean
   paper_started_at: string | null
+  live_started_at: string | null
+  trading_environment: TradingEnv | null
+  ai_mode: 'off' | 'suggestions' | 'autonomous'
   rows: { symbol: string; model_quantity: number | null; broker_quantity: number | null; difference: number;
     status: 'match' | 'differs' | 'model_only' | 'broker_only' }[]
 }
@@ -254,7 +266,7 @@ export const aiApi = {
   scheduler: () => api.get<SchedulerStatus>('/ai/scheduler'),
   listSignals: (status: string = 'pending') =>
     api.get(`/ai/signals?status=${status}`),
-  approveSignal: (id: number) => api.post<{ intent?: QueuedIntent; paper_order?: PaperOrder; environment?: 'tws_paper';
+  approveSignal: (id: number) => api.post<{ intent?: QueuedIntent; paper_order?: PaperOrder; environment?: 'tws_paper' | 'tws_live';
     execution_enabled: boolean; message: string }>(`/ai/signals/${id}/approve`),
   rejectSignal: (id: number) => api.post(`/ai/signals/${id}/reject`),
   snoozeSignal: (id: number, snooze_minutes: number = 60) =>
@@ -282,6 +294,8 @@ export interface PaperBinding {
 }
 
 export interface PaperStatus {
+  environment: TradingEnv
+  realtime_required: boolean
   binding: PaperBinding
   ready: boolean
   blockers: { code: string; message: string }[]
@@ -302,7 +316,8 @@ export interface PaperFill {
 
 export interface PaperOrder {
   id: string
-  origin: 'manual' | 'ai_approval' | 'ai_autonomous'
+  environment: TradingEnv
+  origin: 'manual' | 'ai_approval' | 'ai_autonomous' | 'entry'
   account_id: string
   portfolio_id: number | null
   portfolio_name?: string | null
@@ -329,24 +344,29 @@ export type PaperLimits = Partial<Pick<PaperBinding, 'max_order_value' | 'max_or
 
 export const UNKNOWN_CHECK_TEXT = 'I checked TWS: this order is not there and did not fill.'
 
-export const paperApi = {
-  status: () => api.get<PaperStatus>('/paper/status'),
+// Orders in one environment: '/paper' (practice) or '/live' (REAL MONEY).
+const makeTradingApi = (base: string) => ({
+  status: () => api.get<PaperStatus>(`${base}/status`),
   authorise: (account_id: string, confirmation: string, limits: PaperLimits) =>
-    api.post<PaperBinding>('/paper/authorise', { account_id, confirmation, limits }),
-  updateLimits: (limits: PaperLimits) => api.put<PaperBinding>('/paper/limits', limits),
-  disable: () => api.post<PaperBinding>('/paper/disable'),
-  orders: () => api.get<PaperOrder[]>('/paper/orders'),
+    api.post<PaperBinding>(`${base}/authorise`, { account_id, confirmation, limits }),
+  updateLimits: (limits: PaperLimits) => api.put<PaperBinding>(`${base}/limits`, limits),
+  disable: () => api.post<PaperBinding>(`${base}/disable`),
+  orders: () => api.get<PaperOrder[]>(`${base}/orders`),
   place: (ticket: { symbol: string; side: 'BUY' | 'SELL'; quantity: number; portfolio_id?: number; idempotency_key: string }) =>
-    api.post<PaperOrder>('/paper/orders', ticket),
-  cancel: (id: string) => api.post<PaperOrder>(`/paper/orders/${id}/cancel`),
-  resolveUnknown: (id: string) => api.post<PaperOrder>(`/paper/orders/${id}/resolve`, { confirmation: UNKNOWN_CHECK_TEXT }),
-  startPortfolio: (id: number) => api.post<{ started: boolean; results: { symbol: string; ok: boolean; quantity?: number;
-    message?: string }[] }>(`/paper/portfolios/${id}/start`),
-  autonomy: () => api.get<AutonomyChecklist>('/paper/autonomy'),
-}
+    api.post<PaperOrder>(`${base}/orders`, ticket),
+  cancel: (id: string) => api.post<PaperOrder>(`${base}/orders/${id}/cancel`),
+  resolveUnknown: (id: string) => api.post<PaperOrder>(`${base}/orders/${id}/resolve`, { confirmation: UNKNOWN_CHECK_TEXT }),
+  startPortfolio: (id: number, mode?: 'suggestions' | 'autonomous') => api.post<{ started: boolean;
+    results: { symbol: string; ok: boolean; quantity?: number; message?: string }[] }>(`${base}/portfolios/${id}/start`,
+    mode ? { mode } : {}),
+  autonomy: () => api.get<AutonomyChecklist>(`${base}/autonomy`),
+})
+export const paperApi = makeTradingApi('/paper')
+export const liveApi = makeTradingApi('/live')
+export const tradingApiFor = (env: TradingEnv) => (env === 'live' ? liveApi : paperApi)
 
 export interface ChecklistItem { key: string; ok: boolean; text: string }
 export interface AutonomyChecklist {
   shared: ChecklistItem[]
-  portfolios: { portfolio_id: number; name: string; items: ChecklistItem[]; autonomous: boolean }[]
+  portfolios: { portfolio_id: number; name: string; environment: TradingEnv; items: ChecklistItem[]; autonomous: boolean }[]
 }

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Circle, Loader2, PlugZap, RefreshCw, ShieldCheck, XCircle } from 'lucide-react'
 import { toast } from 'sonner'
-import { apiErrorMessage, PaperStatus, paperApi, TwsAccount, TwsCommand, TwsSettings, TwsStatus, TwsTestStep, twsApi } from '../lib/api'
+import { apiErrorMessage, PaperStatus, tradingApiFor, TradingEnv, TwsAccount, TwsCommand, TwsSettings, TwsStatus, TwsTestStep, twsApiFor } from '../lib/api'
 import TwsSetupGuide from '../components/TwsSetupGuide'
 import PaperTradingCard from '../components/PaperTradingCard'
 import { TWS_STATE_LABELS } from '../components/TwsStatusPill'
@@ -22,14 +22,43 @@ function money(value: unknown, currency?: unknown) {
   return `${currency ? `${currency} ` : ''}${number.toLocaleString(undefined, { maximumFractionDigits: 2 })}`
 }
 
+// Two TWS logins: Paper (practice money) and Live (REAL MONEY), each with its own connection and authorisation.
 export default function BrokerageSettings() {
+  const [tab, setTab] = useState<TradingEnv>(() => (window.location.hash.includes('live') ? 'live' : 'paper'))
+  return (
+    <div className="max-w-4xl mx-auto space-y-6 animate-fade-in">
+      <div className="page-header">
+        <div className="flex items-center gap-2">
+          <ShieldCheck className="w-8 h-8 text-sky-400" />
+          <h1 className="page-title">Interactive Brokers</h1>
+        </div>
+        <p className="page-subtitle">Connect Sapient to Trader Workstation (TWS) on this PC: a Paper login for practice and,
+          if you want, your Live login for real money.</p>
+      </div>
+      <div className="flex gap-2" role="tablist">
+        <button role="tab" aria-selected={tab === 'paper'} data-testid="tab-paper"
+          className={tab === 'paper' ? 'btn-primary' : 'btn-secondary'} onClick={() => setTab('paper')}>Paper (practice)</button>
+        <button role="tab" aria-selected={tab === 'live'} data-testid="tab-live"
+          className={tab === 'live' ? 'btn-primary !bg-red-600 !from-red-600 !to-red-700' : 'btn-secondary'}
+          onClick={() => setTab('live')}>Live (real money)</button>
+      </div>
+      <BrokerageAccount key={tab} profile={tab} />
+    </div>
+  )
+}
+
+function BrokerageAccount({ profile }: { profile: TradingEnv }) {
+  const live = profile === 'live'
+  const tws = twsApiFor(profile)
+  const trading = tradingApiFor(profile)
   const [settings, setSettings] = useState<TwsSettings | null>(null)
-  const [form, setForm] = useState({ port: '7497', client_id: '71', expected_account: '', sdk_folder: '', paper_confirmed: false })
+  const [form, setForm] = useState({ port: live ? '7496' : '7497', client_id: live ? '72' : '71', expected_account: '',
+    sdk_folder: '', account_confirmed: false })
   const [sdk, setSdk] = useState<SdkInfo | null>(null)
   const [status, setStatus] = useState<TwsStatus | null>(null)
   const [account, setAccount] = useState<TwsAccount | null>(null)
   const [paper, setPaper] = useState<PaperStatus | null>(null)
-  const loadPaper = useCallback(() => { paperApi.status().then((res) => setPaper(res.data)).catch(() => undefined) }, [])
+  const loadPaper = useCallback(() => { trading.status().then((res) => setPaper(res.data)).catch(() => undefined) }, [trading])
   const [saving, setSaving] = useState(false)
   const [test, setTest] = useState<TwsCommand | null>(null)
   const [testing, setTesting] = useState(false)
@@ -37,14 +66,14 @@ export default function BrokerageSettings() {
   const pollTest = useRef<number | null>(null)
 
   const loadSettings = useCallback(async () => {
-    const [settingsRes, sdkRes] = await Promise.all([twsApi.settings(), twsApi.sdk()])
+    const [settingsRes, sdkRes] = await Promise.all([tws.settings(), tws.sdk()])
     const s = settingsRes.data
     setSettings(s)
     setSdk(sdkRes.data)
     setForm({ port: String(s.port), client_id: String(s.client_id), expected_account: s.expected_account ?? '',
-      sdk_folder: s.sdk_folder ?? '', paper_confirmed: s.paper_confirmed })
+      sdk_folder: s.sdk_folder ?? '', account_confirmed: s.account_confirmed })
     setGuideOpen(!s.enabled)
-  }, [])
+  }, [tws])
 
   useEffect(() => { loadSettings().catch(() => toast.error('Could not load the TWS settings')) }, [loadSettings])
 
@@ -53,12 +82,12 @@ export default function BrokerageSettings() {
     let alive = true
     const refresh = async () => {
       try {
-        const res = await twsApi.status()
+        const res = await tws.status()
         if (!alive) return
         setStatus(res.data)
-        paperApi.status().then((p) => { if (alive) setPaper(p.data) }).catch(() => undefined)
+        trading.status().then((p) => { if (alive) setPaper(p.data) }).catch(() => undefined)
         if (res.data.state === 'READY' || res.data.state === 'IBKR_DISCONNECTED') {
-          const acc = await twsApi.account()
+          const acc = await tws.account()
           if (alive) setAccount(acc.data)
         }
       } catch { /* engine restarting; try again next tick */ }
@@ -66,7 +95,7 @@ export default function BrokerageSettings() {
     refresh()
     const timer = window.setInterval(refresh, 3000)
     return () => { alive = false; window.clearInterval(timer) }
-  }, [])
+  }, [tws, trading])
 
   useEffect(() => () => { if (pollTest.current) window.clearInterval(pollTest.current) }, [])
 
@@ -77,14 +106,14 @@ export default function BrokerageSettings() {
     if (!/^[A-Za-z0-9]{0,32}$/.test(form.expected_account.trim())) return toast.error('The account number should only contain letters and numbers')
     setSaving(true)
     try {
-      const res = await twsApi.saveSettings({
+      const res = await tws.saveSettings({
         enabled: enable, port, client_id: clientId, expected_account: form.expected_account.trim(),
-        paper_confirmed: form.paper_confirmed, sdk_folder: form.sdk_folder.trim(),
+        account_confirmed: form.account_confirmed, sdk_folder: form.sdk_folder.trim(),
       })
       setSettings(res.data)
-      setForm((current) => ({ ...current, paper_confirmed: res.data.paper_confirmed }))
-      setSdk((await twsApi.sdk()).data)
-      toast.success(enable ? 'Saved. Sapient will connect to TWS (read-only).' : 'Saved. Sapient will not connect to TWS.')
+      setForm((current) => ({ ...current, account_confirmed: res.data.account_confirmed }))
+      setSdk((await tws.sdk()).data)
+      toast.success(enable ? `Saved. Sapient will connect to your ${live ? 'live' : 'paper'} TWS login.` : 'Saved. Sapient will not connect to this TWS login.')
     } catch (error) {
       toast.error(apiErrorMessage(error, 'Could not save the settings'))
     } finally {
@@ -96,11 +125,11 @@ export default function BrokerageSettings() {
     setTesting(true)
     setTest(null)
     try {
-      const { data } = await twsApi.startTest()
+      const { data } = await tws.startTest()
       if (pollTest.current) window.clearInterval(pollTest.current)
       pollTest.current = window.setInterval(async () => {
         try {
-          const res = await twsApi.testResult(data.id)
+          const res = await tws.testResult(data.id)
           setTest(res.data)
           if (res.data.status === 'done' || res.data.status === 'failed') {
             window.clearInterval(pollTest.current!)
@@ -121,7 +150,7 @@ export default function BrokerageSettings() {
 
   const state = status?.state ?? 'NOT_CONFIGURED'
   const label = TWS_STATE_LABELS[state] ?? { text: state, tone: 'amber' }
-  const isPaper = !!status?.account?.startsWith('DU') && !!settings?.paper_confirmed
+  const isPaper = !live && !!status?.account?.startsWith('DU') && !!settings?.account_confirmed
   const paperOn = !!(paper?.binding.enabled && paper.binding.account_id && paper.binding.account_id === status?.account)
   const summary = (account?.snapshots.summary?.data ?? {}) as Record<string, { value: string; currency: string }>
   const positions = (account?.snapshots.positions?.data ?? []) as Array<Record<string, string>>
@@ -130,15 +159,20 @@ export default function BrokerageSettings() {
   const toneClass = { green: 'bg-emerald-500/15 text-emerald-600 border-emerald-500/30',
     amber: 'bg-amber-500/15 text-amber-600 border-amber-500/30', red: 'bg-red-500/15 text-red-600 border-red-500/30' }[label.tone]
 
+  const ordersBadge = paperOn
+    ? (live ? 'ORDERS: REAL MONEY' : 'ORDERS: TWS PAPER')
+    : 'ORDERS: OFF (read-only)'
   return (
-    <div className="max-w-4xl mx-auto space-y-6 animate-fade-in">
-      <div className="page-header">
-        <div className="flex items-center gap-2">
-          <ShieldCheck className="w-8 h-8 text-sky-400" />
-          <h1 className="page-title">Interactive Brokers</h1>
+    <div className="space-y-6">
+      {live && (
+        <div className="card border-red-500/40 bg-red-500/5 text-sm theme-text" data-testid="live-warning">
+          <p className="font-semibold text-red-600">Live = your real money.</p>
+          <p className="mt-1">Run a second TWS window logged in to your <strong>live</strong> account (not Paper Trading)
+            with its API on port <strong>7496</strong>. Sapient reads it until you authorise real-money orders in Step 4,
+            and real-money orders need ASX <strong>real-time</strong> prices (IBKR Client Portal → Settings → Market Data
+            Subscriptions → ASX Total, Non-Professional).</p>
         </div>
-        <p className="page-subtitle">Connect Sapient to Trader Workstation (TWS) on this PC — read-only, or paper orders once you authorise them</p>
-      </div>
+      )}
 
       {/* Status */}
       <div className="card" data-testid="tws-status">
@@ -147,18 +181,12 @@ export default function BrokerageSettings() {
           <span className={`px-2 py-0.5 rounded-md text-xs font-bold border ${toneClass}`}>{label.text}</span>
           {state === 'READY' && (
             <span className="px-2 py-0.5 rounded-md text-xs font-bold border bg-sky-500/15 text-sky-600 border-sky-500/30">
-              {paperOn ? 'TWS PAPER' : isPaper ? 'TWS PAPER · READ-ONLY' : 'TWS · READ-ONLY'}
+              {live ? (paperOn ? 'TWS LIVE' : 'TWS LIVE · READ-ONLY') : paperOn ? 'TWS PAPER' : isPaper ? 'TWS PAPER · READ-ONLY' : 'TWS · READ-ONLY'}
             </span>
           )}
-          {paperOn ? (
-            <span className="px-2 py-0.5 rounded-md text-xs font-bold border bg-emerald-500/15 text-emerald-600 border-emerald-500/30">
-              ORDERS: TWS PAPER · LIVE OFF
-            </span>
-          ) : (
-            <span className="px-2 py-0.5 rounded-md text-xs font-bold border bg-slate-500/10 theme-text-secondary theme-border">
-              ORDERS: SIMULATION ONLY
-            </span>
-          )}
+          <span className={`px-2 py-0.5 rounded-md text-xs font-bold border ${paperOn
+            ? (live ? 'bg-red-500/15 text-red-600 border-red-500/40' : 'bg-emerald-500/15 text-emerald-600 border-emerald-500/30')
+            : 'bg-slate-500/10 theme-text-secondary theme-border'}`}>{ordersBadge}</span>
         </div>
         <p className="text-sm theme-text-secondary mt-2">{status?.detail ?? 'Checking…'}</p>
         {status && !status.worker_running && (
@@ -172,7 +200,7 @@ export default function BrokerageSettings() {
             <p className="theme-text">{sdk?.found ? `Installed (${sdk.version ?? 'version unknown'})` : 'Not found'}</p></div>
         </div>
         {settings?.enabled && (
-          <button className="btn-secondary mt-4 inline-flex items-center gap-2" onClick={() => twsApi.reconnect().then(() => toast.success('Reconnecting…'))}>
+          <button className="btn-secondary mt-4 inline-flex items-center gap-2" onClick={() => tws.reconnect().then(() => toast.success('Reconnecting…'))}>
             <RefreshCw className="w-4 h-4" /> Reconnect
           </button>
         )}
@@ -184,7 +212,7 @@ export default function BrokerageSettings() {
           <h2 className="text-lg font-semibold theme-text">Step 1 — Set up TWS (about 10–15 minutes)</h2>
           {guideOpen ? <ChevronDown className="w-5 h-5 theme-text-secondary" /> : <ChevronRight className="w-5 h-5 theme-text-secondary" />}
         </button>
-        {guideOpen && <div className="mt-5"><TwsSetupGuide /></div>}
+        {guideOpen && <div className="mt-5"><TwsSetupGuide live={live} /></div>}
       </div>
 
       {/* Settings */}
@@ -194,22 +222,24 @@ export default function BrokerageSettings() {
         <div className="grid sm:grid-cols-3 gap-4">
           <label className="text-sm theme-text-secondary">Socket port
             <input className="input w-full mt-1" inputMode="numeric" value={form.port} onChange={(e) => setForm({ ...form, port: e.target.value })} />
-            <span className="text-xs">Paper is normally 7497</span>
+            <span className="text-xs">{live ? 'Live is normally 7496' : 'Paper is normally 7497'}</span>
           </label>
           <label className="text-sm theme-text-secondary">Client ID
             <input className="input w-full mt-1" inputMode="numeric" value={form.client_id} onChange={(e) => setForm({ ...form, client_id: e.target.value })} />
             <span className="text-xs">Any number above 0 not used by another program</span>
           </label>
-          <label className="text-sm theme-text-secondary">Paper account number
-            <input className="input w-full mt-1 font-mono" placeholder="DU1234567" value={form.expected_account}
-              onChange={(e) => setForm({ ...form, expected_account: e.target.value.toUpperCase(), paper_confirmed: false })} />
+          <label className="text-sm theme-text-secondary">{live ? 'Live account number' : 'Paper account number'}
+            <input className="input w-full mt-1 font-mono" placeholder={live ? 'U1234567' : 'DU1234567'} value={form.expected_account}
+              onChange={(e) => setForm({ ...form, expected_account: e.target.value.toUpperCase(), account_confirmed: false })} />
             <span className="text-xs">Shown at the top of TWS</span>
           </label>
         </div>
         <label className="flex items-start gap-2 mt-4 text-sm theme-text">
-          <input type="checkbox" className="mt-1" checked={form.paper_confirmed}
-            onChange={(e) => setForm({ ...form, paper_confirmed: e.target.checked })} />
-          <span>I checked that TWS shows the red <strong>Paper Trading</strong> banner for this account.</span>
+          <input type="checkbox" className="mt-1" checked={form.account_confirmed} data-testid="account-confirmed"
+            onChange={(e) => setForm({ ...form, account_confirmed: e.target.checked })} />
+          {live
+            ? <span>This is my <strong>real-money (live)</strong> account: TWS shows this U… account and <strong>no</strong> Paper Trading banner.</span>
+            : <span>I checked that TWS shows the red <strong>Paper Trading</strong> banner for this account.</span>}
         </label>
         <details className="mt-3 text-sm theme-text-secondary">
           <summary className="cursor-pointer">Advanced: IBKR API software folder</summary>
@@ -258,13 +288,13 @@ export default function BrokerageSettings() {
 
       {paper && (
         <PaperTradingCard key={paper.binding.authorised_at ?? 'new'} status={paper} account={status?.account ?? null}
-          paperConfirmed={!!settings?.paper_confirmed} onChange={loadPaper} />
+          paperConfirmed={!!settings?.account_confirmed} onChange={loadPaper} />
       )}
 
       {/* Read-only account */}
       {account && (state === 'READY' || state === 'IBKR_DISCONNECTED') && (
         <div className="card" data-testid="tws-account">
-          <h2 className="text-lg font-semibold theme-text mb-1">Your account (read-only)</h2>
+          <h2 className="text-lg font-semibold theme-text mb-1">Your {live ? 'LIVE ' : ''}account (read-only view)</h2>
           <p className="text-xs theme-text-secondary mb-4">From TWS{account.snapshots.summary ? `, updated ${new Date(account.snapshots.summary.taken_at).toLocaleTimeString()}` : ''}. Refreshes every minute.</p>
           <div className="grid sm:grid-cols-4 gap-3 mb-6">
             {[['NetLiquidation', 'Net value'], ['TotalCashValue', 'Cash'], ['BuyingPower', 'Buying power'], ['GrossPositionValue', 'Invested']].map(([tag, title]) => (

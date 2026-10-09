@@ -240,8 +240,13 @@ class TwsSession:
         self._wait(lambda n, f: n == "execDetailsEnd" and f.get("reqId") == REQ_EXECUTIONS, timeout, collect)
         return rows
 
-    def market_snapshot(self, symbol: str, exchange: str, currency: str, timeout: float = 15.0) -> dict:
-        """Qualify one stock and take a delayed-if-needed price snapshot (no subscription purchase)."""
+    def market_snapshot(self, symbol: str, exchange: str, currency: str, timeout: float = 15.0,
+                        data_type: int = 3) -> dict:
+        """Qualify one stock and take a price snapshot.
+
+        data_type 3 = delayed if not subscribed (paper); 1 = real-time only (live
+        orders). The answer's ``market_data_type`` says what TWS actually sent.
+        """
         contract = self.transport.make_contract(symbol=symbol, secType="STK", exchange=exchange, currency=currency)
         found: list = []
 
@@ -260,7 +265,7 @@ class TwsSession:
                 result["market_data_type"] = fields.get("marketDataType")
             elif name == "tickPrice" and fields.get("reqId") == REQ_MARKET:
                 prices[str(fields.get("tickType"))] = _plain(fields.get("price"))
-        self.transport.request("reqMarketDataType", 3)  # delayed if not subscribed to live data
+        self.transport.request("reqMarketDataType", data_type)
         self.transport.request("reqMktData", REQ_MARKET, found[0], "", True, False, [])
         self._wait(lambda n, f: n == "tickSnapshotEnd" and f.get("reqId") == REQ_MARKET, timeout, collect_ticks)
         result["prices"] = prices

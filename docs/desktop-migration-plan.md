@@ -308,6 +308,11 @@ account-to-portfolio allocation screen.
   unknown never resent), fills/commissions, cancel, Emergency stop cancels
   own orders, Brokerage Step 4 and the Paper orders page. ASX only. See
   [paper-trading.md](paper-trading.md).
+- **F3 (built 2026-10-09, locked until the user authorises live in the app):**
+  real-money trading per portfolio (paper or live), second TWS connector on
+  the live login, real-time prices only, live limits, one-step "Buy on paper /
+  for real & manage" with semi- or fully automatic management. See
+  [live-trading.md](live-trading.md).
 - **F — Paper orders (original plan):** only after the user says "authorise paper trading" and
   unticks Read-Only on the paper TWS. Real paper orders through
   `IntentService` → outbox → connector; approvals inbox, desktop notifications,

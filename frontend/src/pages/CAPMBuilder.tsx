@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom'
 import { useState } from 'react'
 import { portfolioApi, stocksApi } from '../lib/api'
 import { toast } from 'sonner'
@@ -52,6 +53,7 @@ interface OptimizationResult {
 }
 
 export default function CAPMBuilder() {
+  const navigate = useNavigate()
   const { theme } = useTheme()
   const isDark = theme === 'dark'
   
@@ -190,8 +192,9 @@ export default function CAPMBuilder() {
     
     setSaving(true)
     try {
-      await portfolioApi.save(portfolioName.trim(), result, investmentAmount, 'capm', riskTolerance)
-      toast.success('Portfolio saved!')
+      const saved = await portfolioApi.save(portfolioName.trim(), result, investmentAmount, 'capm', riskTolerance)
+      toast.success('Portfolio saved. Buy it on paper or for real from its page.')
+      if (saved.data?.portfolio_id) navigate(`/portfolios/${saved.data.portfolio_id}`)
       setShowSaveModal(false)
       setPortfolioName('')
     } catch (error: unknown) {

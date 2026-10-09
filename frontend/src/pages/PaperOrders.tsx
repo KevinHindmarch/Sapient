@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { ClipboardList, Loader2, Send } from 'lucide-react'
-import { apiErrorMessage, PaperOrder, PaperOrderState, PaperStatus, paperApi, UNKNOWN_CHECK_TEXT } from '../lib/api'
+import { apiErrorMessage, liveApi, PaperOrder, PaperOrderState, PaperStatus, paperApi, tradingApiFor, TradingEnv, UNKNOWN_CHECK_TEXT } from '../lib/api'
 
 const STATE: Record<PaperOrderState, { text: string; tone: string }> = {
   QUEUED: { text: 'Waiting to send', tone: 'text-sky-500' },
@@ -17,23 +17,24 @@ const STATE: Record<PaperOrderState, { text: string; tone: string }> = {
   BLOCKED: { text: 'Not sent', tone: 'theme-text-secondary' },
   UNKNOWN: { text: 'Outcome unknown', tone: 'text-red-500' },
 }
-const ORIGIN = { manual: 'You', ai_approval: 'AI (you approved)', ai_autonomous: 'AI (automatic)' }
+const ORIGIN = { manual: 'You', ai_approval: 'AI (you approved)', ai_autonomous: 'AI (automatic)', entry: 'Portfolio purchase' }
 
 const aud = (value: string | number | null | undefined) =>
   value === null || value === undefined ? '—' : `A$${Number(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 3 })}`
 
 export default function PaperOrders() {
   const [orders, setOrders] = useState<PaperOrder[]>([])
-  const [status, setStatus] = useState<PaperStatus | null>(null)
+  const [statuses, setStatuses] = useState<Record<TradingEnv, PaperStatus | null>>({ paper: null, live: null })
+  const [env, setEnv] = useState<TradingEnv>('paper')
   const [ticket, setTicket] = useState({ symbol: '', side: 'BUY' as 'BUY' | 'SELL', quantity: '' })
   const [sending, setSending] = useState(false)
   const [checking, setChecking] = useState<PaperOrder | null>(null)
 
   const load = useCallback(async () => {
     try {
-      const [o, s] = await Promise.all([paperApi.orders(), paperApi.status()])
+      const [o, p, l] = await Promise.all([paperApi.orders(), paperApi.status(), liveApi.status()])
       setOrders(o.data)
-      setStatus(s.data)
+      setStatuses({ paper: p.data, live: l.data })
     } catch { /* engine restarting */ }
   }, [])
 
@@ -50,8 +51,8 @@ export default function PaperOrders() {
     if (!symbol || !Number.isInteger(quantity) || quantity < 1) return toast.error('Enter an ASX code and a whole number of shares')
     setSending(true)
     try {
-      await paperApi.place({ symbol, side: ticket.side, quantity, idempotency_key: `manual:${crypto.randomUUID()}` })
-      toast.success(`${ticket.side} ${quantity} ${symbol} queued for your paper account`)
+      await tradingApiFor(env).place({ symbol, side: ticket.side, quantity, idempotency_key: `manual:${crypto.randomUUID()}` })
+      toast.success(`${ticket.side} ${quantity} ${symbol} queued for your ${env === 'live' ? 'LIVE (real-money)' : 'paper'} account`)
       setTicket({ symbol: '', side: ticket.side, quantity: '' })
       await load()
     } catch (err) {
@@ -71,25 +72,38 @@ export default function PaperOrders() {
     }
   }
 
+  const status = statuses[env]
   const binding = status?.binding
   const authorised = !!binding?.authorised_at
+  const liveAuthorised = !!statuses.live?.binding.authorised_at
+  const live = env === 'live'
   return (
     <div className="max-w-5xl mx-auto space-y-6 animate-fade-in" data-testid="paper-orders">
       <div className="page-header">
-        <h1 className="page-title flex items-center gap-2"><ClipboardList className="w-7 h-7 text-sky-500" /> Paper orders</h1>
-        <p className="page-subtitle">Practice orders sent to your Interactive Brokers paper account. No real money. Live trading is off.</p>
+        <h1 className="page-title flex items-center gap-2"><ClipboardList className="w-7 h-7 text-sky-500" /> Orders</h1>
+        <p className="page-subtitle">Orders Sapient sends to Interactive Brokers: <strong>paper</strong> (practice money) and,
+          if you authorised it, <strong className="text-red-600">live (real money)</strong>.</p>
       </div>
 
+      {liveAuthorised && (
+        <div className="flex gap-2" role="tablist">
+          <button className={env === 'paper' ? 'btn-primary' : 'btn-secondary'} onClick={() => setEnv('paper')}>Paper ticket</button>
+          <button className={env === 'live' ? 'btn-primary !bg-red-600 !from-red-600 !to-red-700' : 'btn-secondary'}
+            onClick={() => setEnv('live')} data-testid="ticket-live">Real-money ticket</button>
+        </div>
+      )}
       {!authorised ? (
         <div className="card text-sm theme-text-secondary">
-          Paper trading is not authorised yet. Set it up in <Link to="/brokerage" className="text-sky-500 underline">Brokerage → Step 4</Link>.
+          {live ? 'Real-money' : 'Paper'} trading is not authorised yet. Set it up in{' '}
+          <Link to="/brokerage" className="text-sky-500 underline">Brokerage → Step 4</Link>.
         </div>
       ) : (
-        <div className="card space-y-3">
+        <div className={`card space-y-3 ${live ? 'border-red-500/40' : ''}`}>
           <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-lg font-semibold theme-text">New paper order</h2>
-            <span className="px-2 py-0.5 rounded-md text-xs font-bold border bg-emerald-500/15 text-emerald-600 border-emerald-500/30">
-              TWS PAPER · {binding?.account_id}
+            <h2 className="text-lg font-semibold theme-text">New {live ? 'REAL-MONEY' : 'paper'} order</h2>
+            <span className={`px-2 py-0.5 rounded-md text-xs font-bold border ${live
+              ? 'bg-red-500/15 text-red-600 border-red-500/40' : 'bg-emerald-500/15 text-emerald-600 border-emerald-500/30'}`}>
+              {live ? 'TWS LIVE · REAL MONEY' : 'TWS PAPER'} · {binding?.account_id}
             </span>
           </div>
           {status && !status.ready && (
@@ -118,12 +132,14 @@ export default function PaperOrders() {
             </label>
             <button className="btn-primary inline-flex items-center gap-2" onClick={place}
               disabled={sending || !status?.ready}>
-              {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />} Send paper order
+              {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />} {live ? 'Send REAL-MONEY order' : 'Send paper order'}
             </button>
           </div>
           <p className="text-xs theme-text-secondary">
-            Sapient sets the limit price from TWS's delayed price when it sends (a buy at that price or lower, a sell at it
-            or higher) and refuses if it is more than {Number(binding?.max_price_gap_pct ?? 3)}% away from Yahoo's price.
+            {live
+              ? <>Sapient prices it from TWS's <strong>real-time</strong> price when it sends (buy at the ask, sell at the bid) and refuses if</>
+              : <>Sapient sets the limit price from TWS's delayed price when it sends (a buy at that price or lower, a sell at it
+            or higher) and refuses if</>}{' '}it is more than {Number(binding?.max_price_gap_pct ?? 3)}% away from Yahoo's price.
             Limits: up to {aud(binding?.max_order_value)} per order, {binding?.max_orders_per_day} orders and{' '}
             {aud(binding?.max_value_per_day)} per day.
           </p>
@@ -133,14 +149,19 @@ export default function PaperOrders() {
       <div className="card">
         <h2 className="text-lg font-semibold theme-text mb-3">Orders</h2>
         {orders.length === 0 ? (
-          <p className="text-sm theme-text-secondary">No paper orders yet.</p>
+          <p className="text-sm theme-text-secondary">No orders yet.</p>
         ) : (
           <div className="space-y-3">
             {orders.map((o) => {
               const st = STATE[o.state]
               return (
-                <div key={o.id} className="rounded-xl border theme-border p-3 text-sm" data-testid="paper-order">
+                <div key={o.id} className={`rounded-xl border p-3 text-sm ${o.environment === 'live' ? 'border-red-500/40' : 'theme-border'}`}
+                  data-testid="paper-order">
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${o.environment === 'live'
+                      ? 'bg-red-500/15 text-red-600 border-red-500/40' : 'bg-slate-500/10 theme-text-secondary theme-border'}`}>
+                      {o.environment === 'live' ? 'REAL MONEY' : 'PAPER'}
+                    </span>
                     <span className={`font-bold ${o.side === 'BUY' ? 'text-emerald-500' : 'text-red-500'}`}>{o.side}</span>
                     <span className="font-semibold theme-text">{Number(o.quantity)} {o.symbol}</span>
                     <span className="theme-text-secondary">limit {aud(o.limit_price)}{o.quote?.delayed ? ' (delayed price)' : ''}</span>
@@ -160,7 +181,7 @@ export default function PaperOrders() {
                   )}
                   <div className="flex gap-2 mt-2">
                     {['QUEUED', 'SUBMITTED', 'PARTIALLY_FILLED'].includes(o.state) && (
-                      <button className="btn-secondary text-xs" onClick={() => act(() => paperApi.cancel(o.id), 'Cancel requested')}>
+                      <button className="btn-secondary text-xs" onClick={() => act(() => tradingApiFor(o.environment).cancel(o.id), 'Cancel requested')}>
                         Cancel order
                       </button>
                     )}
@@ -190,7 +211,7 @@ export default function PaperOrders() {
               <button className="btn-primary" onClick={() => {
                 const id = checking.id
                 setChecking(null)
-                void act(() => paperApi.resolveUnknown(id), 'Marked as not placed')
+                void act(() => tradingApiFor(checking.environment).resolveUnknown(id), 'Marked as not placed')
               }}>{UNKNOWN_CHECK_TEXT}</button>
             </div>
           </div>

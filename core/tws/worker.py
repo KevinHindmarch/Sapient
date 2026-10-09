@@ -54,7 +54,9 @@ def _now():
 
 class TwsWorker:
     def __init__(self, transport_factory: Callable[[SdkInfo], Transport] = IbapiTransport,
-                 check_port: Callable[[int], bool] = port_open, sdk_finder=find_sdk, clock: Clock | None = None):
+                 check_port: Callable[[int], bool] = port_open, sdk_finder=find_sdk, clock: Clock | None = None,
+                 profile: str = "paper"):
+        self.profile = profile
         self.transport_factory = transport_factory
         self.check_port = check_port
         self.sdk_finder = sdk_finder
@@ -72,7 +74,7 @@ class TwsWorker:
         if state != self.state:
             log.info("TWS state %s -> %s (%s)", self.state, state, detail or "")
         self.state = state
-        store.set_status(state=state, detail=detail, **fields)
+        store.set_status(self.profile, state=state, detail=detail, **fields)
 
     def _disconnect(self) -> None:
         self.executor = None
@@ -90,15 +92,15 @@ class TwsWorker:
 
     # ---- main loop -------------------------------------------------------
     def tick(self) -> None:
-        store.heartbeat()
-        command = store.claim_next_command()
+        store.heartbeat(self.profile)
+        command = store.claim_next_command(self.profile)
         if command:
             self._run_command(command)
             return
-        settings = store.get_settings()
-        binding = get_binding()
+        settings = store.get_settings(self.profile)
+        binding = get_binding(env=self.profile)
         key = (tuple(settings[k] for k in ("enabled", "port", "client_id", "expected_account", "sdk_folder",
-                                            "paper_confirmed")),
+                                            "account_confirmed")),
                binding["account_id"], binding["authorised_at"])
         if key != self.settings_key:  # settings changed: start over
             self.settings_key = key
@@ -157,17 +159,16 @@ class TwsWorker:
             return
         self.failures = 0
         self.next_snapshot = 0.0
-        if orders_allowed and accounts[0] == get_binding()["account_id"]:
-            self.executor = PaperExecutor(session, settings["client_id"], accounts[0])
-        store.set_status(account=accounts[0], server_version=session.transport.server_version(),
+        if orders_allowed and accounts[0] == get_binding(env=self.profile)["account_id"]:
+            self.executor = PaperExecutor(session, settings["client_id"], accounts[0], env=self.profile)
+        store.set_status(self.profile, account=accounts[0], server_version=session.transport.server_version(),
                          connected_since=_now())
         self._watch(settings)
 
-    @staticmethod
-    def _paper_authorised(settings: dict) -> bool:
-        """Orders only for the account the user authorised and confirmed as paper."""
-        binding = get_binding()
-        return bool(binding["account_id"] and binding["authorised_at"] and settings.get("paper_confirmed")
+    def _paper_authorised(self, settings: dict) -> bool:
+        """Orders only for the account the user authorised and confirmed for this profile."""
+        binding = get_binding(env=self.profile)
+        return bool(binding["account_id"] and binding["authorised_at"] and settings.get("account_confirmed")
                     and settings.get("expected_account") == binding["account_id"])
 
     def _watch(self, settings: dict) -> None:
@@ -193,18 +194,19 @@ class TwsWorker:
             if self.state != "READY":
                 self._publish("SYNCHRONIZING", "Loading account data from TWS…", ib_connected=True)
             try:
-                store.save_snapshot("summary", session.account_summary())
-                store.save_snapshot("positions", session.positions())
-                store.save_snapshot("open_orders", session.open_orders())
-                store.save_snapshot("executions", session.executions())
+                store.save_snapshot("summary", session.account_summary(), self.profile)
+                store.save_snapshot("positions", session.positions(), self.profile)
+                store.save_snapshot("open_orders", session.open_orders(), self.profile)
+                store.save_snapshot("executions", session.executions(), self.profile)
             except TwsTimeout:
                 self._publish("SYNCHRONIZING", "TWS is slow to send account data; retrying.", ib_connected=True)
                 self.next_snapshot = self.clock.monotonic() + 10
                 return
             self.next_snapshot = self.clock.monotonic() + SNAPSHOT_INTERVAL
-            store.set_status(last_sync_at=_now())
+            store.set_status(self.profile, last_sync_at=_now())
         if self.executor:
-            self._publish("READY", "Connected to your TWS paper account (paper orders on).", ib_connected=True)
+            self._publish("READY", "Connected to your TWS LIVE account (REAL-MONEY orders on)." if self.profile == "live"
+                          else "Connected to your TWS paper account (paper orders on).", ib_connected=True)
             self.executor.step()
         else:
             self._publish("READY", "Connected to TWS (read-only).", ib_connected=True)
@@ -213,7 +215,7 @@ class TwsWorker:
         try:
             if command["kind"] == "test_connection":
                 self._disconnect()  # the test uses the same client ID
-                result = run_test(store.get_settings(), self.transport_factory, self.check_port, self.sdk_finder)
+                result = run_test(store.get_settings(self.profile), self.transport_factory, self.check_port, self.sdk_finder)
                 store.finish_command(command["id"], result, ok=True)
             else:  # reconnect
                 self._disconnect()
@@ -226,8 +228,8 @@ class TwsWorker:
             self.next_attempt = 0.0
 
     def run(self, should_stop: Callable[[], bool] = lambda: False) -> None:
-        store.fail_stale_running_commands()
-        if PaperExecutor.recover_on_start():
+        store.fail_stale_running_commands(self.profile)
+        if PaperExecutor.recover_on_start(self.profile):
             log.warning("paper orders were mid-send at startup; marked unknown until TWS confirms")
         while not should_stop():
             try:

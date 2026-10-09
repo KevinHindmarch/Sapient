@@ -127,6 +127,12 @@ for (let i = 0; i < 60 && !tws?.worker_running; i++) {
   if (!tws.worker_running) await new Promise((r) => setTimeout(r, 1000))
 }
 check(tws?.worker_running, `TWS connector is running (state ${tws?.state})`)
+let liveTws = null
+for (let i = 0; i < 60 && !liveTws?.worker_running; i++) {
+  liveTws = await api('/tws-live/status')
+  if (!liveTws.worker_running) await new Promise((r) => setTimeout(r, 1000))
+}
+check(liveTws?.worker_running && liveTws.state === 'NOT_CONFIGURED', 'live (real-money) TWS connector is running and not set up')
 // The market-hours scheduler runs in the same background process (needs bundled time zones).
 let sched = null
 for (let i = 0; i < 60 && !sched?.running; i++) {
@@ -148,6 +154,11 @@ await page.waitForSelector('[data-testid="tws-status"]', { timeout: 30_000 })
 await page.waitForSelector('text=Step 3 — Test the connection', { timeout: 30_000 })
 await page.waitForSelector('[data-testid="paper-trading"]', { timeout: 30_000 })
 check(true, 'Brokerage shows the paper trading step (not authorised in tests)')
+await page.click('[data-testid="tab-live"]')
+await page.waitForSelector('[data-testid="live-warning"]', { timeout: 30_000 })
+await page.waitForSelector('[data-testid="live-trading"]', { timeout: 30_000 })
+check(true, 'Brokerage Live tab shows the real-money setup (locked in tests)')
+await page.click('[data-testid="tab-paper"]')
 await page.evaluate(() => { location.hash = '#/paper-orders' })
 await page.waitForSelector('[data-testid="paper-orders"]', { timeout: 30_000 })
 await page.evaluate(() => { location.hash = '#/ai-trading' })
@@ -181,5 +192,7 @@ const log = fs.readFileSync(path.join(logs, 'engine.log'), 'utf8')
 check(/engine exited/.test(log), 'engine process stops when the app closes')
 const connectorLog = fs.readFileSync(path.join(logs, 'tws-connector-process.log'), 'utf8')
 check(/engine exited/.test(connectorLog), 'TWS connector stops when the app closes')
+const liveLog = fs.readFileSync(path.join(logs, 'tws-connector-live-process.log'), 'utf8')
+check(/engine exited/.test(liveLog), 'live TWS connector stops when the app closes')
 check(errors.length === 0, `no console errors (${JSON.stringify(errors)})`)
 console.log(`desktop smoke test passed (${mode})`)

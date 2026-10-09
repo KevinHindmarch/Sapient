@@ -116,8 +116,9 @@ export default function AITradingInbox() {
     try {
       const res = await aiApi.approveSignal(signal.id)
       if (res.data.paper_order) {
-        toast.success(`${signal.action} ${Number(res.data.paper_order.quantity)} ${signal.symbol}: paper order queued for your `
-          + 'TWS paper account. Follow it on the Paper orders page.')
+        const live = res.data.environment === 'tws_live'
+        toast.success(`${signal.action} ${Number(res.data.paper_order.quantity)} ${signal.symbol}: ${live ? 'REAL-MONEY' : 'paper'} order `
+          + `queued for your TWS ${live ? 'live' : 'paper'} account. Follow it on the Orders page.`)
       } else if (res.data.intent?.state === 'QUEUED') {
         toast.success(`${signal.action} ${signal.symbol} simulation intent queued. No order was placed or filled.`)
       } else {

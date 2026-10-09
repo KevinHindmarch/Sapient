@@ -26,12 +26,14 @@ import logging
 
 from core import db
 from core.strategy import calendar
+from core.tws.environments import get as get_env
 from core.tws.paper import get_binding
 from core.tws.session import TwsSession, TwsTimeout
 
 log = logging.getLogger("sapient.paper")
 
 LAST, BID, ASK = ("4", "68"), ("1", "66"), ("2", "67")   # live and delayed tick types
+REALTIME_LAST, REALTIME_BID, REALTIME_ASK = ("4",), ("1",), ("2",)
 ACK_TIMEOUT = 10.0
 REJECT_CODES = {103, 110, 200, 201, 203, 321, 10268}
 READ_ONLY_HINT = (" In TWS: File → Global Configuration → API → Settings, untick “Read-Only API” "
@@ -84,6 +86,31 @@ def choose_limit(side: str, prices: dict, reference: Decimal, max_gap_pct: Decim
     return limit, ""
 
 
+def choose_live_limit(side: str, prices: dict, reference: Decimal, max_gap_pct: Decimal) -> tuple[Decimal | None, str]:
+    """Real-money limit from a REAL-TIME snapshot: buy at the ask, sell at the bid (fills at today's price).
+
+    Delayed ticks are ignored; without a real-time price nothing is sent.
+    """
+    last = _first_price(prices, REALTIME_LAST)
+    if side == "BUY":
+        raw = _first_price(prices, REALTIME_ASK) or last
+        if raw is None:
+            return None, "No real-time price from TWS, so no real-money order was sent."
+        tick = asx_tick(raw)
+        limit = (raw / tick).to_integral_value(ROUND_CEILING) * tick
+    else:
+        raw = _first_price(prices, REALTIME_BID) or last
+        if raw is None:
+            return None, "No real-time price from TWS, so no real-money order was sent."
+        tick = asx_tick(raw)
+        limit = (raw / tick).to_integral_value(ROUND_FLOOR) * tick
+    gap = abs(limit - reference) / reference * 100
+    if gap > max_gap_pct:
+        return None, (f"TWS real-time price {limit} is {gap:.1f}% away from the Yahoo price {reference} "
+                      f"(allowed {max_gap_pct}%), so the order was not sent.")
+    return limit, ""
+
+
 def _exec_family(exec_id: str) -> tuple[str, str]:
     """IBKR corrections keep the id and change the final '.NN' revision."""
     family, _, revision = exec_id.rpartition(".")
@@ -91,19 +118,20 @@ def _exec_family(exec_id: str) -> tuple[str, str]:
 
 
 class PaperExecutor:
-    def __init__(self, session: TwsSession, client_id: int, account: str):
+    def __init__(self, session: TwsSession, client_id: int, account: str, env: str = "paper"):
         self.session = session
         self.client_id = client_id
         self.account = account
+        self.env = get_env(env)
 
     # ---- startup ----------------------------------------------------------------
     @staticmethod
-    def recover_on_start() -> int:
+    def recover_on_start(env: str = "paper") -> int:
         """Orders caught mid-send by a crash or restart have an unknown outcome."""
         with db.transaction() as (cur, _):
             cur.execute("""UPDATE paper_orders SET state='UNKNOWN', updated_at=%s,
                            detail='Sapient stopped while sending this order; checking TWS before anything else is sent.'
-                           WHERE state='SUBMITTING' RETURNING id""", (_now(),))
+                           WHERE state='SUBMITTING' AND environment=%s RETURNING id""", (_now(), get_env(env).name))
             return len(cur.fetchall())
 
     # ---- one connector tick -------------------------------------------------------
@@ -117,10 +145,10 @@ class PaperExecutor:
 
     def _send_cancels(self) -> None:
         with db.transaction() as (cur, _):
-            binding = get_binding(cur)
+            binding = get_binding(cur, self.env.name)
             states = "('CANCEL_REQUESTED','UNKNOWN')" if binding["halted"] else "('CANCEL_REQUESTED')"
-            cur.execute(f"""SELECT id, api_order_id FROM paper_orders WHERE state IN {states}
-                            AND api_order_id IS NOT NULL AND cancel_sent_at IS NULL""")
+            cur.execute(f"""SELECT id, api_order_id FROM paper_orders WHERE state IN {states} AND environment=%s
+                            AND api_order_id IS NOT NULL AND cancel_sent_at IS NULL""", (self.env.name,))
             pending = [dict(r) for r in cur.fetchall()]
         for order in pending:
             try:
@@ -145,10 +173,12 @@ class PaperExecutor:
     def _submit_next(self) -> None:
         now = _now()
         with db.transaction() as (cur, _):
-            binding = get_binding(cur)
-            cur.execute("SELECT count(*) AS n FROM paper_orders WHERE state IN ('UNKNOWN','SUBMITTING')")
+            binding = get_binding(cur, self.env.name)
+            cur.execute("""SELECT count(*) AS n FROM paper_orders WHERE environment=%s
+                           AND state IN ('UNKNOWN','SUBMITTING')""", (self.env.name,))
             unresolved = cur.fetchone()["n"]
-            cur.execute("SELECT * FROM paper_orders WHERE state='QUEUED' ORDER BY created_at LIMIT 1")
+            cur.execute("""SELECT * FROM paper_orders WHERE state='QUEUED' AND environment=%s
+                           ORDER BY created_at LIMIT 1""", (self.env.name,))
             order = cur.fetchone()
         if not order:
             return
@@ -156,7 +186,7 @@ class PaperExecutor:
         if order["expires_at"] <= now:
             return self._block(order["id"], "EXPIRED", "Not sent in time (TWS was busy or not ready).")
         if not binding["enabled"] or binding["halted"] or binding["account_id"] != self.account:
-            return self._block(order["id"], "BLOCKED", "Paper trading was switched off before sending.")
+            return self._block(order["id"], "BLOCKED", "Trading was switched off before sending.")
         if order["account_id"] != self.account:
             return self._block(order["id"], "BLOCKED", "TWS is logged in to a different account.")
         if unresolved:
@@ -165,14 +195,19 @@ class PaperExecutor:
             return self._block(order["id"], "BLOCKED", "The ASX closed before the order could be sent.")
 
         symbol = order["symbol"][:-3]  # BHP.AX -> BHP
+        live = self.env.realtime_required
         try:
-            snap = self.session.market_snapshot(symbol, "ASX", "AUD")
+            snap = self.session.market_snapshot(symbol, "ASX", "AUD", data_type=1 if live else 3)
         except TwsTimeout:
             return self._block(order["id"], "BLOCKED", "TWS did not send a price in time, so nothing was sent.")
         if not snap.get("qualified"):
             return self._block(order["id"], "BLOCKED", f"TWS does not recognise {symbol} on the ASX.")
         reference = Decimal(order["reference_price"])
-        limit, reason = choose_limit(order["side"], snap.get("prices") or {}, reference, binding["max_price_gap_pct"])
+        if live and snap.get("market_data_type") != 1:
+            return self._block(order["id"], "BLOCKED", "TWS sent delayed prices, not real-time. Real-money orders need "
+                                                       "the ASX real-time data subscription, so nothing was sent.")
+        pick = choose_live_limit if live else choose_limit
+        limit, reason = pick(order["side"], snap.get("prices") or {}, reference, binding["max_price_gap_pct"])
         if limit is None:
             return self._block(order["id"], "BLOCKED", reason)
         quantity = Decimal(order["quantity"])
@@ -190,24 +225,27 @@ class PaperExecutor:
         quote = {"prices": snap.get("prices"), "market_data_type": snap.get("market_data_type"),
                  "delayed": snap.get("market_data_type") in (3, 4), "taken_at": _now().isoformat()}
         with db.transaction() as (cur, _):
-            binding = get_binding(cur)
+            binding = get_binding(cur, self.env.name)
             if not binding["enabled"] or binding["halted"]:
-                cur.execute("""UPDATE paper_orders SET state='BLOCKED', detail='Paper trading was switched off before sending.',
+                cur.execute("""UPDATE paper_orders SET state='BLOCKED', detail='Trading was switched off before sending.',
                                updated_at=%s WHERE id=%s AND state='QUEUED'""", (_now(), order["id"]))
                 return
-            cur.execute("SELECT high_water FROM paper_order_ids WHERE id=1")
+            cur.execute(f"SELECT high_water FROM {self.env.ids_table} WHERE id=1")
             high_water = cur.fetchone()["high_water"]
-            cur.execute("SELECT coalesce(max(api_order_id), 0) AS m FROM paper_orders")
+            cur.execute("SELECT coalesce(max(api_order_id), 0) AS m FROM paper_orders WHERE environment=%s",
+                        (self.env.name,))
             used = cur.fetchone()["m"]
-            api_order_id = max(int(next_valid or 0), high_water + 1, used + 1)
-            cur.execute("UPDATE paper_order_ids SET high_water=%s WHERE id=1", (api_order_id,))
+            # Live ids live in their own range so they never clash with paper ids in the shared table.
+            api_order_id = max(int(next_valid or 0), high_water + 1, used + 1, self.env.order_id_base + 1)
+            cur.execute(f"UPDATE {self.env.ids_table} SET high_water=%s WHERE id=1", (api_order_id,))
             cur.execute("""UPDATE paper_orders SET state='SUBMITTING', api_order_id=%s, order_ref=%s, limit_price=%s,
                              quote=%s, con_id=%s, exchange='ASX', currency='AUD', submitted_at=%s, updated_at=%s,
                              detail=%s
                            WHERE id=%s AND state='QUEUED' RETURNING id""",
                         (api_order_id, order_ref, format(limit, "f"), quote, con_id, _now(), _now(),
-                         f"Sending to TWS: {order['side']} {order['quantity']} {symbol} limit A${limit}"
-                         + (" (delayed price)" if quote["delayed"] else ""), order["id"]))
+                         f"Sending to TWS{' (REAL MONEY)' if live else ''}: {order['side']} {order['quantity']} {symbol} "
+                         f"limit A${limit}" + (" (delayed price)" if quote["delayed"] else " (real-time price)"
+                                               if live else ""), order["id"]))
             if not cur.fetchone():
                 return  # cancelled or blocked meanwhile
             cur.execute("INSERT INTO paper_audit(kind, paper_order_id, payload) VALUES ('paper_order_submitting', %s, %s)",
@@ -249,12 +287,13 @@ class PaperExecutor:
 
     def _find(self, cur, *, api_order_id=None, order_ref=None, client_id=None):
         if order_ref and str(order_ref).startswith("sapient:"):
-            cur.execute("SELECT * FROM paper_orders WHERE order_ref=%s", (order_ref,))
+            cur.execute("SELECT * FROM paper_orders WHERE order_ref=%s AND environment=%s", (order_ref, self.env.name))
             row = cur.fetchone()
             if row:
                 return dict(row)
         if api_order_id and client_id in (None, self.client_id):
-            cur.execute("SELECT * FROM paper_orders WHERE api_order_id=%s", (api_order_id,))
+            cur.execute("SELECT * FROM paper_orders WHERE api_order_id=%s AND environment=%s",
+                        (api_order_id, self.env.name))
             row = cur.fetchone()
             if row:
                 return dict(row)
@@ -390,7 +429,8 @@ class PaperExecutor:
         position = cur.fetchone()
         old_qty = Decimal(str(position["quantity"])) if position else Decimal(0)
         old_cost = Decimal(str(position["avg_cost"])) if position else Decimal(0)
-        note = f"Paper fill in {self.account} (TWS execution {exec_id})"
+        note = (f"{'LIVE (real-money) fill' if self.env.name == 'live' else 'Paper fill'} in {self.account} "
+                f"(TWS execution {exec_id})")
         position_id = position["id"] if position else None
         if order["origin"] == "entry" and position:
             cur.execute("""SELECT coalesce(decimal_sum(shares * price), '0') AS v, coalesce(decimal_sum(shares), '0') AS q
@@ -399,7 +439,7 @@ class PaperExecutor:
             if Decimal(str(totals["q"])) > 0:
                 cur.execute("UPDATE portfolio_positions SET avg_cost=%s WHERE id=%s",
                             (float(Decimal(str(totals["v"])) / Decimal(str(totals["q"]))), position_id))
-            note = "Paper entry fill: bought on paper to match this portfolio. " + note
+            note = f"Entry fill: bought in {self.env.label} to match this portfolio. " + note
         elif order["side"] == "BUY":
             new_qty = old_qty + delta
             if position:

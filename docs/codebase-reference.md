@@ -107,6 +107,12 @@ open orders, executions snapshots), GET `/compare/{portfolio_id}` (model
 holdings vs the latest TWS positions: match / differs / model_only /
 broker_only; symbols mapped BHP→BHP.AX for AUD/ASX, "BRK B"→BRK-B).
 
+### `/api/live` and `/api/tws-live` (real money, F3)
+Same routes as `/api/paper` and `/api/tws` for the live environment (see
+docs/live-trading.md). `/api/{paper,live}/portfolios/{id}/start` takes
+`{"mode": "suggestions"|"autonomous"}` and sets the portfolio's
+`trading_environment`. `/api/paper/orders` lists both environments.
+
 ### `/api/paper` (paper trading, F2)
 GET `/status` (binding, ready, blockers, authorisation text), POST
 `/authorise` (exact statement for the confirmed TWS paper account + limits),
@@ -160,6 +166,9 @@ a changed checksum or an unknown newer version refuses to start:
    REJECTED/EXPIRED/BLOCKED/UNKNOWN; api_order_id/order_ref unique),
    `paper_executions` (execId PK, commission), `paper_order_ids` (high-water),
    `paper_audit`.
+7. `live` — `tws_live_settings/status/snapshots`, `tws_commands.profile`,
+   `live_binding`, `live_order_ids`, `paper_orders.environment`,
+   `portfolios.live_started_at` and `trading_environment`.
 4. `profile` — `users.theme` (NULL until saved, so upgrades keep the theme on
    screen) and `users.onboarded_at`; existing users are marked onboarded so an
    upgrade never re-runs the welcome wizard.

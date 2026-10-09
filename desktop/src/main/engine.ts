@@ -47,6 +47,8 @@ export class EngineSupervisor extends EventEmitter {
     private readonly allowedOrigins: string[],
     /** 'api' serves HTTP and reports its port; 'worker' is the TWS connector (no port). */
     private readonly role: 'api' | 'worker' = 'api',
+    /** Extra command-line arguments, e.g. ['--profile', 'live'] for the real-money connector. */
+    private readonly extraArgs: string[] = [],
   ) {
     super()
   }
@@ -75,6 +77,7 @@ export class EngineSupervisor extends EventEmitter {
     const token = randomBytes(32).toString('base64url')
     const args = [...this.engine.args, '--data-dir', this.dataDir]
     if (this.role === 'worker') args.push('--worker')
+    args.push(...this.extraArgs)
     for (const origin of this.allowedOrigins) args.push('--allowed-origin', origin)
     this.log(`starting engine (attempt ${attempt}): ${this.engine.command}`)
     this.setState({ kind: 'starting', attempt })

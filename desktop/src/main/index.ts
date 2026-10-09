@@ -21,7 +21,8 @@ protocol.registerSchemesAsPrivileged([
 
 let mainWindow: BrowserWindow | null = null
 let engine: EngineSupervisor
-let connector: EngineSupervisor | null = null  // read-only TWS connector process
+let connector: EngineSupervisor | null = null  // TWS connector for the paper login (+ market-hours scheduler)
+let liveConnector: EngineSupervisor | null = null  // TWS connector for the live (real-money) login
 let shellPage = ''  // HTML for app://sapient/__shell while starting or failed
 let alerts: Alerts | null = null  // tray, notifications, emergency stop
 let quitting = false
@@ -203,6 +204,9 @@ if (!app.requestSingleInstanceLock()) {
       connector = new EngineSupervisor(engineCommand(), app.getPath('userData'),
         path.join(logDir(), 'tws-connector-process.log'), [], 'worker')
       connector.start()
+      liveConnector = new EngineSupervisor(engineCommand(), app.getPath('userData'),
+        path.join(logDir(), 'tws-connector-live-process.log'), [], 'worker', ['--profile', 'live'])
+      liveConnector.start()
     })
     createWindow()
     if (process.platform === 'win32') app.setAppUserModelId('com.sapient.desktop')  // toast notifications
@@ -224,7 +228,7 @@ if (!app.requestSingleInstanceLock()) {
     quitting = true
     alerts?.stop()
     event.preventDefault()
-    void Promise.allSettled([engine.stop(), connector?.stop()]).finally(() => app.exit(0))
+    void Promise.allSettled([engine.stop(), connector?.stop(), liveConnector?.stop()]).finally(() => app.exit(0))
   })
   app.on('window-all-closed', () => app.quit())
 }

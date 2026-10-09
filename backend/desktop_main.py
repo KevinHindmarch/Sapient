@@ -73,6 +73,8 @@ def main(argv=None) -> int:
     parser.add_argument("--port", type=int, default=0, help="0 picks a free port")
     parser.add_argument("--allowed-origin", action="append", default=[])
     parser.add_argument("--worker", action="store_true", help="run the TWS connector instead of the API")
+    parser.add_argument("--profile", choices=("paper", "live"), default="paper",
+                        help="which TWS login the connector serves (live = real money)")
     args = parser.parse_args(argv)
 
     token = sys.stdin.readline().strip()
@@ -95,7 +97,7 @@ def main(argv=None) -> int:
         return 3
 
     if args.worker:
-        return run_worker(args.data_dir)
+        return run_worker(args.data_dir, args.profile)
 
     import uvicorn
     from backend.main import app
@@ -117,23 +119,25 @@ def main(argv=None) -> int:
     return 0
 
 
-def run_worker(data_dir: Path) -> int:
+def run_worker(data_dir: Path, profile: str = "paper") -> int:
     import logging
     from logging.handlers import RotatingFileHandler
     from core.tws.worker import TwsWorker
 
     logs = data_dir / "logs"
     logs.mkdir(parents=True, exist_ok=True)
-    handler = RotatingFileHandler(logs / "tws-connector.log", maxBytes=2_000_000, backupCount=3, encoding="utf-8")
+    name = "tws-connector.log" if profile == "paper" else "tws-connector-live.log"
+    handler = RotatingFileHandler(logs / name, maxBytes=2_000_000, backupCount=3, encoding="utf-8")
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
     logging.basicConfig(level=logging.INFO, handlers=[handler])
     emit("ready")
     # Market-hours RSI checks live in the same background process as the TWS
     # connector; they only create proposals, never orders.
-    import threading
-    from core.strategy.scheduler import run_forever
-    threading.Thread(target=run_forever, args=(lambda: False,), name="scheduler", daemon=True).start()
-    TwsWorker().run()
+    if profile == "paper":  # one scheduler for every portfolio, paper or live
+        import threading
+        from core.strategy.scheduler import run_forever
+        threading.Thread(target=run_forever, args=(lambda: False,), name="scheduler", daemon=True).start()
+    TwsWorker(profile=profile).run()
     return 0
 
 
