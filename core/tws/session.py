@@ -179,6 +179,20 @@ class TwsSession:
             return False
 
     def account_summary(self, timeout: float = 20.0) -> dict:
+        """Account totals, then (separately) cash and exchange rate per currency from "$LEDGER:ALL".
+
+        The ledger is asked for on its own: TWS doesn't reliably answer the
+        per-currency rows when they are mixed into the same request as the totals.
+        Its rows are keyed "Tag:CUR" (CashBalance:USD, ExchangeRate:USD, ...).
+        """
+        values = self._summary(SUMMARY_TAGS, timeout, keyed=False)
+        try:
+            values.update(self._summary("$LEDGER:ALL", timeout, keyed=True))
+        except TwsTimeout:
+            pass  # totals still count; US buys explain that the US$ figures are missing
+        return values
+
+    def _summary(self, tags: str, timeout: float, keyed: bool) -> dict:
         values: dict[str, dict] = {}
 
         def collect(name, fields):
@@ -186,11 +200,8 @@ class TwsSession:
                 tag, currency = str(fields.get("tag")), _plain(fields.get("currency"))
                 entry = {"value": _plain(fields.get("value")), "currency": currency,
                          "account": _plain(fields.get("account"))}
-                if tag not in STANDARD_TAGS:  # one row per currency: CashBalance:AUD, ExchangeRate:USD, ...
-                    values[f"{tag}:{currency}"] = entry
-                else:
-                    values[tag] = entry
-        self.transport.request("reqAccountSummary", REQ_SUMMARY, "All", SUMMARY_TAGS + ",$LEDGER:ALL")
+                values[f"{tag}:{currency}" if keyed or tag not in STANDARD_TAGS else tag] = entry
+        self.transport.request("reqAccountSummary", REQ_SUMMARY, "All", tags)
         try:
             self._wait(lambda n, f: n == "accountSummaryEnd" and f.get("reqId") == REQ_SUMMARY, timeout, collect)
         finally:

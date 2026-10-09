@@ -262,6 +262,17 @@ def admit(request: dict, user_id: int, env: str = "paper") -> dict:
     e = get_env(env)
     r = _normalise(request)
     digest = hashlib.sha256(json.dumps({**r, "environment": e.name}, sort_keys=True).encode()).hexdigest()
+    order_market = markets.for_symbol(r["symbol"])
+    # Fetched before the database is locked, and only when TWS hasn't sent its own rate.
+    fx_fallback = None
+    if order_market and order_market.currency != "AUD" and r["side"] == "BUY":
+        conn = db.connect()
+        try:
+            summary, _ = _snapshot(conn.cursor(), "summary", e.name)
+        finally:
+            conn.close()
+        if markets.rate_to_aud(summary or {}, order_market.currency) is None:
+            fx_fallback = markets.yahoo_rate_to_aud(order_market.currency)
     with db.transaction() as (cur, _):
         cur.execute("SELECT * FROM paper_orders WHERE idempotency_key=%s", (r["idempotency_key"],))
         existing = cur.fetchone()
@@ -277,7 +288,7 @@ def admit(request: dict, user_id: int, env: str = "paper") -> dict:
             raise PaperError(problems[0]["code"], problems[0]["message"])
         portfolio = _check_ownership(cur, r, user_id, now, e)
         _check_ai_mode(cur, r, portfolio, user_id, binding, e)
-        _check_limits(cur, r, binding, now, e, market)
+        _check_limits(cur, r, binding, now, e, market, fx_fallback)
         order_id = str(uuid.uuid4())
         cur.execute("""INSERT INTO paper_orders(id, idempotency_key, request_hash, origin, account_id, portfolio_id,
                          signal_id, symbol, side, quantity, reference_price, expires_at, environment, exchange, currency)
@@ -372,11 +383,9 @@ def _check_ai_mode(cur, r, portfolio, user_id, binding, e: Env):
             raise PaperError("portfolio_not_started", f"Start {e.label} trading for this portfolio first (portfolio page).")
 
 
-def _rate_to_base(summary: dict, currency: str) -> Decimal | None:
-    """How many A$ (the account's base currency) one unit of ``currency`` is worth, from TWS's own ledger."""
-    if currency == "AUD":
-        return Decimal(1)
-    return _summary_value(summary, f"ExchangeRate:{currency}")
+def _rate_to_base(summary: dict, currency: str, fallback: Decimal | None = None) -> Decimal | None:
+    """How many A$ (the account's base currency) one unit of ``currency`` is worth (TWS first)."""
+    return markets.rate_to_aud(summary, currency, fallback)
 
 
 def _cash(summary: dict, currency: str) -> Decimal | None:
@@ -387,7 +396,8 @@ def _cash(summary: dict, currency: str) -> Decimal | None:
     return value
 
 
-def _check_limits(cur, r, binding, now, e: Env, market: "markets.Market" = markets.ASX):
+def _check_limits(cur, r, binding, now, e: Env, market: "markets.Market" = markets.ASX,
+                  fx_fallback: Decimal | None = None):
     """Money limits for BUYS (user decision 2026-10-09: "should be buys only").
 
     Per-order value, daily value, daily order count and the % of the account
@@ -404,10 +414,10 @@ def _check_limits(cur, r, binding, now, e: Env, market: "markets.Market" = marke
             raise PaperError("no_account_values", "Account values from TWS are missing.")
         worst_local = Decimal(0)
     else:
-        rate = _rate_to_base(summary, market.currency)
+        rate = _rate_to_base(summary, market.currency, fx_fallback)
         if rate is None:
-            raise PaperError("no_exchange_rate", f"TWS hasn't sent the {market.currency}/AUD exchange rate yet; "
-                                                 "try again after the next account update.")
+            raise PaperError("no_exchange_rate", f"No {market.currency}/AUD exchange rate is available yet (from TWS "
+                                                 "or Yahoo); try again in a minute.")
         # Worst case the connector may set the limit this far from the reference price, in A$.
         worst_local = quantity * reference * (1 + binding["max_price_gap_pct"] / 100)
         worst = worst_local * rate
@@ -417,8 +427,9 @@ def _check_limits(cur, r, binding, now, e: Env, market: "markets.Market" = marke
                                                 f"A${binding['max_order_value']:,.2f} per order.")
         cash = _cash(summary, market.currency)
         if nav is None or cash is None:
-            raise PaperError("no_account_values", f"Account values from TWS are missing"
-                                                  + (f" (no {market.currency} cash balance)." if nav is not None else "."))
+            raise PaperError("no_account_values", f"TWS hasn't sent your {market.currency} cash balance yet; try again "
+                                                  "after the next account update (about a minute)." if nav is not None
+                             else "Account values from TWS are missing.")
         cur.execute("SELECT max_trade_pct, max_daily_trades FROM ai_trading_settings ORDER BY id LIMIT 1")
         legacy = cur.fetchone() or {}
         max_trade_pct = Decimal(str(legacy.get("max_trade_pct") or 5))
@@ -434,7 +445,7 @@ def _check_limits(cur, r, binding, now, e: Env, market: "markets.Market" = marke
                               coalesce(decimal_sum(quantity * reference_price), '0') AS value
                        FROM paper_orders WHERE {counted} GROUP BY coalesce(currency, 'AUD')""",
                     (e.name, start.astimezone(timezone.utc)))
-        today_value = sum((Decimal(str(row["value"])) * (_rate_to_base(summary, row["currency"]) or Decimal(1))
+        today_value = sum((Decimal(str(row["value"])) * (_rate_to_base(summary, row["currency"], fx_fallback) or Decimal(1))
                            for row in cur.fetchall()), Decimal(0))
         daily_cap = min(binding["max_orders_per_day"],
                         int(legacy.get("max_daily_trades") or binding["max_orders_per_day"]))

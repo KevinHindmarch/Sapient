@@ -194,7 +194,8 @@ class AdmissionTests(PaperTestCase):
 
     def test_scope_is_whole_shares(self):
         self.refused("unsupported_symbol", self.order, symbol="NOT A STOCK")
-        self.refused("no_exchange_rate", self.order, symbol="AAPL")   # US needs TWS's US$ rate (test_g4_us.py)
+        with mock.patch("core.tws.markets.yahoo_rate_to_aud", return_value=None):
+            self.refused("no_exchange_rate", self.order, symbol="AAPL")   # US needs a US$ rate (test_g4_us.py)
         self.refused("whole_shares_required", self.order, quantity="1.5")
         self.refused("whole_shares_required", self.order, quantity=0)
 
@@ -598,8 +599,9 @@ class ApiTests(PaperTestCase):
                 manual = client.post("/api/paper/orders", headers=auth,
                                      json={"symbol": "CBA.AX", "side": "BUY", "quantity": 2})
                 self.assertEqual((manual.status_code, manual.json()["origin"]), (202, "manual"))
-                refused = client.post("/api/paper/orders", headers=auth,
-                                      json={"symbol": "AAPL", "side": "BUY", "quantity": 1})
+                with mock.patch("core.tws.markets.yahoo_rate_to_aud", return_value=None):
+                    refused = client.post("/api/paper/orders", headers=auth,
+                                          json={"symbol": "AAPL", "side": "BUY", "quantity": 1})
                 self.assertEqual(refused.json()["detail"]["code"], "no_exchange_rate")
             off = client.post("/api/paper/disable", headers=auth).json()
             self.assertFalse(off["enabled"])

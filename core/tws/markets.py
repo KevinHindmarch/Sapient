@@ -61,3 +61,39 @@ def tick(market: Market, price: Decimal) -> Decimal:
     if price < Decimal("2.00"):
         return Decimal("0.005")
     return Decimal("0.01")
+
+
+FX_FALLBACK_MARGIN = Decimal("1.02")  # Yahoo's rate is research data: lean towards stricter A$ limits
+
+
+def yahoo_rate_to_aud(currency: str) -> Decimal | None:
+    """A$ per unit of ``currency`` from Yahoo (e.g. AUDUSD=X), with a 2% cautious margin.
+
+    Used only when TWS hasn't sent its own exchange rate, and only to check A$
+    limits (it overstates the A$ value of a US order). Never used as a price.
+    """
+    if currency == "AUD":
+        return Decimal(1)
+    try:
+        from core import yahoo
+        history = yahoo.Ticker(f"AUD{currency}=X").history(period="5d")
+        per_aud = Decimal(str(float(history["Close"].dropna().iloc[-1])))
+        if per_aud > 0:
+            return (Decimal(1) / per_aud * FX_FALLBACK_MARGIN).quantize(Decimal("0.000001"))
+    except Exception:
+        pass
+    return None
+
+
+def rate_to_aud(summary: dict | None, currency: str, fallback: Decimal | None = None) -> Decimal | None:
+    """A$ per unit of ``currency``: TWS's own ExchangeRate from the account ledger, else ``fallback``."""
+    if currency == "AUD":
+        return Decimal(1)
+    entry = (summary or {}).get(f"ExchangeRate:{currency}") or {}
+    try:
+        value = Decimal(str(entry.get("value")))
+        if value.is_finite() and value > 0:
+            return value
+    except Exception:
+        pass
+    return fallback

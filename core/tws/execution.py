@@ -348,15 +348,12 @@ class PaperExecutor:
                                + "Sapient will not resend it; it checks TWS on the next sync.")
 
     def _rate_to_base(self, currency: str) -> Decimal | None:
-        """TWS's own exchange rate to A$ from the latest account snapshot (AUD = 1)."""
+        """A$ per unit of ``currency``: TWS's rate from the latest account snapshot, else Yahoo's (cautious)."""
         if currency == "AUD":
             return Decimal(1)
         from core.tws import store
         summary = (store.snapshots(self.env.name).get("summary") or {}).get("data") or {}
-        try:
-            return Decimal(str(((summary.get(f"ExchangeRate:{currency}") or {}).get("value"))))
-        except (InvalidOperation, TypeError):
-            return None
+        return markets.rate_to_aud(summary, currency) or markets.yahoo_rate_to_aud(currency)
 
     def _no_price_reason(self, symbol: str, errors_before: int, live: bool,
                          market: "markets.Market" = markets.ASX) -> str:

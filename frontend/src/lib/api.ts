@@ -28,6 +28,11 @@ export function apiErrorMessage(error: unknown, fallback: string): string {
   if (detail && typeof detail === 'object' && 'message' in detail && typeof detail.message === 'string') {
     return detail.message
   }
+  if (Array.isArray(detail) && detail.length) {  // FastAPI input check: say which field and why
+    const first = detail[0] as { loc?: unknown[]; msg?: string }
+    const field = Array.isArray(first.loc) ? String(first.loc[first.loc.length - 1]) : ''
+    if (first.msg) return `${fallback}: ${field ? `${field} – ` : ''}${first.msg}`
+  }
   return fallback
 }
 
