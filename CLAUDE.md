@@ -9,14 +9,21 @@ Detailed reference (every endpoint, table and module): [docs/codebase-reference.
 Active migration plan (Replit web app → Windows desktop app): [docs/desktop-migration-plan.md](docs/desktop-migration-plan.md).
 Target trading lifecycle (RSI entry → Sharpe weights → IBKR orders → RSI exits →
 autonomous/semi-autonomous management, paper + live): [docs/trading-workflow.md](docs/trading-workflow.md).
+Installer + first-run TWS setup wizard + Test connection UX: [docs/install-and-setup.md](docs/install-and-setup.md).
+
+## Working agreement with the user
+
+The user does not review PRs: implement the migration phase by phase, open a PR
+per phase, get CI green, merge it, and continue. Ask only for decisions that
+are genuinely theirs (trading authorisation, money, licences, accounts).
 
 ## Current state (October 2026)
 
-- Runs today as a hosted web app: **React SPA + FastAPI + PostgreSQL**, originally
-  built and deployed on Replit. The user wants Replit removed entirely and the app
-  turned into a self-contained **Electron + React/Tailwind desktop app on Windows**
-  that talks to Yahoo Finance and to a locally installed **IBKR Trader Workstation
-  (TWS)**. See the migration plan; it is a plan, not yet implemented.
+- Runs today as **React SPA + FastAPI + PostgreSQL**. It was built on Replit;
+  Replit files and the legacy Streamlit app have been removed (Phase A). Target:
+  a self-contained **Electron + React/Tailwind desktop app on Windows** talking
+  to Yahoo Finance and a locally installed **IBKR Trader Workstation (TWS)**.
+  Phases B onward of the migration plan are not yet implemented.
 - **No real broker orders are possible.** `core/ibkr_client.py` is a simulation stub
   (`place_order`/`cancel_order` always raise). All order paths go through the
   durable "safety admission" in `core/execution_safety.py`, which only records
@@ -79,13 +86,8 @@ safety_spec/         stdlib-only SQLite reference model of the TWS worker protoc
 scripts/tws_readonly_check.py  operator-run read-only TWS probe (official ibapi)
 tests/               unittest suites (see Commands)
 docs/                IBKR architecture/roadmap/safety docs + this repo's references
-artifacts/mockup-sandbox/  Replit design mockups — NOT shipped, slated for deletion
-attached_assets/     Replit chat uploads (screenshots) — not used by code
-LEGACY (dead, not imported by backend/core): app_streamlit.py, models.py,
-  portfolio_optimizer.py, stock_data.py, technical_indicators.py, utils.py,
-  .streamlit/
-REPLIT-ONLY: .replit, replit.md, .agents/, scripts/post-merge.sh, start.sh,
-  app.py, uv.lock/pyproject name "repl-nix-workspace", root package.json
+scripts/check.py     fast checks used locally and by CI (.github/workflows/ci.yml)
+server.py / run_dev.py  temporary launchers (127.0.0.1) until the Electron shell lands
 ```
 
 ## How the pieces connect
@@ -111,8 +113,11 @@ Browser (React SPA) --axios /api + Bearer JWT--> FastAPI routers
 ## Commands
 
 ```bash
+uv sync                      # Python deps into .venv (pyproject.toml / uv.lock)
+cd frontend && npm ci        # frontend deps (frontend/package-lock.json)
+uv run python scripts/check.py   # what CI runs: tests + compileall + frontend build
 # Backend (dev, port 8000) + frontend (Vite, port 5000, proxies /api → 8000)
-python run_dev.py
+uv run python run_dev.py
 # Production-style single server (FastAPI serves frontend/dist on $PORT, default 5000)
 cd frontend && npm run build && cd .. && python server.py
 
@@ -141,7 +146,7 @@ cd frontend && npm run build && npm run lint
 - yfinance prices are research data, not execution-price evidence.
 - Saved/model positions never imply broker holdings.
 - Keep honest status language: "simulation", "TWS paper", "TWS live" are distinct.
-- Secrets: never commit keys. `.replit` currently contains a committed
-  `BROKER_ENCRYPTION_KEY`; treat it as compromised.
+- Secrets: never commit keys. A `BROKER_ENCRYPTION_KEY` was committed in the
+  old `.replit` (still in git history); treat it as compromised, never reuse it.
 - Do not put model identifiers in commits/PRs. Develop on the assigned branch.
 - User preference: explain things in simple, everyday language.

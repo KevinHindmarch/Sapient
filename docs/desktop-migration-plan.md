@@ -124,7 +124,13 @@ existing IBKR safety gates and cannot be skipped.
    (tests + build) and a GitHub Actions workflow on `windows-latest`.
 
 Exit: app still runs locally (`python run_dev.py`) with Postgres; tests pass;
-`grep -ri replit` finds nothing.
+`grep -ri replit` finds nothing outside the docs.
+
+**Done (2026-10-09):** items 2, 4–7. Defaults taken: Q2 start fresh (no
+Replit data import; export it yourself from Replit before shutting it down if
+wanted). Item 3 remains a manual action for the owner: the old key is gone from
+the tree but still in git history — never reuse it. Frontend lint has 19
+pre-existing errors (react-hooks v7 rules); CI runs tests + build, not lint, until fixed.
 
 ### Phase B — SQLite data layer (≈1–1.5 weeks)
 
@@ -203,6 +209,9 @@ Exit: API runs as a standalone local process; all pages work with no login.
 7. Code signing (Q4) to avoid SmartScreen warnings; electron-updater against
    GitHub Releases (Q5). CI on `windows-latest` builds the installer artifact.
 8. Settings page gains: data folder, backup/restore, log viewer, version.
+9. Installer experience per [install-and-setup.md](install-and-setup.md) §1:
+   assisted NSIS installer with a named step list and progress, everything
+   bundled (no downloads during install), keep-data uninstall.
 
 Exit: clean Windows 10/11 VM — install, launch offline (cached data + clear
 "no internet" state), launch online, build a portfolio, close, reopen, uninstall.
@@ -212,7 +221,10 @@ No Python/Node/Postgres needed on the machine.
 
 No orders. TWS Read-Only API stays ticked.
 
-1. First-run "Connect to TWS" wizard replacing the OAuth Brokerage page:
+1. First-run setup wizard and **Test connection** per
+   [install-and-setup.md](install-and-setup.md) §2–4 (download TWS guide,
+   step-by-step API settings with ports, SDK install, staged diagnostics),
+   replacing the OAuth Brokerage page:
    locate official TWS API install + version, host fixed to `127.0.0.1`, port
    (7497 default, user confirms), fixed nonzero client ID, expected paper account
    entered by user, checklist for TWS settings (enable socket clients, localhost

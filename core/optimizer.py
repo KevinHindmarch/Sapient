@@ -1,5 +1,5 @@
 """
-Core portfolio optimizer - shared between Streamlit and FastAPI
+Core portfolio optimizer
 """
 
 import numpy as np

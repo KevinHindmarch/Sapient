@@ -1,5 +1,5 @@
 """
-Core technical indicators - shared between Streamlit and FastAPI
+Core technical indicators
 """
 
 import numpy as np
