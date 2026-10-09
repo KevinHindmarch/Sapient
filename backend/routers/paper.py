@@ -36,7 +36,7 @@ class Authorise(BaseModel):
 
 class OrderTicket(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    symbol: str = Field(min_length=4, max_length=12)
+    symbol: str = Field(min_length=1, max_length=12)  # US codes can be one letter (F, V); markets.for_symbol checks the rest
     side: str = Field(pattern=r"^(BUY|SELL)$")
     quantity: int = Field(ge=1, le=1_000_000)
     portfolio_id: int | None = Field(default=None, ge=1)

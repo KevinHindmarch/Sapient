@@ -74,6 +74,23 @@ class ExchangeRateFallbackTests(PaperTestCase):
             self.refused("no_exchange_rate", self.order, key="u3", symbol="AAPL", quantity=1, price="200")
 
 
+class UsTicketRouteTests(PaperTestCase):
+    def test_short_us_codes_are_accepted_by_the_ticket(self):
+        import os
+        from fastapi.testclient import TestClient
+        from backend.main import app
+        self.authorise(max_order_value=2000, max_value_per_day=100000)
+        store.save_snapshot("summary", ledger())
+        token = "u" * 40
+        with mock.patch.dict(os.environ, {"SAPIENT_API_TOKEN": token, "SAPIENT_SKIP_MIGRATIONS": "1"}), \
+                mock.patch("backend.routers.paper._reference_price", return_value=120.0):
+            client = TestClient(app, base_url="http://127.0.0.1")
+            placed = client.post("/api/paper/orders", headers={"Authorization": f"Bearer {token}"},
+                                 json={"symbol": "MS", "side": "BUY", "quantity": 5})
+        self.assertEqual(placed.status_code, 202, placed.text)
+        self.assertEqual((placed.json()["symbol"], placed.json()["currency"]), ("MS", "USD"))
+
+
 class LedgerRequestTests(unittest.TestCase):
     def test_ledger_is_asked_for_separately_and_keyed_by_currency(self):
         from core.tws.session import TwsSession
