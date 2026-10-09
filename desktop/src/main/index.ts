@@ -20,6 +20,7 @@ protocol.registerSchemesAsPrivileged([
 
 let mainWindow: BrowserWindow | null = null
 let engine: EngineSupervisor
+let connector: EngineSupervisor | null = null  // read-only TWS connector process
 let shellPage = ''  // HTML for app://sapient/__shell while starting or failed
 
 function rendererDir(): string {
@@ -179,6 +180,13 @@ if (!app.requestSingleInstanceLock()) {
       path.join(logDir(), 'engine.log'), origins)
     engine.on('state', onEngineState)
     engine.start()
+    // The TWS connector starts once the engine has prepared the database.
+    engine.once('state', function startConnector(state: EngineState) {
+      if (state.kind !== 'ready') { engine.once('state', startConnector); return }
+      connector = new EngineSupervisor(engineCommand(), app.getPath('userData'),
+        path.join(logDir(), 'tws-connector-process.log'), [], 'worker')
+      connector.start()
+    })
     createWindow()
   })
 
@@ -187,7 +195,7 @@ if (!app.requestSingleInstanceLock()) {
     if (quitting) return
     quitting = true
     event.preventDefault()
-    void engine.stop().finally(() => app.exit(0))
+    void Promise.allSettled([engine.stop(), connector?.stop()]).finally(() => app.exit(0))
   })
   app.on('window-all-closed', () => app.quit())
 }

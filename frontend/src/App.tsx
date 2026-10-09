@@ -1,4 +1,6 @@
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { Routes, Route, Navigate, useNavigate } from 'react-router-dom'
+import { useProfile } from './lib/profile'
+import Onboarding from './pages/Onboarding'
 import Dashboard from './pages/Dashboard'
 import ManualBuilder from './pages/ManualBuilder'
 import AutoBuilder from './pages/AutoBuilder'
@@ -13,6 +15,28 @@ import AITradingInbox from './pages/AITradingInbox'
 import Layout from './components/Layout'
 
 function App() {
+  const { profile, error, reload } = useProfile()
+  const navigate = useNavigate()
+
+  if (error) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center gap-3 theme-text-secondary">
+        <p>Sapient's engine isn't answering yet.</p>
+        <button className="btn-primary" onClick={reload}>Try again</button>
+      </div>
+    )
+  }
+  if (!profile) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-sky-500" />
+      </div>
+    )
+  }
+  if (!profile.onboarded) {
+    return <Onboarding onDone={(goTo) => navigate(goTo, { replace: true })} />
+  }
+
   return (
     <Routes>
       <Route path="/" element={<Layout />}>

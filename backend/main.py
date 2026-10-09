@@ -9,11 +9,14 @@ from contextlib import asynccontextmanager
 import os
 import sys
 
+from typing import Literal
+
 from fastapi import FastAPI
+from pydantic import BaseModel, ConfigDict, Field
 from fastapi.middleware.cors import CORSMiddleware
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from backend.routers import stocks, portfolio, indicators, broker, ai_trading, execution
+from backend.routers import stocks, portfolio, indicators, broker, ai_trading, execution, tws
 from backend.security import LocalAccessMiddleware
 
 
@@ -54,6 +57,7 @@ app.include_router(indicators.router, prefix="/api/indicators", tags=["Technical
 app.include_router(broker.router, prefix="/api/broker", tags=["Brokerage"])
 app.include_router(ai_trading.router, prefix="/api/ai", tags=["AI Trading"])
 app.include_router(execution.router, prefix="/api/execution", tags=["Execution safety"])
+app.include_router(tws.router, prefix="/api/tws", tags=["Interactive Brokers TWS"])
 
 
 @app.get("/api/health")
@@ -66,4 +70,21 @@ async def profile():
     from core.database import UserService
     from core.db import data_dir
     user = UserService.get_local_user() or {}
-    return {"display_name": user.get("display_name"), "data_dir": str(data_dir())}
+    return {"display_name": user.get("display_name"), "theme": user.get("theme"),
+            "onboarded": user.get("onboarded_at") is not None, "data_dir": str(data_dir())}
+
+
+class ProfileUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    display_name: str | None = Field(default=None, min_length=1, max_length=60)
+    theme: Literal["light", "dark"] | None = None
+    complete_onboarding: bool = False
+
+
+@app.put("/api/profile")
+async def update_profile(body: ProfileUpdate):
+    from core.database import UserService
+    name = body.display_name.strip() if body.display_name else None
+    UserService.update_profile(display_name=name or None, theme=body.theme,
+                               complete_onboarding=body.complete_onboarding)
+    return await profile()

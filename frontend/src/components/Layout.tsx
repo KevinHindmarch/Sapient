@@ -1,6 +1,7 @@
 import { Outlet, NavLink } from 'react-router-dom'
 import logo from '../assets/logo.png'
 import { useTheme } from '../lib/theme'
+import { useProfile } from '../lib/profile'
 import { 
   LayoutDashboard, 
   Wrench, 
@@ -19,6 +20,7 @@ import {
 } from 'lucide-react'
 import { useState } from 'react'
 import HelpModal from './HelpModal'
+import TwsStatusPill from './TwsStatusPill'
 
 const navItems = [
   { path: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -37,6 +39,7 @@ const tradingNavItems = [
 
 export default function Layout() {
   const { theme, toggleTheme } = useTheme()
+  const { profile } = useProfile()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [showHelp, setShowHelp] = useState(false)
 
@@ -111,17 +114,18 @@ export default function Layout() {
             }}
           >
             <div className="w-10 h-10 rounded-full bg-gradient-to-br from-sky-400 to-indigo-500 flex items-center justify-center text-sm font-bold text-white shadow-lg">
-              S
+              {(profile?.display_name || 'S').slice(0, 1).toUpperCase()}
             </div>
             <div className="flex-1 min-w-0">
               <p className={`text-sm font-semibold truncate ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
-                Local profile
+                {profile?.display_name || 'Local profile'}
               </p>
               <p className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Data stays on this PC</p>
             </div>
           </div>
           
           <div className="space-y-1">
+            <TwsStatusPill />
             {tradingNavItems.map((item) => (
               <NavLink
                 key={item.path}
@@ -243,6 +247,7 @@ export default function Layout() {
               Help & Glossary
             </button>
 
+            <TwsStatusPill />
             {tradingNavItems.map((item) => (
               <NavLink
                 key={item.path}

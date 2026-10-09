@@ -45,6 +45,8 @@ export class EngineSupervisor extends EventEmitter {
     private readonly dataDir: string,
     private readonly logFile: string,
     private readonly allowedOrigins: string[],
+    /** 'api' serves HTTP and reports its port; 'worker' is the TWS connector (no port). */
+    private readonly role: 'api' | 'worker' = 'api',
   ) {
     super()
   }
@@ -72,6 +74,7 @@ export class EngineSupervisor extends EventEmitter {
   private launch(attempt: number): void {
     const token = randomBytes(32).toString('base64url')
     const args = [...this.engine.args, '--data-dir', this.dataDir]
+    if (this.role === 'worker') args.push('--worker')
     for (const origin of this.allowedOrigins) args.push('--allowed-origin', origin)
     this.log(`starting engine (attempt ${attempt}): ${this.engine.command}`)
     this.setState({ kind: 'starting', attempt })
@@ -105,11 +108,12 @@ export class EngineSupervisor extends EventEmitter {
         return
       }
       if (settled) return
-      if (event.event === 'ready' && typeof event.port === 'number') {
+      if (event.event === 'ready' && (this.role === 'worker' || typeof event.port === 'number')) {
         settled = true
         clearTimeout(timer)
-        this.log(`engine ready on 127.0.0.1:${event.port}`)
-        this.setState({ kind: 'ready', info: { port: event.port, token, apiBase: `http://127.0.0.1:${event.port}/api` } })
+        const port = event.port ?? 0
+        this.log(this.role === 'worker' ? 'TWS connector ready' : `engine ready on 127.0.0.1:${port}`)
+        this.setState({ kind: 'ready', info: { port, token, apiBase: `http://127.0.0.1:${port}/api` } })
       } else if (event.event === 'error') {
         settled = true
         clearTimeout(timer)

@@ -35,8 +35,13 @@ The old `.replit` key was fake.
   are gone, and it is single-user with no login (Phase C). Target: a
   self-contained **Electron + React/Tailwind desktop app on Windows** talking to
   Yahoo Finance and a locally installed **IBKR Trader Workstation (TWS)**.
-  The Electron shell and Windows installer exist (Phase D); TWS connectivity
-  (Phase E) onward is not yet done.
+  The Electron shell and Windows installer exist (Phase D). Phase E (read-only
+  TWS connection) is built: a separate connector process reads account,
+  positions, orders and fills from TWS; it can never send orders. Waiting on
+  the user's real-PC Test connection before Phase F (paper orders).
+- First run shows a welcome wizard (name, light/dark, TWS now/later). Upgrades
+  keep everything (data lives in %APPDATA%\Sapient, never the install folder)
+  and never repeat the wizard; CI proves it by upgrading from the latest release.
 - **No real broker orders are possible.** `core/ibkr_client.py` is a simulation stub
   (`place_order`/`cancel_order` always raise). All order paths go through the
   durable "safety admission" in `core/execution_safety.py`, which only records
@@ -76,9 +81,12 @@ frontend/            React 19 + TS + Vite 7 + Tailwind v4 SPA (the real UI)
   src/lib/theme.tsx  light/dark, localStorage `sapient-theme`
   src/pages/         Dashboard, Manual/Auto/CAPM builders, Portfolios,
                      PortfolioDetail (largest), StockAnalysis, AITradingInbox,
-                     AITradingSettings, BrokerageSettings (TWS status + setup
-                     guide), Settings (theme, data folder)
-  src/components/    Layout (sidebar/nav), HelpModal, HelpTooltip, WeightEditor
+                     AITradingSettings, BrokerageSettings (TWS status, setup
+                     guide, settings, Test connection, read-only account),
+                     Onboarding (first-run wizard), Settings (name, theme, data folder)
+  src/lib/profile.tsx ProfileProvider: name/theme/onboarded from /api/profile
+  src/components/    Layout (sidebar/nav), HelpModal, HelpTooltip, WeightEditor,
+                     TwsSetupGuide, TwsStatusPill
 backend/             FastAPI app (thin HTTP layer), 127.0.0.1 only
   main.py            routers under /api/*, /api/health, /api/profile; startup
                      migrate() + ensure local user; CORS from SAPIENT_ALLOWED_ORIGINS
@@ -86,14 +94,17 @@ backend/             FastAPI app (thin HTTP layer), 127.0.0.1 only
                      SAPIENT_API_TOKEN on every /api route except /api/health;
                      get_current_user() = the single local profile (users.id=1)
   desktop_main.py    entrypoint for Electron/PyInstaller: token on stdin, prints
-                     {"event":"ready","port":N}, exits when stdin closes
+                     {"event":"ready","port":N}, exits when stdin closes;
+                     --worker runs the TWS connector instead
   routers/           stocks, portfolio, indicators, broker (status + simulation
-                     orders), ai_trading, execution (intents/halt/resume)
+                     orders), ai_trading, execution (intents/halt/resume),
+                     tws (settings/status/test/account)
   schemas/           pydantic request/response models
 core/                Service layer (all business logic)
   db.py              SQLite connection layer (WAL, FULL sync, BEGIN IMMEDIATE,
                      %s→? placeholders, Sapient-specific column-type converters)
-  migrations.py      versioned checksummed schema (1 core, 2 safety); migrate()
+  migrations.py      versioned checksummed schema (1 core, 2 safety, 3 tws,
+                     4 profile); migrate()
                      runs at API startup after backing up the DB
   database.py        User (local profile)/Portfolio/AITradingSettings/AISignal/
                      BrokerOrder/AIAudit services (SQL via core.db)
@@ -107,8 +118,11 @@ core/                Service layer (all business logic)
   indicators.py      TechnicalIndicatorService (RSI/MACD/BB/SMA/EMA/Stoch, RSI screener)
   ai_engine.py       scan_portfolio → signals; autonomous → IntentService.admit
   execution_safety.py IntentService: the single order admission boundary
-  ibkr_client.py     placeholder: connection_status() + IBKRClient that refuses
-                     every direct place/cancel (OAuth/credential vault removed)
+  ibkr_client.py     connection_status() (reads TWS connector state) + IBKRClient
+                     that refuses every direct place/cancel
+  tws/               read-only TWS connector: sdk (find official ibapi), transport
+                     (127.0.0.1, READ_ONLY_REQUESTS allowlist), session, diagnostics
+                     (Test connection steps + fixes), worker (state machine), store
 desktop/             Electron shell (TypeScript): src/main (window, app:// protocol,
                      CSP, EngineSupervisor, updater.ts = manual GitHub-release
                      updates + encrypted token), src/preload (window.sapient bridge),
@@ -132,7 +146,8 @@ React UI --axios + Bearer <per-launch token>--> FastAPI on 127.0.0.1 (one local 
    order-like routes (broker/orders, ai approve, rebalance, autonomous engine)
         --> core/execution_safety.IntentService.admit[_batch]
         --> safety_* tables (intents, reservations, outbox, audit) — never a broker
-   TWS worker (not built yet) will talk to the same SQLite outbox locally
+   TWS connector (separate process, sapient-api --worker) <--tws_* tables--> API
+        reads TWS on 127.0.0.1 with an allowlist of read-only requests; no orders
 ```
 
 - Every /api route except /api/health needs the launch token; there are no
@@ -172,7 +187,9 @@ python -m unittest discover -s tests -p 'test_safety_spec.py' -v          # SQLi
 python -m unittest discover -s tests -p 'test_tws_readonly_check.py' -v   # mocked ibapi
 python -m unittest discover -s tests -p 'test_execution_safety_unit.py' -v
 python -m unittest discover -s tests -p 'test_execution_safety_sqlite.py' -v  # admission on real SQLite
-python -m unittest discover -s tests -p 'test_local_api.py' -v   # token/Host checks, desktop entrypoint, Yahoo cache
+python -m unittest discover -s tests -p 'test_local_api.py' -v   # token/Host checks, desktop entrypoint, Yahoo cache, profile, /api/tws
+python -m unittest discover -s tests -p 'test_tws.py' -v         # fake TWS: diagnostics, read-only transport, worker
+python -m unittest discover -s tests -p 'test_upgrades.py' -v    # fresh install vs upgrade keeps data, no repeat wizard
 python -m compileall -q core backend
 cd frontend && npm run build && npm run lint
 ```
@@ -192,6 +209,9 @@ cd frontend && npm run build && npm run lint
   paper. Use a fixed nonzero client ID; never auto-switch on collision.
 - yfinance prices are research data, not execution-price evidence.
 - Saved/model positions never imply broker holdings.
+- Upgrades must keep user data: never edit an applied (released) migration,
+  never store data in the install folder, and new first-run steps must be
+  skipped for existing users (mark them done in the migration).
 - Keep honest status language: "simulation", "TWS paper", "TWS live" are distinct.
 - Secrets: never commit keys or tokens. The update token lives only in
   `%APPDATA%\Sapient\github-update-token.bin` (DPAPI-encrypted).

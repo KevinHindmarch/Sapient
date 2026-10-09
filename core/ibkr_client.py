@@ -19,14 +19,24 @@ class ExecutionPolicyError(RuntimeError):
 
 
 def connection_status() -> dict:
-    """Truthful status for the UI; there is no TWS worker yet."""
+    """Truthful status for the UI: read-only TWS connection, never order execution."""
+    try:
+        from core.tws import store
+        tws = store.get_status()
+        settings = store.get_settings()
+    except Exception:  # database not migrated yet
+        tws, settings = {"state": "NOT_CONFIGURED", "worker_running": False}, {"enabled": False}
+    connected = tws.get("state") == "READY"
     return {
         "mode": "simulation",
-        "tws_configured": False,
-        "worker": "not_installed",
+        "tws_configured": bool(settings.get("enabled")),
+        "tws_state": tws.get("state"),
+        "tws_connected_read_only": connected,
+        "worker": "running" if tws.get("worker_running") else "not_running",
         "execution_enabled": False,
-        "message": "Interactive Brokers TWS connection is not set up yet. "
-                   "Orders are queued as simulation intents only.",
+        "message": ("Connected to TWS read-only. Orders are still recorded as simulation intents only."
+                    if connected else
+                    "Interactive Brokers TWS is not connected. Orders are recorded as simulation intents only."),
     }
 
 

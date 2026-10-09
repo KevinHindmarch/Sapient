@@ -44,31 +44,48 @@ jobs:
           npm ci
           npm run dist:win
 
-      - name: Install silently
-        shell: pwsh
-        run: |
-          $installer = Get-ChildItem desktop/release/Sapient-Setup-*.exe | Select-Object -First 1
-          Start-Process -FilePath $installer.FullName -ArgumentList '/S', "/D=$env:RUNNER_TEMP\SapientApp" -Wait
-          if (-not (Test-Path "$env:RUNNER_TEMP\SapientApp\Sapient.exe")) { throw "Sapient.exe was not installed" }
-          if (-not (Test-Path "$env:RUNNER_TEMP\SapientApp\resources\engine\sapient-api.exe")) { throw "engine missing" }
-
-      - name: Installed app smoke test
+      # 1) What users do: the latest published release is installed and has data in it.
+      - name: Install the latest published release and save a portfolio in it
         working-directory: desktop
         shell: pwsh
-        run: node e2e/smoke.mjs "$env:RUNNER_TEMP\SapientApp\Sapient.exe" "$env:RUNNER_TEMP"
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download --repo "$env:GITHUB_REPOSITORY" --pattern 'Sapient-Setup-*.exe' --dir "$env:RUNNER_TEMP\previous"
+          $previous = Get-ChildItem "$env:RUNNER_TEMP\previous\Sapient-Setup-*.exe" | Select-Object -First 1
+          Write-Host "previous release: $($previous.Name)"
+          Start-Process -FilePath $previous.FullName -ArgumentList '/S', "/D=$env:RUNNER_TEMP\SapientApp" -Wait
+          if (-not (Test-Path "$env:RUNNER_TEMP\SapientApp\Sapient.exe")) { throw "previous release was not installed" }
+          node e2e/smoke.mjs "$env:RUNNER_TEMP\SapientApp\Sapient.exe" "$env:RUNNER_TEMP" --mode seed
 
-      - name: Upgrade over the existing install keeps data
+      # 2) Installing this build over it keeps the profile, the portfolio and skips the wizard.
+      - name: Upgrade from the latest release keeps data
         working-directory: desktop
         shell: pwsh
         run: |
           $db = "$env:APPDATA\Sapient\sapient.db"
-          if (-not (Test-Path $db)) { throw "expected the first run to create $db" }
-          $before = (Get-Item $db).Length
+          if (-not (Test-Path $db)) { throw "expected the previous release to create $db" }
           $installer = Get-ChildItem release/Sapient-Setup-*.exe | Select-Object -First 1
           Start-Process -FilePath $installer.FullName -ArgumentList '/S', "/D=$env:RUNNER_TEMP\SapientApp" -Wait
+          if (-not (Test-Path "$env:RUNNER_TEMP\SapientApp\resources\engine\sapient-api.exe")) { throw "engine missing" }
           if (-not (Test-Path $db)) { throw "upgrade removed the database" }
-          node e2e/smoke.mjs "$env:RUNNER_TEMP\SapientApp\Sapient.exe" "$env:RUNNER_TEMP"
-          Write-Host "database kept across upgrade ($before bytes before)"
+          node e2e/smoke.mjs "$env:RUNNER_TEMP\SapientApp\Sapient.exe" "$env:RUNNER_TEMP" --mode upgraded
+
+      # 3) A brand-new PC: the welcome wizard runs once, then never again.
+      - name: Fresh install shows the welcome wizard
+        working-directory: desktop
+        shell: pwsh
+        run: |
+          Remove-Item -Recurse -Force "$env:APPDATA\Sapient"
+          node e2e/smoke.mjs "$env:RUNNER_TEMP\SapientApp\Sapient.exe" "$env:RUNNER_TEMP" --mode fresh
+
+      - name: Reinstalling the same version keeps data
+        working-directory: desktop
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem release/Sapient-Setup-*.exe | Select-Object -First 1
+          Start-Process -FilePath $installer.FullName -ArgumentList '/S', "/D=$env:RUNNER_TEMP\SapientApp" -Wait
+          node e2e/smoke.mjs "$env:RUNNER_TEMP\SapientApp\Sapient.exe" "$env:RUNNER_TEMP" --mode upgraded
 
       - uses: actions/upload-artifact@v4
         if: always()

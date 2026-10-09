@@ -1,12 +1,24 @@
 import { useEffect, useState } from 'react'
 import { useTheme } from '../lib/theme'
 import { profileApi } from '../lib/api'
+import { useProfile } from '../lib/profile'
+import { toast } from 'sonner'
 import { Moon, Sun, User, Palette } from 'lucide-react'
 import UpdatesCard from '../components/UpdatesCard'
 
 export default function Settings() {
   const { theme, setTheme } = useTheme()
   const [dataDir, setDataDir] = useState<string>('')
+  const { profile, update } = useProfile()
+  const [name, setName] = useState(profile?.display_name ?? '')
+  const saveName = async () => {
+    try {
+      await update({ display_name: name.trim() })
+      toast.success('Name saved')
+    } catch {
+      toast.error('Could not save your name')
+    }
+  }
 
   useEffect(() => {
     profileApi.get().then((res) => setDataDir(res.data.data_dir)).catch(() => setDataDir(''))
@@ -30,6 +42,12 @@ export default function Settings() {
               Your data is stored only on this PC{dataDir ? ':' : '.'}
             </p>
             {dataDir && <p data-testid="data-dir" className="text-xs font-mono theme-text-secondary break-all mt-1">{dataDir}</p>}
+            <div className="flex gap-2 mt-3">
+              <input className="input flex-1" aria-label="Your name" maxLength={60} value={name}
+                onChange={(event) => setName(event.target.value)} placeholder="Your name" />
+              <button className="btn-secondary" disabled={!name.trim() || name.trim() === profile?.display_name}
+                onClick={saveName}>Save name</button>
+            </div>
           </div>
         </div>
 

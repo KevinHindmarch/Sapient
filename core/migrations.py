@@ -299,10 +299,65 @@ CREATE INDEX safety_intents_daily ON safety_intents(user_id,created_at);
 CREATE INDEX safety_outbox_pending ON safety_outbox(user_id,id) WHERE delivered_at IS NULL;
 """
 
+TWS_V1 = f"""
+CREATE TABLE tws_settings (
+ id INTEGER PRIMARY KEY CHECK (id = 1),
+ enabled FLAG NOT NULL DEFAULT FALSE,
+ port INTEGER NOT NULL DEFAULT 7497 CHECK (port BETWEEN 1 AND 65535),
+ client_id INTEGER NOT NULL DEFAULT 71 CHECK (client_id > 0),
+ expected_account TEXT,
+ paper_confirmed FLAG NOT NULL DEFAULT FALSE,
+ sdk_folder TEXT,
+ updated_at UTCTIME NOT NULL DEFAULT {_NOW}
+);
+INSERT INTO tws_settings(id) VALUES (1);
+CREATE TABLE tws_status (
+ id INTEGER PRIMARY KEY CHECK (id = 1),
+ state TEXT NOT NULL DEFAULT 'NOT_CONFIGURED',
+ detail TEXT,
+ account TEXT,
+ server_version INTEGER,
+ sdk_version TEXT,
+ ib_connected FLAG,
+ connected_since UTCTIME,
+ last_sync_at UTCTIME,
+ worker_heartbeat_at UTCTIME,
+ updated_at UTCTIME NOT NULL DEFAULT {_NOW}
+);
+INSERT INTO tws_status(id) VALUES (1);
+CREATE TABLE tws_snapshots (
+ kind TEXT PRIMARY KEY,
+ data JSONTEXT NOT NULL,
+ taken_at UTCTIME NOT NULL DEFAULT {_NOW}
+);
+CREATE TABLE tws_commands (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ kind TEXT NOT NULL CHECK (kind IN ('test_connection','reconnect')),
+ status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','running','done','failed')),
+ result JSONTEXT,
+ created_at UTCTIME NOT NULL DEFAULT {_NOW},
+ started_at UTCTIME,
+ finished_at UTCTIME
+);
+CREATE INDEX tws_commands_pending ON tws_commands(id) WHERE status = 'pending';
+"""
+
+# A profile that already exists when this runs belongs to someone upgrading:
+# never show them the first-run wizard again. Fresh installs create the profile
+# after migrating, so they get the wizard.
+PROFILE_V1 = """
+-- NULL = never saved here (upgrades from 0.1.0 keep the theme the app already shows).
+ALTER TABLE users ADD COLUMN theme TEXT CHECK (theme IS NULL OR theme IN ('light','dark'));
+ALTER TABLE users ADD COLUMN onboarded_at UTCTIME;
+UPDATE users SET onboarded_at = COALESCE(created_at, strftime('%Y-%m-%d %H:%M:%f','now'))
+"""
+
 # (version, name, sql). Append only.
 MIGRATIONS = (
     (1, "core", CORE_V1),
     (2, "safety", SAFETY_V1),
+    (3, "tws", TWS_V1),
+    (4, "profile", PROFILE_V1),
 )
 SAFETY_SCHEMA_VERSION = 2
 
