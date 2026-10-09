@@ -29,7 +29,7 @@ export default function Settings() {
             <p className="text-sm theme-text-secondary">
               Your data is stored only on this PC{dataDir ? ':' : '.'}
             </p>
-            {dataDir && <p className="text-xs font-mono theme-text-secondary break-all mt-1">{dataDir}</p>}
+            {dataDir && <p data-testid="data-dir" className="text-xs font-mono theme-text-secondary break-all mt-1">{dataDir}</p>}
           </div>
         </div>
 
