@@ -94,6 +94,7 @@ class PortfolioResponse(BaseModel):
     status: str
     position_count: Optional[int] = 0
     ai_mode: Optional[str] = "off"
+    strategy: Optional[str] = "rules"            # how AI Trading decides: rules | signals (H3)
     market: Optional[str] = "ASX"
     trading_environment: Optional[str] = None  # 'paper' / 'live' once bought at IBKR
 

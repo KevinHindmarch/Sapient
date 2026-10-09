@@ -562,6 +562,11 @@ ALTER TABLE portfolios ADD COLUMN entry_deadline UTCTIME;
 ALTER TABLE portfolio_positions ADD COLUMN entry_state TEXT
 """
 
+# H3: how AI Trading decides for a portfolio: 'rules' (RSI + MACD, default) or 'signals' (signal lab vote).
+STRATEGY_CHOICE_V1 = """
+ALTER TABLE portfolios ADD COLUMN strategy TEXT
+"""
+
 # (version, name, sql). Append only.
 MIGRATIONS = (
     (1, "core", CORE_V1),
@@ -573,6 +578,7 @@ MIGRATIONS = (
     (7, "live", LIVE_V1),
     (8, "ledger", LEDGER_V1),
     (9, "entry", ENTRY_V1),
+    (10, "strategy_choice", STRATEGY_CHOICE_V1),
 )
 SAFETY_SCHEMA_VERSION = 2
 

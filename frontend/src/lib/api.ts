@@ -444,3 +444,24 @@ export const backupsApi = {
   restore: (name: string) => api.post('/backups/restore', { name }),
   cancelRestore: () => api.delete('/backups/restore'),
 }
+
+// ---- Signal lab (H2) and how AI Trading decides per portfolio (H3) ----
+export interface SignalTest {
+  symbol: string; signal: string; label: string; days: number; trades: number; time_in_market: number
+  edge_per_year: number; strategy_per_year: number; holding_per_year: number; t_stat: number; p_value: number
+  recent_edge_per_year: number; holding_now: boolean; passed: boolean; verdict: string
+}
+export interface SignalVote {
+  symbol: string; score: number; says: 'hold' | 'out' | 'no change'
+  signals: { signal: string; label: string; holding_now: boolean; edge_per_year: number; p_value: number }[]
+}
+export interface SignalLabResult {
+  years: number; fdr: number; cost_per_trade: number; recent_years: number
+  tests: SignalTest[]; errors: Record<string, string>; votes: SignalVote[]
+  strategy?: 'rules' | 'signals'; buy_score?: number; sell_score?: number
+}
+export const signalsApi = {
+  portfolio: (id: number) => api.get<SignalLabResult>(`/signals/portfolio/${id}`, { timeout: 180000 }),
+  setStrategy: (id: number, strategy: 'rules' | 'signals') =>
+    api.put<{ strategy: 'rules' | 'signals' }>(`/signals/portfolio/${id}/strategy`, { strategy }),
+}

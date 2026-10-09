@@ -181,6 +181,7 @@ def _within_guardrails(
     turnover_today: float,
     settings: dict,
     risk_exit: bool = False,
+    plan_sized: bool = False,
 ) -> tuple[bool, str | None]:
     """Apply per-trade and per-day guardrails. Returns (ok, reason_if_skipped).
 
@@ -194,7 +195,7 @@ def _within_guardrails(
 
     trade_pct = (estimated_value / portfolio_value) * 100.0
     max_trade_pct = float(settings.get("max_trade_pct") or 0)
-    if trade_pct > max_trade_pct + 1e-6:
+    if not plan_sized and trade_pct > max_trade_pct + 1e-6:  # signal-lab buy-backs restore the plan
         return False, f"trade_pct {trade_pct:.2f}% exceeds max_trade_pct {max_trade_pct}%"
 
     max_daily_trades = int(settings.get("max_daily_trades") or 0)
@@ -361,6 +362,51 @@ def _build_signal(
         "rule_summary": rule_summary,
         "expires_at": expires_at or datetime.now(timezone.utc) + timedelta(hours=SIGNAL_TTL_HOURS),
     }
+
+
+def _lab_signal(portfolio_id: int, portfolio: dict, position: dict, analysis: dict, lab_vote: dict | None,
+                portfolio_value: float, expires_at: datetime | None) -> tuple[dict | None, str | None]:
+    """Signal-lab decision for one stock: all-in or all-out on the evidence-weighted vote (H3).
+
+    Only signals that passed the lab vote. "out" sells the whole holding;
+    "hold" with nothing held buys the planned shares back (user decision
+    2026-10-10: may fully sell and buy back). No passing signal = hold as is.
+    """
+    symbol = position["symbol"]
+    price = float(analysis.get("current_price") or 0)
+    held = float(position.get("quantity") or 0)
+    if lab_vote is None:
+        return None, "signal lab: no signal passed for this stock, so it is held as is"
+    if price <= 0:
+        return None, "signal lab: no price right now"
+    names = ", ".join(s["label"] for s in lab_vote["signals"])
+    if lab_vote["says"] == "out" and held >= 1:
+        action, quantity = "SELL", float(math.floor(held + 1e-9))
+        summary = f"Signal lab says sell (score {lab_vote['score']:.2f}; {names})"
+    elif lab_vote["says"] == "hold" and held < 1:
+        planned = float(position.get("planned_quantity") or 0)
+        weight = float(position.get("weight_at_creation") or 0)
+        quantity = float(math.floor(planned if planned >= 1 else weight * portfolio_value / price))
+        if quantity < 1:
+            return None, "signal lab says buy, but its share of the portfolio is less than one share"
+        action = "BUY"
+        summary = f"Signal lab says buy back (score {lab_vote['score']:.2f}; {names})"
+    else:
+        return None, f"signal lab: {lab_vote['says']} (score {lab_vote['score']:.2f}), nothing to do"
+    return {
+        "portfolio_id": portfolio_id,
+        "symbol": symbol,
+        "company_name": _company_name(symbol),
+        "market": (portfolio.get("market") or "ASX").upper(),
+        "action": action,
+        "quantity": quantity,
+        "price_at_signal": price,
+        "confidence": float(round(max(lab_vote["score"], 1 - lab_vote["score"]), 3)),
+        "rationale": {"rule": "signal_vote", "score": lab_vote["score"], "signals": lab_vote["signals"],
+                      "current_price": price, "portfolio_value": portfolio_value},
+        "rule_summary": summary,
+        "expires_at": expires_at or datetime.now(timezone.utc) + timedelta(hours=SIGNAL_TTL_HOURS),
+    }, None
 
 
 def _dip_entry(portfolio_id: int, portfolio: dict, position: dict, analysis: dict | None, pending_buy: float,
@@ -534,6 +580,19 @@ def scan_portfolio(user_id: int, portfolio_id: int, expires_at: datetime | None 
     portfolio_value = market_value + max(cash, 0.0) if env else (market_value or _portfolio_total_value(positions))
 
     loss_breaker = _loss_breaker(analysed, settings)
+
+    # Signal lab (H3): for portfolios that chose it, the evidence-weighted vote replaces the RSI/MACD rules;
+    # stop-loss and take-profit still come first.
+    use_lab = bool(env) and (portfolio.get("strategy") or "rules") == "signals"
+    lab_votes: dict[str, dict | None] = {}
+    if use_lab:
+        from core import signals
+        lab_symbols = [p["symbol"] for p, _ in analysed if p["symbol"] not in not_bought]
+        try:
+            lab = signals.run_lab(lab_symbols)
+            lab_votes = {symbol: signals.vote(lab["tests"], symbol) for symbol in lab_symbols}
+        except Exception as exc:  # no lab today: only the protective exits run
+            skipped.append({"symbol": "*", "reason": f"signal lab unavailable ({exc}); only stop-loss/take-profit ran"})
     sectors: dict[str, str | None] = {}
     for position, analysis in analysed:
         symbol = position["symbol"]
@@ -548,6 +607,11 @@ def scan_portfolio(user_id: int, portfolio_id: int, expires_at: datetime | None 
             portfolio_value=portfolio_value,
             expires_at=expires_at,
         )
+        if use_lab and (candidate is None or candidate["rationale"].get("rule") not in RISK_EXITS):
+            candidate, note = _lab_signal(portfolio_id, portfolio, position, analysis, lab_votes.get(symbol),
+                                          portfolio_value, expires_at)
+            if note:
+                skipped.append({"symbol": symbol, "reason": note})
         if candidate is None or (candidate["action"] == "BUY" and symbol in waiting):
             continue
 
@@ -583,7 +647,9 @@ def scan_portfolio(user_id: int, portfolio_id: int, expires_at: datetime | None 
             turnover_today=turnover_today_baseline
                 + sum(s["quantity"] * s["price_at_signal"] for s in new_signals_payload),
             settings=settings,
-            risk_exit=candidate["rationale"].get("rule") in RISK_EXITS,
+            risk_exit=candidate["rationale"].get("rule") in RISK_EXITS
+                or (candidate["rationale"].get("rule") == "signal_vote" and candidate["action"] == "SELL"),
+            plan_sized=candidate["rationale"].get("rule") == "signal_vote",
         )
         if not ok:
             skipped.append({"symbol": symbol, "reason": reason})

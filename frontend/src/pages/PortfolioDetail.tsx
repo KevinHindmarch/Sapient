@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import SignalLab from '../components/SignalLab'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { portfolioApi, stocksApi, brokerApi, aiApi, apiErrorMessage, money, PortfolioSummary, RebalancePlan } from '../lib/api'
 import { Portfolio, Position, Transaction } from '../types'
@@ -47,6 +48,7 @@ export default function PortfolioDetail() {
   const [deletingPosition, setDeletingPosition] = useState<Position | null>(null)
 
   const [aiMode, setAiMode] = useState<'off' | 'suggestions' | 'autonomous'>('off')
+  const [strategy, setStrategy] = useState<'rules' | 'signals'>('rules')
   const [savingAiMode, setSavingAiMode] = useState(false)
 
   const [brokerConnected, setBrokerConnected] = useState(false)
@@ -187,6 +189,7 @@ export default function PortfolioDetail() {
       const response = await portfolioApi.detail(Number(id))
       setData(response.data)
       setAiMode(response.data.portfolio?.ai_mode || 'off')
+      setStrategy(response.data.portfolio?.strategy === 'signals' ? 'signals' : 'rules')
 
       const symbols = response.data.positions.map((p: Position) => p.symbol)
       if (symbols.length > 0) {
@@ -611,6 +614,8 @@ export default function PortfolioDetail() {
         </div>
         </div>
       </div>
+
+      <SignalLab portfolioId={Number(id)} strategy={strategy} onStrategy={setStrategy} />
 
       {accountSummary && brokerConnected && (
         <div className={`card border ${isDark ? 'border-sky-500/30' : 'border-sky-200'}`}>
