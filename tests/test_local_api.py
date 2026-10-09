@@ -215,9 +215,27 @@ class MarketCacheTests(unittest.TestCase):
             self.assertEqual(fake.history.call_count, 1)
             fake.history.return_value = pd.DataFrame()
             self.yahoo.Ticker("XYZ.AX").history(period="1y")
-            self.yahoo.Ticker("XYZ.AX").history(period="1y")
-            self.assertEqual(fake.history.call_count, 3)
+            self.yahoo.Ticker("XYZ.AX").history(period="1y")   # "nothing" is remembered for 10 minutes
+            self.assertEqual(fake.history.call_count, 2)
             self.assertEqual(ticker.call_count, 8)
+
+    def test_last_good_copy_when_yahoo_fails_and_pause_on_rate_limit(self):
+        clock = [1000.0]
+        good = pd.DataFrame({"x": [1]})
+        with mock.patch.object(self.yahoo.time, "time", side_effect=lambda: clock[0]), \
+                mock.patch.object(self.yahoo._yf, "download", return_value=good) as download:
+            self.yahoo.download(["A"], period="1y")
+            clock[0] += 7 * 60 * 60                           # cache expired
+            download.side_effect = RuntimeError("YFRateLimitError: Too Many Requests")
+            pd.testing.assert_frame_equal(self.yahoo.download(["A"], period="1y"), good)
+            download.side_effect = None
+            pd.testing.assert_frame_equal(self.yahoo.download(["A"], period="1y"), good)
+            self.assertEqual(download.call_count, 2)          # paused: the old copy, no new request
+            with self.assertRaises(self.yahoo.YahooUnavailable):
+                self.yahoo.download(["B"], period="1y")       # paused and nothing older to show
+            clock[0] += 61
+            self.yahoo.download(["B"], period="1y")
+            self.assertEqual(download.call_count, 3)
 
     def test_expired_entries_refetch(self):
         clock = [1000.0]

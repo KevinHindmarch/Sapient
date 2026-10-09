@@ -72,3 +72,12 @@ stock's US primary listing, during US hours (Sydney night time). Rules:
   refused with an explanation. Paper uses free delayed data.
 - Automatic checks for US portfolios run during US market hours, so Sapient
   (and TWS) must be running overnight Australian time for them.
+
+## Limits apply to buying only (user decision 2026-10-09)
+
+"should be buys only": the per-order value, daily value, daily order count and
+the % of the account limit buys. Sells (stop-loss, take-profit, RSI exits,
+rebalance sells, your own tickets) are not money-limited, so a whole holding can
+be sold at once; they are still limited to shares actually held (for a
+portfolio: shares Sapient bought for it), the price check, market hours and the
+Emergency stop.

@@ -4,6 +4,7 @@ import { apiBase, apiToken } from './runtime'
 
 const api = axios.create({
   baseURL: apiBase,
+  timeout: 300_000,  // a full market scan can take a few minutes; nothing should wait forever
   headers: {
     'Content-Type': 'application/json',
     Authorization: `Bearer ${apiToken}`,
@@ -64,7 +65,7 @@ export const portfolioApi = {
   compareStrategies: (symbols: string[], investment_amount: number, period: string = '2y') =>
     api.post('/portfolio/compare-strategies', { symbols, investment_amount, period }),
   save: (name: string, optimization_results: object, investment_amount: number, mode: string, risk_tolerance: string, market: string = 'ASX') =>
-    api.post<{ success: boolean; portfolio_id?: number }>('/portfolio/save', { name, optimization_results, investment_amount, mode, risk_tolerance, market }),
+    api.post<{ success: boolean; portfolio_id?: number; warning?: string }>('/portfolio/save', { name, optimization_results, investment_amount, mode, risk_tolerance, market }),
   list: () => api.get('/portfolio/list'),
   detail: (id: number) => api.get(`/portfolio/${id}`),
   trade: (portfolioId: number, symbol: string, txn_type: string, quantity: number, price: number, notes?: string) =>
@@ -403,4 +404,29 @@ export interface ChecklistItem { key: string; ok: boolean; text: string }
 export interface AutonomyChecklist {
   shared: ChecklistItem[]
   portfolios: { portfolio_id: number; name: string; environment: TradingEnv; items: ChecklistItem[]; autonomous: boolean }[]
+}
+
+/** Fewest stocks each risk profile needs (matches core/optimizer.py RISK_PARAMS). */
+export const MIN_STOCKS: Record<string, number> = { conservative: 4, moderate: 3, aggressive: 2 }
+
+/** Hand-edited weights scaled to add up to exactly 100% (what gets saved). */
+export function normaliseWeights(weights: Record<string, number>): Record<string, number> {
+  const total = Object.values(weights).reduce((sum, w) => sum + (w > 0 ? w : 0), 0)
+  if (total <= 0) return weights
+  return Object.fromEntries(Object.entries(weights).filter(([, w]) => w > 0).map(([s, w]) => [s, w / total]))
+}
+
+export interface BackupFile { name: string; kind: string; size: number; modified_at: string }
+export interface BackupsInfo {
+  backups: BackupFile[]
+  status: { last_backup_at?: string; last_check_ok?: boolean; last_check_detail?: string }
+  pending_restore: { backup: string } | null
+  folder: string
+}
+
+export const backupsApi = {
+  list: () => api.get<BackupsInfo>('/backups'),
+  now: () => api.post('/backups/now'),
+  restore: (name: string) => api.post('/backups/restore', { name }),
+  cancelRestore: () => api.delete('/backups/restore'),
 }

@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import { useState } from 'react'
-import { portfolioApi, stocksApi } from '../lib/api'
+import { portfolioApi, stocksApi, MIN_STOCKS } from '../lib/api'
 import { toast } from 'sonner'
 import { Search, TrendingUp, Save, Loader2, Activity, Target, Shield, Zap, X, Plus, Radar, Check } from 'lucide-react'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts'
@@ -122,7 +122,8 @@ export default function CAPMBuilder() {
     setResult(null)
   }
 
-  const addStock = (symbol: string) => {
+  const addStock = (raw: string) => {
+    const symbol = raw.toUpperCase().replace(/\.AX$/, '')  // one spelling, so scan + search can't add it twice
     if (!selectedStocks.includes(symbol)) {
       setSelectedStocks([...selectedStocks, symbol])
       setResult(null)
@@ -150,9 +151,8 @@ export default function CAPMBuilder() {
       const response = await portfolioApi.analyzeCAPM(selectedStocks)
       const data: Record<string, StockCAPMData> = {}
       for (const symbol of selectedStocks) {
-        if (response.data.stocks[symbol + '.AX']) {
-          data[symbol] = response.data.stocks[symbol + '.AX']
-        }
+        const found = response.data.stocks[`${symbol}.AX`] ?? response.data.stocks[symbol]
+        if (found) data[symbol] = found
       }
       setStockData(data)
       toast.success('CAPM analysis complete')
@@ -165,8 +165,9 @@ export default function CAPMBuilder() {
   }
 
   const optimizePortfolio = async () => {
-    if (selectedStocks.length < 2) {
-      toast.error('Select at least 2 stocks')
+    const needed = MIN_STOCKS[riskTolerance] ?? 2
+    if (selectedStocks.length < needed) {
+      toast.error(`The ${riskTolerance} profile needs at least ${needed} stocks`)
       return
     }
 
@@ -193,6 +194,7 @@ export default function CAPMBuilder() {
     setSaving(true)
     try {
       const saved = await portfolioApi.save(portfolioName.trim(), result, investmentAmount, 'capm', riskTolerance)
+      if (saved.data.warning) toast.warning(`${saved.data.warning}. Those stocks were left out of the saved portfolio.`)
       toast.success('Portfolio saved. Buy it on paper or for real from its page.')
       if (saved.data?.portfolio_id) navigate(`/portfolios/${saved.data.portfolio_id}`)
       setShowSaveModal(false)

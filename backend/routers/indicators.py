@@ -43,6 +43,10 @@ def rsi_screener(market: str = "asx", signal: str = "buy"):
     
     symbols = [s['symbol'] for s in stocks]
     result = TechnicalIndicatorService.scan_rsi_signals(symbols, market, period="3mo")
+    result["analysed"] = len(result["results"])  # stocks Yahoo actually returned prices for
+    if symbols and not result["results"]:
+        raise HTTPException(503, detail="Couldn't get prices from Yahoo Finance for any stock. Check the internet "
+                                        "connection and try again in a few minutes.")
     
     if signal == "buy":
         result["results"] = [r for r in result["results"] if r["signal"] == "buy"]

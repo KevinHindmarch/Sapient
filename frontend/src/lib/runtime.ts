@@ -13,14 +13,17 @@ export interface UpdateProgress {
   total: number
 }
 
+export interface DesktopSettings { closeToTray: boolean; openAtLogin?: boolean; keepAwake?: boolean }
+
 export interface SapientBridge {
   apiBase: string
   apiToken: string
   appVersion?: string
   openExternal?: (url: string) => void
   desktop?: {
-    settings: () => Promise<{ closeToTray: boolean }>
-    setCloseToTray: (value: boolean) => Promise<{ closeToTray: boolean }>
+    settings: () => Promise<DesktopSettings>
+    setCloseToTray: (value: boolean) => Promise<DesktopSettings>
+    setSetting?: (key: keyof DesktopSettings, value: boolean) => Promise<DesktopSettings>
     emergencyStop: () => Promise<{ ok: boolean; message: string }>
   }
   updates?: {

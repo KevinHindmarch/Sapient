@@ -388,44 +388,60 @@ def _cash(summary: dict, currency: str) -> Decimal | None:
 
 
 def _check_limits(cur, r, binding, now, e: Env, market: "markets.Market" = markets.ASX):
+    """Money limits for BUYS (user decision 2026-10-09: "should be buys only").
+
+    Per-order value, daily value, daily order count and the % of the account
+    apply to buying only, so a stop-loss or take-profit can sell a whole
+    holding at once. Sells are still limited to shares actually held (and, for
+    a portfolio, to shares Sapient bought for it), the price check, market
+    hours and the Emergency stop.
+    """
     quantity, reference = Decimal(r["quantity"]), Decimal(r["reference_price"])
     summary, _ = _snapshot(cur, "summary", e.name)
-    rate = _rate_to_base(summary, market.currency)
-    if rate is None:
-        raise PaperError("no_exchange_rate", f"TWS hasn't sent the {market.currency}/AUD exchange rate yet; "
-                                             "try again after the next account update.")
-    # Worst case the connector may set the limit this far from the reference price, in A$.
-    worst_local = quantity * reference * (1 + binding["max_price_gap_pct"] / 100)
-    worst = worst_local * rate
-    shown = f"A${worst:,.2f}" + (f" (US${worst_local:,.2f})" if market.currency == "USD" else "")
-    if worst > binding["max_order_value"]:
-        raise PaperError("order_too_large", f"Order value up to {shown} is above your {e.label} limit of "
-                                            f"A${binding['max_order_value']:,.2f} per order.")
     nav = _summary_value(summary, "NetLiquidation")
-    cash = _cash(summary, market.currency)
-    if nav is None or (r["side"] == "BUY" and cash is None):
-        raise PaperError("no_account_values", f"Account values from TWS are missing"
-                                              + (f" (no {market.currency} cash balance)." if nav is not None else "."))
-    cur.execute("SELECT max_trade_pct, max_daily_trades FROM ai_trading_settings ORDER BY id LIMIT 1")
-    legacy = cur.fetchone() or {}
-    max_trade_pct = Decimal(str(legacy.get("max_trade_pct") or 5))
-    if worst > nav * max_trade_pct / 100:
-        raise PaperError("trade_pct_limit", f"Order is more than {max_trade_pct}% of the account value.")
-    start = datetime.combine(calendar.local_date(calendar.ASX, now), datetime.min.time(), calendar.ASX.tz)
-    cur.execute("""SELECT count(*) AS n FROM paper_orders WHERE environment=%s AND created_at >= %s""",
-                (e.name, start.astimezone(timezone.utc)))
-    today_count = cur.fetchone()["n"]
-    cur.execute("""SELECT coalesce(currency, 'AUD') AS currency,
-                          coalesce(decimal_sum(quantity * reference_price), '0') AS value
-                   FROM paper_orders WHERE environment=%s AND created_at >= %s GROUP BY coalesce(currency, 'AUD')""",
-                (e.name, start.astimezone(timezone.utc)))
-    today_value = sum((Decimal(str(row["value"])) * (_rate_to_base(summary, row["currency"]) or Decimal(1))
-                       for row in cur.fetchall()), Decimal(0))
-    daily_cap = min(binding["max_orders_per_day"], int(legacy.get("max_daily_trades") or binding["max_orders_per_day"]))
-    if today_count >= daily_cap:
-        raise PaperError("daily_order_limit", f"Daily limit of {daily_cap} {e.label} orders reached.")
-    if today_value + worst > binding["max_value_per_day"]:
-        raise PaperError("daily_value_limit", f"Daily {e.label} order value limit reached.")
+    if r["side"] != "BUY":
+        if nav is None:
+            raise PaperError("no_account_values", "Account values from TWS are missing.")
+        worst_local = Decimal(0)
+    else:
+        rate = _rate_to_base(summary, market.currency)
+        if rate is None:
+            raise PaperError("no_exchange_rate", f"TWS hasn't sent the {market.currency}/AUD exchange rate yet; "
+                                                 "try again after the next account update.")
+        # Worst case the connector may set the limit this far from the reference price, in A$.
+        worst_local = quantity * reference * (1 + binding["max_price_gap_pct"] / 100)
+        worst = worst_local * rate
+        shown = f"A${worst:,.2f}" + (f" (US${worst_local:,.2f})" if market.currency == "USD" else "")
+        if worst > binding["max_order_value"]:
+            raise PaperError("order_too_large", f"Buy value up to {shown} is above your {e.label} limit of "
+                                                f"A${binding['max_order_value']:,.2f} per order.")
+        cash = _cash(summary, market.currency)
+        if nav is None or cash is None:
+            raise PaperError("no_account_values", f"Account values from TWS are missing"
+                                                  + (f" (no {market.currency} cash balance)." if nav is not None else "."))
+        cur.execute("SELECT max_trade_pct, max_daily_trades FROM ai_trading_settings ORDER BY id LIMIT 1")
+        legacy = cur.fetchone() or {}
+        max_trade_pct = Decimal(str(legacy.get("max_trade_pct") or 5))
+        if worst > nav * max_trade_pct / 100:
+            raise PaperError("trade_pct_limit", f"Buy is more than {max_trade_pct}% of the account value.")
+        start = datetime.combine(calendar.local_date(calendar.ASX, now), datetime.min.time(), calendar.ASX.tz)
+        # Today's buys that went to TWS or may still go (orders blocked or expired before sending don't count).
+        counted = """environment=%s AND side='BUY' AND created_at >= %s
+                     AND NOT (state IN ('BLOCKED','EXPIRED') AND api_order_id IS NULL)"""
+        cur.execute(f"SELECT count(*) AS n FROM paper_orders WHERE {counted}", (e.name, start.astimezone(timezone.utc)))
+        today_count = cur.fetchone()["n"]
+        cur.execute(f"""SELECT coalesce(currency, 'AUD') AS currency,
+                              coalesce(decimal_sum(quantity * reference_price), '0') AS value
+                       FROM paper_orders WHERE {counted} GROUP BY coalesce(currency, 'AUD')""",
+                    (e.name, start.astimezone(timezone.utc)))
+        today_value = sum((Decimal(str(row["value"])) * (_rate_to_base(summary, row["currency"]) or Decimal(1))
+                           for row in cur.fetchall()), Decimal(0))
+        daily_cap = min(binding["max_orders_per_day"],
+                        int(legacy.get("max_daily_trades") or binding["max_orders_per_day"]))
+        if today_count >= daily_cap:
+            raise PaperError("daily_order_limit", f"Daily limit of {daily_cap} {e.label} buys reached.")
+        if today_value + worst > binding["max_value_per_day"]:
+            raise PaperError("daily_value_limit", f"Daily {e.label} buying limit reached.")
     working = "','".join(WORKING)
     if r["side"] == "BUY":
         cur.execute(f"""SELECT coalesce(decimal_sum(quantity * coalesce(limit_price, reference_price) * 1.1), '0') AS v

@@ -22,6 +22,7 @@ class OptimizeResponse(BaseModel):
     portfolio_dividend_yield: float
     risk_tolerance: str
     optimization_success: bool
+    method: str = "max_sharpe"   # "min_variance" when no mix beats the risk-free rate
     correlation_matrix: Optional[List[List[float]]] = None
     correlation_symbols: Optional[List[str]] = None
 

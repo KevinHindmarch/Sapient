@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { stocksApi, portfolioApi } from '../lib/api'
+import { stocksApi, portfolioApi, MIN_STOCKS, normaliseWeights } from '../lib/api'
 import { OptimizationResult } from '../types'
 import { toast } from 'sonner'
 import { Search, X, TrendingUp, Save, AlertTriangle, CheckCircle, Info, Loader2, Globe, SlidersHorizontal } from 'lucide-react'
@@ -172,8 +172,9 @@ export default function ManualBuilder() {
   }
 
   const onSubmit = async (data: FormData) => {
-    if (selectedStocks.length < 2) {
-      toast.error('Please select at least 2 stocks')
+    const needed = MIN_STOCKS[data.risk_tolerance] ?? 2
+    if (selectedStocks.length < needed) {
+      toast.error(`The ${data.risk_tolerance} profile needs at least ${needed} stocks`)
       return
     }
 
@@ -189,7 +190,14 @@ export default function ManualBuilder() {
       setResult(response.data)
       setEditedWeights(null)
       setShowWeightEditor(false)
-      toast.success('Portfolio optimized successfully!')
+      if (response.data.method === 'min_variance') {
+        toast.info('None of these stocks beat a safe bank-bond return over this period, so Sapient chose the '
+          + 'lowest-risk mix instead of chasing returns. Consider other stocks.')
+      } else if (response.data.optimization_success === false) {
+        toast.warning('The optimiser did not fully converge; the weights are its best attempt.')
+      } else {
+        toast.success('Portfolio optimized successfully!')
+      }
     } catch (error: unknown) {
       const err = error as { response?: { data?: { detail?: string } } }
       toast.error(err.response?.data?.detail || 'Optimization failed')
@@ -209,8 +217,9 @@ export default function ManualBuilder() {
 
     setSaving(true)
     try {
-      const resultToSave = editedWeights ? { ...result, weights: editedWeights } : result
+      const resultToSave = editedWeights ? { ...result, weights: normaliseWeights(editedWeights) } : result
       const saved = await portfolioApi.save(portfolioName.trim(), resultToSave, investmentAmount, 'manual', riskTolerance, market)
+      if (saved.data.warning) toast.warning(`${saved.data.warning}. Those stocks were left out of the saved portfolio.`)
       toast.success('Portfolio saved. Buy it on paper or for real from its page.')
       if (saved.data?.portfolio_id) navigate(`/portfolios/${saved.data.portfolio_id}`)
       setShowSaveModal(false)
@@ -325,7 +334,7 @@ export default function ManualBuilder() {
 
             {selectedStocks.length > 0 && (
               <p className={`mt-2 text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                {selectedStocks.length} stock{selectedStocks.length > 1 ? 's' : ''} selected — need at least 2 to optimize
+                {selectedStocks.length} stock{selectedStocks.length > 1 ? 's' : ''} selected — the {riskTolerance} profile needs at least {MIN_STOCKS[riskTolerance] ?? 2}
               </p>
             )}
           </div>

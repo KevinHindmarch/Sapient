@@ -50,7 +50,7 @@ export default function Layout() {
   return (
     <div className="min-h-screen flex">
       <aside 
-        className={`hidden lg:flex lg:flex-col lg:w-72 border-r transition-colors duration-300 ${
+        className={`hidden lg:flex lg:flex-col lg:w-72 lg:sticky lg:top-0 lg:h-screen lg:overflow-y-auto border-r transition-colors duration-300 ${
           isDark ? 'border-slate-700/50' : 'border-slate-200'
         }`}
         style={{

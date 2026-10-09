@@ -278,8 +278,8 @@ class PaperExecutor:
             return self._block(order["id"], "BLOCKED", reason)
         quantity = Decimal(order["quantity"])
         rate = self._rate_to_base(market.currency)
-        if rate is None or quantity * limit * rate > binding["max_order_value"]:
-            return self._block(order["id"], "BLOCKED", "At TWS's price the order is above your per-order limit.")
+        if order["side"] == "BUY" and (rate is None or quantity * limit * rate > binding["max_order_value"]):
+            return self._block(order["id"], "BLOCKED", "At TWS's price the buy is above your per-order limit.")
         contract_info = snap.get("contract") or {}
         con_id = contract_info.get("conId")
         if not con_id:

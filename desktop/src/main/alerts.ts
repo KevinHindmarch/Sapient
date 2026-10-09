@@ -2,7 +2,7 @@
 // and the optional "keep running in the tray" behaviour. Everything here talks to
 // the local engine with the same per-launch token the UI uses.
 
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, Tray } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, powerSaveBlocker, Tray } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 
@@ -32,7 +32,14 @@ interface PaperOrder {
   detail: string | null
 }
 
-interface DesktopSettings { closeToTray: boolean }
+interface DesktopSettings {
+  closeToTray: boolean   // closing the window keeps Sapient running in the tray (default on)
+  openAtLogin: boolean   // start with Windows, hidden in the tray (default off)
+  keepAwake: boolean     // stop the PC sleeping while a market Sapient trades is open (default on)
+}
+const DEFAULTS: DesktopSettings = { closeToTray: true, openAtLogin: false, keepAwake: true }
+
+interface SchedulerStatus { markets?: { code: string; open_now: boolean }[] }
 
 // Paper order changes worth a notification (automatic trades must never be silent).
 const kind = (o: PaperOrder) => (o.environment === 'live' ? 'REAL-MONEY' : 'Paper')
@@ -55,6 +62,7 @@ export class Alerts {
   private timer: NodeJS.Timeout | null = null
   private settings: DesktopSettings
   private hintShown = false
+  private awakeBlocker: number | null = null
 
   constructor(
     private readonly window: () => BrowserWindow | null,
@@ -73,12 +81,14 @@ export class Alerts {
   start(): void {
     this.createTray()
     this.registerIpc()
+    this.applyLoginItem()
     void this.poll()
     this.timer = setInterval(() => { void this.poll() }, POLL_MS)
   }
 
   stop(): void {
     if (this.timer) clearInterval(this.timer)
+    this.setAwake(false)
     this.tray?.destroy()
     this.tray = null
   }
@@ -103,9 +113,39 @@ export class Alerts {
   private loadSettings(): DesktopSettings {
     try {
       const raw = JSON.parse(fs.readFileSync(this.settingsFile, 'utf8')) as Partial<DesktopSettings>
-      return { closeToTray: raw.closeToTray === true }
+      return {
+        closeToTray: typeof raw.closeToTray === 'boolean' ? raw.closeToTray : DEFAULTS.closeToTray,
+        openAtLogin: raw.openAtLogin === true,
+        keepAwake: typeof raw.keepAwake === 'boolean' ? raw.keepAwake : DEFAULTS.keepAwake,
+      }
     } catch {
-      return { closeToTray: false }
+      return { ...DEFAULTS }
+    }
+  }
+
+  /** Start with Windows (hidden in the tray) when the user asked for it. */
+  private applyLoginItem(): void {
+    if (process.platform !== 'win32' || !app.isPackaged) return
+    app.setLoginItemSettings({ openAtLogin: this.settings.openAtLogin, args: ['--hidden'] })
+  }
+
+  private setAwake(on: boolean): void {
+    if (on && this.awakeBlocker === null) {
+      this.awakeBlocker = powerSaveBlocker.start('prevent-app-suspension')
+    } else if (!on && this.awakeBlocker !== null) {
+      powerSaveBlocker.stop(this.awakeBlocker)
+      this.awakeBlocker = null
+    }
+  }
+
+  /** Keep the PC awake while the ASX or US market is open, so automatic checks and orders aren't missed. */
+  private async refreshAwake(): Promise<void> {
+    if (!this.settings.keepAwake) { this.setAwake(false); return }
+    try {
+      const status = await this.call<SchedulerStatus>('/ai/scheduler')
+      this.setAwake((status.markets ?? []).some((m) => m.open_now))
+    } catch {
+      // engine restarting: keep the current state
     }
   }
 
@@ -119,6 +159,15 @@ export class Alerts {
     ipcMain.handle('sapient:set-close-to-tray', (_event, value: unknown) => {
       this.settings.closeToTray = value === true
       this.saveSettings()
+      return { ...this.settings }
+    })
+    ipcMain.handle('sapient:set-desktop-setting', (_event, key: unknown, value: unknown) => {
+      if ((key === 'closeToTray' || key === 'openAtLogin' || key === 'keepAwake') && typeof value === 'boolean') {
+        this.settings[key] = value
+        this.saveSettings()
+        if (key === 'openAtLogin') this.applyLoginItem()
+        if (key === 'keepAwake') void this.refreshAwake()
+      }
       return { ...this.settings }
     })
     ipcMain.handle('sapient:emergency-stop', () => this.emergencyStop(false))
@@ -186,6 +235,7 @@ export class Alerts {
     if (this.seeded && fresh.length && Notification.isSupported()) this.notify(fresh)
     this.seeded = true
     await this.pollOrders()
+    await this.refreshAwake()
   }
 
   private async pollOrders(): Promise<void> {

@@ -6,12 +6,57 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import minimize
 from core import yahoo as yf
+from types import SimpleNamespace
 from typing import Dict, List, Optional
 
 from core.stocks import StockDataService
 
 
-RISK_FREE_RATE = 0.035
+# One risk-free rate per market everywhere (Australian / US 10-year government bond yields).
+RISK_FREE_RATES = {"ASX": 0.0435, "US": 0.045}
+RISK_FREE_RATE = RISK_FREE_RATES["ASX"]
+MIN_HOLDING = 0.01   # weights under 1% are dropped and the rest rescaled
+
+
+def risk_free_for(market: str | None) -> float:
+    return RISK_FREE_RATES.get((market or "ASX").upper(), RISK_FREE_RATE)
+
+
+def solve_weights(mean_returns: pd.Series, cov_matrix: pd.DataFrame, max_weight: float,
+                  risk_free_rate: float) -> dict:
+    """Maximum-Sharpe weights (each 0..max_weight, summing to 1).
+
+    When even the best mix earns less than the risk-free rate, maximising the
+    Sharpe ratio would favour the most volatile stocks, so the lowest-risk mix
+    (minimum variance) is used instead and reported as such.
+    """
+    n = len(mean_returns)
+    mu, cov = mean_returns.values, cov_matrix.values
+    constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1},)
+    bounds = tuple((0.0, max_weight) for _ in range(n))
+    start = np.array([1 / n] * n)
+
+    def volatility(w):
+        return float(np.sqrt(max(np.dot(w.T, np.dot(cov, w)), 0.0)))
+
+    def negative_sharpe(w):
+        vol = volatility(w)
+        return 1e6 if vol == 0 else -(float(np.dot(mu, w)) - risk_free_rate) / vol
+
+    result = minimize(negative_sharpe, start, method='SLSQP', bounds=bounds, constraints=constraints,
+                      options={'maxiter': 1000})
+    weights, method = result.x, "max_sharpe"
+    if (float(np.dot(mu, weights)) - risk_free_rate) <= 0:
+        result = minimize(lambda w: volatility(w) ** 2, start, method='SLSQP', bounds=bounds,
+                          constraints=constraints, options={'maxiter': 1000})
+        weights, method = result.x, "min_variance"
+    weights = np.clip(weights, 0, None)
+    weights = np.where(weights >= MIN_HOLDING, weights, 0)
+    weights = weights / weights.sum() if weights.sum() > 0 else start
+    ret, vol = float(np.dot(mu, weights)), volatility(weights)
+    return {"weights": weights, "return": ret, "volatility": vol,
+            "sharpe": (ret - risk_free_rate) / vol if vol > 0 else 0.0,
+            "success": bool(result.success), "method": method}
 
 RISK_PARAMS = {
     'conservative': {
@@ -105,16 +150,9 @@ class PortfolioOptimizerService:
             
             annualization_factor = PortfolioOptimizerService.infer_annualization_factor(returns)
             
-            # Use arithmetic mean for expected returns (simple average)
+            # Arithmetic mean of total-return prices: Yahoo's adjusted prices already include
+            # dividends, so the dividend yield is shown but never added again.
             mean_returns = returns.mean() * annualization_factor
-            
-            if dividend_yields:
-                for col in returns.columns:
-                    if col in dividend_yields:
-                        div_yield = dividend_yields[col]
-                        if div_yield > 0.5:
-                            div_yield = div_yield / 100
-                        mean_returns[col] += div_yield
             
             cov_matrix = returns.cov() * annualization_factor
             num_assets = len(returns.columns)
@@ -122,36 +160,12 @@ class PortfolioOptimizerService:
             if num_assets < params['min_stocks']:
                 return {'error': f"Minimum {params['min_stocks']} stocks required for {risk_tolerance} risk profile"}
             
-            def objective(weights):
-                portfolio_return = np.sum(mean_returns * weights)
-                portfolio_volatility = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
-                
-                if portfolio_volatility == 0:
-                    return -np.inf
-                
-                adjusted_volatility = portfolio_volatility * params['volatility_penalty']
-                sharpe_ratio = (portfolio_return - risk_free_rate) / adjusted_volatility
-                return -sharpe_ratio
-            
-            constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
-            min_weight = max(0.02, 0.5 / num_assets)
-            bounds = tuple((min_weight, params['max_weight']) for _ in range(num_assets))
-            initial_guess = np.array([1/num_assets] * num_assets)
-            
-            result = minimize(
-                objective,
-                initial_guess,
-                method='SLSQP',
-                bounds=bounds,
-                constraints=constraints,
-                options={'maxiter': 1000}
-            )
-            
-            optimal_weights = result.x
-            
-            portfolio_return = np.sum(mean_returns * optimal_weights)
-            portfolio_volatility = np.sqrt(np.dot(optimal_weights.T, np.dot(cov_matrix, optimal_weights)))
-            sharpe_ratio = (portfolio_return - risk_free_rate) / portfolio_volatility
+            solved = solve_weights(mean_returns, cov_matrix, params['max_weight'], risk_free_rate)
+            optimal_weights = solved["weights"]
+            portfolio_return, portfolio_volatility = solved["return"], solved["volatility"]
+            sharpe_ratio = solved["sharpe"]
+            result = SimpleNamespace(success=solved["success"])
+            method = solved["method"]
             
             portfolio_returns = returns.dot(optimal_weights)
             var_95 = float(np.percentile(portfolio_returns, 5))
@@ -180,6 +194,7 @@ class PortfolioOptimizerService:
                 'beta': beta,
                 'historical_data': price_data,
                 'optimization_success': result.success,
+                'method': method,  # 'max_sharpe' or 'min_variance' (when nothing beats the risk-free rate)
                 'risk_tolerance': risk_tolerance,
                 'max_single_weight': params['max_weight'],
                 'dividend_yields': dividend_yields,
@@ -239,7 +254,8 @@ class PortfolioOptimizerService:
     def backtest_portfolio(
         price_data: pd.DataFrame,
         weights: Dict[str, float],
-        initial_investment: float = 10000
+        initial_investment: float = 10000,
+        market: str = "ASX"
     ) -> Optional[Dict]:
         """
         Backtest portfolio performance with given weights.
@@ -267,7 +283,7 @@ class PortfolioOptimizerService:
             total_return = float((portfolio_value.iloc[-1] / initial_investment - 1) * 100)
             annual_return = float(portfolio_returns.mean() * annualization_factor * 100)
             annual_volatility = float(portfolio_returns.std() * np.sqrt(annualization_factor) * 100)
-            sharpe = float((portfolio_returns.mean() * annualization_factor - RISK_FREE_RATE) / 
+            sharpe = float((portfolio_returns.mean() * annualization_factor - risk_free_for(market)) / 
                           (portfolio_returns.std() * np.sqrt(annualization_factor)))
             
             running_max = portfolio_value.expanding().max()
@@ -330,7 +346,8 @@ class PortfolioOptimizerService:
         expected_returns: Dict[str, float],
         investment_amount: float,
         risk_tolerance: str = 'moderate',
-        dividend_yields: Optional[Dict[str, float]] = None
+        dividend_yields: Optional[Dict[str, float]] = None,
+        risk_free_rate: float = RISK_FREE_RATE
     ) -> Optional[Dict]:
         """
         Optimize portfolio using externally provided expected returns.
@@ -371,36 +388,12 @@ class PortfolioOptimizerService:
             if num_assets < params['min_stocks']:
                 return {'error': f"Minimum {params['min_stocks']} stocks required for {risk_tolerance} risk profile"}
             
-            def objective(weights):
-                portfolio_return = np.sum(mean_returns * weights)
-                portfolio_volatility = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
-                
-                if portfolio_volatility == 0:
-                    return -np.inf
-                
-                adjusted_volatility = portfolio_volatility * params['volatility_penalty']
-                sharpe_ratio = (portfolio_return - RISK_FREE_RATE) / adjusted_volatility
-                return -sharpe_ratio
-            
-            constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
-            min_weight = max(0.02, 0.5 / num_assets)
-            bounds = tuple((min_weight, params['max_weight']) for _ in range(num_assets))
-            initial_guess = np.array([1/num_assets] * num_assets)
-            
-            result = minimize(
-                objective,
-                initial_guess,
-                method='SLSQP',
-                bounds=bounds,
-                constraints=constraints,
-                options={'maxiter': 1000}
-            )
-            
-            optimal_weights = result.x
-            
-            portfolio_return = np.sum(mean_returns * optimal_weights)
-            portfolio_volatility = np.sqrt(np.dot(optimal_weights.T, np.dot(cov_matrix, optimal_weights)))
-            sharpe_ratio = (portfolio_return - RISK_FREE_RATE) / portfolio_volatility
+            solved = solve_weights(mean_returns, cov_matrix, params['max_weight'], risk_free_rate)
+            optimal_weights = solved["weights"]
+            portfolio_return, portfolio_volatility = solved["return"], solved["volatility"]
+            sharpe_ratio = solved["sharpe"]
+            result = SimpleNamespace(success=solved["success"])
+            method = solved["method"]
             
             portfolio_returns = returns.dot(optimal_weights)
             var_95 = float(np.percentile(portfolio_returns, 5))
@@ -429,6 +422,7 @@ class PortfolioOptimizerService:
                 'beta': beta,
                 'historical_data': price_data,
                 'optimization_success': result.success,
+                'method': method,  # 'max_sharpe' or 'min_variance' (when nothing beats the risk-free rate)
                 'risk_tolerance': risk_tolerance,
                 'max_single_weight': params['max_weight'],
                 'dividend_yields': dividend_yields,

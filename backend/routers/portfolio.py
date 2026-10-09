@@ -85,6 +85,7 @@ def optimize_portfolio(request: OptimizeRequest):
         portfolio_dividend_yield=result['portfolio_dividend_yield'],
         risk_tolerance=result['risk_tolerance'],
         optimization_success=result['optimization_success'],
+        method=result.get('method', 'max_sharpe'),
         correlation_matrix=correlation_matrix,
         correlation_symbols=correlation_symbols
     )
@@ -401,7 +402,8 @@ def optimize_fundamentals_portfolio(request: OptimizeRequest):
         expected_returns=expected_returns,
         investment_amount=request.investment_amount,
         risk_tolerance=request.risk_tolerance,
-        dividend_yields=dividend_yields
+        dividend_yields=dividend_yields,
+        risk_free_rate=StockDataService.get_risk_free_rate(getattr(request, "market", "ASX") or "ASX"),
     )
     
     if result is None:
@@ -522,7 +524,8 @@ def optimize_capm_portfolio(request: OptimizeRequest):
         expected_returns=expected_returns,
         investment_amount=request.investment_amount,
         risk_tolerance=request.risk_tolerance,
-        dividend_yields=dividend_yields
+        dividend_yields=dividend_yields,
+        risk_free_rate=StockDataService.get_risk_free_rate(getattr(request, "market", "ASX") or "ASX"),
     )
     
     if result is None:
