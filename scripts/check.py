@@ -21,7 +21,7 @@ TEST_PATTERNS = (
     "test_upgrades.py",
     "test_strategy.py",
     "test_paper.py",
-    "test_live.py",
+    "test_live.py", "test_g1_safety.py",
 )
 
 

@@ -50,7 +50,7 @@ class LocalAccessMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
-async def get_current_user() -> dict:
+def get_current_user() -> dict:
     """The single local user. Access was already checked by LocalAccessMiddleware."""
     user = UserService.get_local_user()
     if user is None:

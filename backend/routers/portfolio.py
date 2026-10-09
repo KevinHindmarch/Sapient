@@ -32,7 +32,7 @@ router = APIRouter()
 
 
 @router.post("/optimize", response_model=OptimizeResponse)
-async def optimize_portfolio(request: OptimizeRequest):
+def optimize_portfolio(request: OptimizeRequest):
     """Optimize portfolio allocation for given stocks."""
     market = request.market.upper() if request.market else "ASX"
     
@@ -92,7 +92,7 @@ async def optimize_portfolio(request: OptimizeRequest):
 
 
 @router.post("/backtest", response_model=BacktestResponse)
-async def backtest_portfolio(request: BacktestRequest):
+def backtest_portfolio(request: BacktestRequest):
     """Backtest portfolio with given weights."""
     price_data = StockDataService.get_stock_data(request.symbols, request.period)
     
@@ -123,7 +123,7 @@ async def backtest_portfolio(request: BacktestRequest):
 
 
 @router.post("/compare-strategies", response_model=CompareStrategiesResponse)
-async def compare_strategies(request: OptimizeRequest):
+def compare_strategies(request: OptimizeRequest):
     """Compare all risk strategies for given stocks."""
     price_data = StockDataService.get_stock_data(request.symbols, request.period)
     
@@ -144,7 +144,7 @@ async def compare_strategies(request: OptimizeRequest):
 
 
 @router.post("/save")
-async def save_portfolio(
+def save_portfolio(
     portfolio_data: PortfolioCreate,
     current_user: dict = Depends(get_current_user)
 ):
@@ -166,14 +166,14 @@ async def save_portfolio(
 
 
 @router.get("/list", response_model=List[PortfolioResponse])
-async def get_portfolios(current_user: dict = Depends(get_current_user)):
+def get_portfolios(current_user: dict = Depends(get_current_user)):
     """Get all portfolios for current user."""
     portfolios = PortfolioService.get_user_portfolios(current_user['id'])
     return [PortfolioResponse(**p) for p in portfolios]
 
 
 @router.get("/{portfolio_id}", response_model=PortfolioDetailResponse)
-async def get_portfolio_detail(
+def get_portfolio_detail(
     portfolio_id: int,
     current_user: dict = Depends(get_current_user)
 ):
@@ -195,7 +195,7 @@ async def get_portfolio_detail(
 
 
 @router.post("/{portfolio_id}/trade")
-async def execute_trade(
+def execute_trade(
     portfolio_id: int,
     trade: TradeRequest,
     current_user: dict = Depends(get_current_user)
@@ -220,7 +220,7 @@ async def execute_trade(
 
 
 @router.put("/{portfolio_id}/positions/{position_id}")
-async def update_position(
+def update_position(
     portfolio_id: int,
     position_id: int,
     update: UpdatePositionRequest,
@@ -242,7 +242,7 @@ async def update_position(
 
 
 @router.delete("/{portfolio_id}")
-async def delete_portfolio(
+def delete_portfolio(
     portfolio_id: int,
     current_user: dict = Depends(get_current_user)
 ):
@@ -259,7 +259,7 @@ async def delete_portfolio(
 
 
 @router.delete("/{portfolio_id}/positions/{position_id}")
-async def remove_position(
+def remove_position(
     portfolio_id: int,
     position_id: int,
     current_user: dict = Depends(get_current_user)
@@ -278,7 +278,7 @@ async def remove_position(
 
 
 @router.post("/{portfolio_id}/stocks")
-async def add_stock(
+def add_stock(
     portfolio_id: int,
     stock: AddStockRequest,
     current_user: dict = Depends(get_current_user)
@@ -301,7 +301,7 @@ async def add_stock(
 
 
 @router.get("/fundamentals/scan")
-async def scan_fundamentals(top_n: int = 20, market: str = "ASX"):
+def scan_fundamentals(top_n: int = 20, market: str = "ASX"):
     """
     Scan stocks and return top N by fundamental score.
     
@@ -332,7 +332,7 @@ async def scan_fundamentals(top_n: int = 20, market: str = "ASX"):
 
 
 @router.post("/fundamentals/optimize")
-async def optimize_fundamentals_portfolio(request: OptimizeRequest):
+def optimize_fundamentals_portfolio(request: OptimizeRequest):
     """
     Optimize portfolio using fundamentals-based expected returns.
     
@@ -427,7 +427,7 @@ async def optimize_fundamentals_portfolio(request: OptimizeRequest):
 
 
 @router.get("/capm/analyze")
-async def analyze_capm(symbols: str, period: str = "2y"):
+def analyze_capm(symbols: str, period: str = "2y"):
     """
     Analyze stocks using CAPM to calculate beta and expected returns.
     
@@ -449,7 +449,7 @@ async def analyze_capm(symbols: str, period: str = "2y"):
 
 
 @router.post("/capm/optimize")
-async def optimize_capm_portfolio(request: OptimizeRequest):
+def optimize_capm_portfolio(request: OptimizeRequest):
     """
     Optimize portfolio using CAPM-based expected returns.
     
@@ -542,7 +542,7 @@ async def optimize_capm_portfolio(request: OptimizeRequest):
 
 
 @router.get("/capm/scan")
-async def scan_capm_opportunities(top_n: int = 30, period: str = "2y"):
+def scan_capm_opportunities(top_n: int = 30, period: str = "2y"):
     """
     Scan ASX200 stocks and find undervalued opportunities using CAPM.
     
@@ -632,7 +632,7 @@ class _RebalancePlan(_BaseModel):
 
 
 @router.put("/{portfolio_id}/ai-mode")
-async def set_portfolio_ai_mode(
+def set_portfolio_ai_mode(
     portfolio_id: int,
     body: _AIModeUpdate,
     current_user: dict = Depends(get_current_user),
@@ -722,7 +722,7 @@ def _compute_rebalance_legs(positions: list, current_prices: dict) -> tuple[list
 
 
 @router.get("/{portfolio_id}/rebalance-plan", response_model=_RebalancePlan)
-async def get_rebalance_plan(
+def get_rebalance_plan(
     portfolio_id: int,
     current_user: dict = Depends(get_current_user),
 ):
@@ -762,7 +762,7 @@ async def get_rebalance_plan(
 
 
 @router.post("/{portfolio_id}/execute-rebalance", status_code=202)
-async def execute_rebalance(
+def execute_rebalance(
     portfolio_id: int,
     payload: PlaceOrdersRequest,
     current_user: dict = Depends(get_current_user),

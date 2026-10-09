@@ -65,7 +65,7 @@ async def search_stocks(q: str = Query(..., min_length=1), market: str = "ASX") 
 
 
 @router.get("/info/{symbol}")
-async def get_stock_info(symbol: str) -> StockInfo:
+def get_stock_info(symbol: str) -> StockInfo:
     """Get detailed information about a stock."""
     info = StockDataService.get_stock_info(symbol)
     
@@ -76,7 +76,7 @@ async def get_stock_info(symbol: str) -> StockInfo:
 
 
 @router.post("/historical")
-async def get_historical_data(request: HistoricalDataRequest) -> HistoricalDataResponse:
+def get_historical_data(request: HistoricalDataRequest) -> HistoricalDataResponse:
     """Get historical price data for multiple stocks."""
     price_data = StockDataService.get_stock_data(request.symbols, request.period)
     
@@ -95,7 +95,7 @@ async def get_historical_data(request: HistoricalDataRequest) -> HistoricalDataR
 
 
 @router.get("/dividends")
-async def get_dividend_yields(symbols: str = Query(...)) -> DividendYieldResponse:
+def get_dividend_yields(symbols: str = Query(...)) -> DividendYieldResponse:
     """Get dividend yields for multiple stocks (comma-separated symbols)."""
     symbol_list = [s.strip() for s in symbols.split(',')]
     yields = StockDataService.get_dividend_yields(symbol_list)
@@ -104,19 +104,19 @@ async def get_dividend_yields(symbols: str = Query(...)) -> DividendYieldRespons
 
 
 @router.get("/asx200")
-async def get_asx200_stocks():
+def get_asx200_stocks():
     """Get list of ASX200 stocks with sectors."""
     return StockDataService.get_asx200_stocks()
 
 
 @router.get("/sp500")
-async def get_sp500_stocks():
+def get_sp500_stocks():
     """Get list of S&P 500 stocks with sectors."""
     return StockDataService.get_sp500_stocks()
 
 
 @router.get("/validate/{symbol}")
-async def validate_stock(symbol: str):
+def validate_stock(symbol: str):
     """Validate if a stock symbol exists and has data."""
     valid = StockDataService.validate_stock(symbol)
     formatted_symbol = StockDataService.format_symbol(symbol)
@@ -125,7 +125,7 @@ async def validate_stock(symbol: str):
 
 
 @router.get("/rank")
-async def rank_stocks_by_performance():
+def rank_stocks_by_performance():
     """
     Rank all ASX200 stocks by their individual Sharpe ratio.
     Returns stocks sorted by best risk-adjusted returns.

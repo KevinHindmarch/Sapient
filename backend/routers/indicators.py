@@ -10,7 +10,7 @@ router = APIRouter()
 
 
 @router.get("/analyze/{symbol}")
-async def analyze_stock(symbol: str, period: str = "1y", market: str = "asx"):
+def analyze_stock(symbol: str, period: str = "1y", market: str = "asx"):
     """Perform comprehensive technical analysis on a stock."""
     result = TechnicalIndicatorService.analyze_stock(symbol, period, market)
     
@@ -21,7 +21,7 @@ async def analyze_stock(symbol: str, period: str = "1y", market: str = "asx"):
 
 
 @router.get("/chart-data/{symbol}")
-async def get_chart_data(symbol: str, indicator: str = "all", period: str = "1y", market: str = "asx"):
+def get_chart_data(symbol: str, indicator: str = "all", period: str = "1y", market: str = "asx"):
     """Get indicator data formatted for charting."""
     result = TechnicalIndicatorService.get_chart_data(symbol, indicator, period, market)
     
@@ -32,7 +32,7 @@ async def get_chart_data(symbol: str, indicator: str = "all", period: str = "1y"
 
 
 @router.get("/rsi-screener")
-async def rsi_screener(market: str = "asx", signal: str = "buy"):
+def rsi_screener(market: str = "asx", signal: str = "buy"):
     """Scan stocks for RSI signals (oversold/overbought/hold)."""
     from core.stocks import StockDataService
     

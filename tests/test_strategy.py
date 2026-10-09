@@ -253,7 +253,7 @@ class EngineRuleTests(unittest.TestCase):
                           "stop_loss_pct": 5},
                 portfolio_value=1000.0, expires_at=utc(2026, 10, 12, 0, 0))
         self.assertEqual((signal["action"], signal["rationale"]["rule"]), ("SELL", "stop_loss"))
-        self.assertAlmostEqual(signal["quantity"], min(10, 1000 * 0.25 / 90), places=3)
+        self.assertEqual(signal["quantity"], 10)  # risk exits sell the whole position, not a trade-size slice
         self.assertEqual(signal["expires_at"], utc(2026, 10, 12, 0, 0))
         self.assertIn("stop-loss", signal["rule_summary"])
 

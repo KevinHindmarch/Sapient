@@ -12,6 +12,7 @@ autonomous/semi-autonomous management, paper + live): [docs/trading-workflow.md]
 Installer + first-run TWS setup wizard + Test connection UX: [docs/install-and-setup.md](docs/install-and-setup.md).
 Paper trading (authorisation record, rules, submit protocol): [docs/paper-trading.md](docs/paper-trading.md).
 Live (real-money) trading (user decisions, rules): [docs/live-trading.md](docs/live-trading.md).
+Audit after v0.5.0 and the G-phase plan: [docs/audit-2026-10.md](docs/audit-2026-10.md).
 
 ## Working agreement with the user
 
@@ -105,7 +106,8 @@ backend/             FastAPI app (thin HTTP layer), 127.0.0.1 only
                      get_current_user() = the single local profile (users.id=1)
   desktop_main.py    entrypoint for Electron/PyInstaller: token on stdin, prints
                      {"event":"ready","port":N}, exits when stdin closes;
-                     --worker runs the TWS connector instead
+                     --worker runs the TWS connector instead; --halt = Emergency
+                     stop straight in the DB (tray fallback when the API is down)
   routers/           stocks, portfolio, indicators, broker (status + simulation
                      orders), ai_trading, execution (intents/halt/resume),
                      tws (/api/tws paper login, /api/tws-live live login), paper
@@ -133,7 +135,8 @@ core/                Service layer (all business logic)
   strategy/          calendar (ASX/US hours, holidays 2026–27), rules (stop-loss,
                      take-profit, RSI exit/entry), sizing (weights → whole shares),
                      scheduler (2 checks per trading day per portfolio, runs in the
-                     connector process, unique window rows, expires unanswered proposals)
+                     API process so it stops with the API, unique window rows,
+                     expires unanswered proposals)
   execution_safety.py IntentService: the single order admission boundary
   ibkr_client.py     connection_status() (reads TWS connector state) + IBKRClient
                      that refuses every direct place/cancel
@@ -218,6 +221,7 @@ python -m unittest discover -s tests -p 'test_upgrades.py' -v    # fresh install
 python -m unittest discover -s tests -p 'test_strategy.py' -v    # calendar, rules, sizing, scheduler
 python -m unittest discover -s tests -p 'test_paper.py' -v       # paper admission, submit protocol, fills, cancel, halt
 python -m unittest discover -s tests -p 'test_live.py' -v        # live: separate auth, real-time only, separation from paper
+python -m unittest discover -s tests -p 'test_g1_safety.py' -v   # audit fixes: account kinds, portfolio-owned sells, DAY-order expiry
 python -m compileall -q core backend
 cd frontend && npm run build && npm run lint
 ```
@@ -236,7 +240,12 @@ cd frontend && npm run build && npm run lint
 - TWS defaults: paper port 7497, live 7496 — a port or `DU` prefix does not prove
   paper. Use a fixed nonzero client ID; never auto-switch on collision.
 - yfinance prices are research data, not execution-price evidence.
-- Saved/model positions never imply broker holdings.
+- Saved/model positions never imply broker holdings. A portfolio may only sell
+  shares Sapient bought for it in that account (`paper_portfolio_fills`).
+- Paper accounts start with D; a paper setup never accepts another account,
+  and live never accepts a D account.
+- API route handlers are plain `def` (thread pool): blocking work on the event
+  loop froze the Emergency stop.
 - Upgrades must keep user data: never edit an applied (released) migration,
   never store data in the install folder, and new first-run steps must be
   skipped for existing users (mark them done in the migration).

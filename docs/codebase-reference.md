@@ -207,7 +207,7 @@ off and reports `broker_confirmed: False`.
   holidays/early closes for 2026–27; unknown years assume weekdays open and are
   flagged), `rules.py` (exit: stop-loss → take-profit → RSI overbought; entry:
   RSI oversold), `sizing.py` (weights + budget + trusted prices → whole shares,
-  cash buffer, top-up pass), `scheduler.py` (runs in the connector process
+  cash buffer, top-up pass), `scheduler.py` (runs in the API process
   thread; two windows per trading day; only the latest missed window runs;
   answer-by = approval timeout capped at market close; crashed runs are
   abandoned, not retried; expires unanswered proposals every tick).

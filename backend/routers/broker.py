@@ -40,7 +40,7 @@ def _order_to_response(row: dict) -> BrokerOrderResponse:
 
 
 @router.get("/status")
-async def broker_status(current_user: dict = Depends(get_current_user)):
+def broker_status(current_user: dict = Depends(get_current_user)):
     return connection_status()
 
 
@@ -50,7 +50,7 @@ async def broker_status(current_user: dict = Depends(get_current_user)):
 
 
 @router.post("/orders", status_code=202)
-async def place_orders(
+def place_orders(
     payload: PlaceOrdersRequest,
     current_user: dict = Depends(get_current_user),
 ):
@@ -76,7 +76,7 @@ async def place_orders(
 
 
 @router.get("/orders/recent", response_model=list[BrokerOrderResponse])
-async def list_recent_orders(
+def list_recent_orders(
     limit: int = 50,
     current_user: dict = Depends(get_current_user),
 ):

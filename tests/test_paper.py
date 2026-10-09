@@ -13,6 +13,7 @@ from unittest import mock
 from core import db, migrations
 from core.tws import paper, store
 from core.tws.execution import PaperExecutor, asx_tick, choose_limit
+from core.tws.session import REQ_EXECUTIONS
 from core.tws.session import TwsSession
 from core.tws.worker import Clock, TwsWorker
 from tests.test_tws import SDK, FakeTws
@@ -99,7 +100,8 @@ class PaperFakeTws(FakeTws):
 
     def cancel_order(self, order_id):
         self.cancelled.append(order_id)
-        self.emit("orderStatus", orderId=order_id, status="Cancelled", filled=0, remaining=0, avgFillPrice=0, permId=1)
+        self.emit("orderStatus", orderId=order_id, status="Cancelled", filled=0, remaining=0, avgFillPrice=0,
+                  permId=9000 + order_id)
         self.emit("error", reqId=order_id, errorCode=202, errorString="Order Canceled - reason:")
 
 
@@ -344,7 +346,7 @@ class ExecutorTests(PaperTestCase):
         ex = self.executor(fake)
         ex.step()
         # The same execution again (e.g. from the next sync) is not counted twice.
-        fake.emit("execDetails", reqId=9002, contract=None, execution=SimpleNamespace(
+        fake.emit("execDetails", reqId=REQ_EXECUTIONS, contract=None, execution=SimpleNamespace(
             execId="0001.abc.01.01", orderId=500, clientId=71, orderRef=self.get(first["id"])["order_ref"],
             permId=9500, acctNumber=ACCOUNT, shares=Decimal("10"), price=45.67, time="t"))
         ex.session.drain()
@@ -452,17 +454,17 @@ class PortfolioOnPaperTests(PaperTestCase):
         self.assertEqual(self.get(order_id)["state"], "FILLED")
 
     def test_buy_and_sell_fills_update_holdings_once(self):
-        buy = self.order(key="b", symbol="BHP.AX", side="BUY", quantity=5, price="40", portfolio_id=self.pid)
+        buy = self.order(key="b", symbol="BHP.AX", side="BUY", quantity=10, price="40", portfolio_id=self.pid)
         self.sql("UPDATE paper_orders SET state='SUBMITTED', api_order_id=700, order_ref='sapient:b' WHERE id=%s", (buy["id"],))
         ex = ExecutorTests.executor(self, PaperFakeTws())
-        self.fill(ex, buy["id"], "b1.01", "5", "46")
-        self.fill(ex, buy["id"], "b1.01", "5", "46")                    # same fill again: no change
-        self.assertEqual(self.positions()["BHP.AX"], (15.0, 42.0, "active"))
+        self.fill(ex, buy["id"], "b1.01", "10", "46")
+        self.fill(ex, buy["id"], "b1.01", "10", "46")                   # same fill again: no change
+        self.assertEqual(self.positions()["BHP.AX"], (20.0, 43.0, "active"))
         sell = self.order(key="s", symbol="BHP.AX", side="SELL", quantity=10, price="46", portfolio_id=self.pid)
         self.sql("UPDATE paper_orders SET state='SUBMITTED', api_order_id=701, order_ref='sapient:s' WHERE id=%s", (sell["id"],))
         self.fill(ex, sell["id"], "s1.01", "8", "47")
         self.fill(ex, sell["id"], "s1.02", "7", "47")                    # IBKR correction: 7 not 8
-        self.assertEqual(self.positions()["BHP.AX"][0], 8.0)
+        self.assertEqual(self.positions()["BHP.AX"][0], 13.0)
         notes = self.sql("SELECT notes FROM transactions WHERE portfolio_id=%s", (self.pid,), fetch=True)
         self.assertTrue(all("Paper fill in DU1234567" in n["notes"] for n in notes))
 
@@ -491,6 +493,12 @@ class PortfolioOnPaperTests(PaperTestCase):
         self.sql("UPDATE portfolios SET ai_mode='autonomous', paper_started_at=%s WHERE id=%s",
                  (datetime.now(timezone.utc), self.pid))
         self.sql("DELETE FROM portfolio_positions WHERE portfolio_id=%s AND symbol <> 'BHP.AX'", (self.pid,))
+        # The portfolio's 10 BHP were bought through Sapient (its entry order filled).
+        entry = paper.admit({"origin": "entry", "idempotency_key": "entry", "symbol": "BHP.AX", "side": "BUY",
+                             "quantity": 10, "reference_price": "40", "portfolio_id": self.pid}, self.user["id"])
+        self.sql("UPDATE paper_orders SET state='SUBMITTED', api_order_id=690, order_ref='sapient:e' WHERE id=%s",
+                 (entry["id"],))
+        self.fill(ExecutorTests.executor(self, PaperFakeTws()), entry["id"], "e1.01", "10", "40")
         analysis = {"current_price": 45.0, "indicators": {"rsi": {"value": 80.0}, "macd": {}}}
         clock = [datetime(2026, 10, 11, 23, 20, tzinfo=timezone.utc)]  # Mon 12 Oct 2026, 10:20 Sydney
         with mock.patch.object(ai_engine.TechnicalIndicatorService, "analyze_stock", return_value=analysis), \
@@ -498,7 +506,7 @@ class PortfolioOnPaperTests(PaperTestCase):
                 mock.patch("core.strategy.scheduler.calendar.is_open", return_value=True):
             runs = Scheduler(now=lambda: clock[0]).tick()
         self.assertEqual(runs[0]["new_signals"], 1, runs)
-        orders = paper.list_orders()
+        orders = [o for o in paper.list_orders() if o["origin"] != "entry"]
         self.assertEqual([(o["origin"], o["side"], o["symbol"], o["state"]) for o in orders],
                          [("ai_autonomous", "SELL", "BHP.AX", "QUEUED")])
         quantity = int(orders[0]["quantity"])

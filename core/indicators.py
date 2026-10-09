@@ -239,9 +239,14 @@ class TechnicalIndicatorService:
             
             trend = 'uptrend' if current_price > float(sma_50.iloc[-1]) else 'downtrend'
             
+            returns = close.pct_change().dropna()
             return {
                 'symbol': symbol,
                 'current_price': current_price,
+                'previous_close': float(close.iloc[-2]),
+                'last_return': float(returns.iloc[-1]) if len(returns) else 0.0,
+                # typical daily move over the previous 20 days (excluding today)
+                'daily_volatility': float(returns.iloc[-21:-1].std()) if len(returns) > 21 else None,
                 'trend': trend,
                 'indicators': {
                     'rsi': {

@@ -80,6 +80,23 @@ def get_binding(cur=None, env: str = "paper") -> dict:
     return row
 
 
+def account_kind_problem(env: str, account_id: str | None) -> tuple[str, str] | None:
+    """IBKR paper account numbers start with D (DU…, DF…); real-money ones never do.
+
+    The prefix alone doesn't prove an account is paper, but a paper setup that
+    points at a non-D account is certainly wrong, so both directions are refused.
+    """
+    account_id = (account_id or "").strip().upper()
+    if not account_id:
+        return None
+    if env == "live" and account_id.startswith("D"):
+        return ("paper_account_on_live", f"{account_id} is a paper account (it starts with D). Use the Paper tab for it.")
+    if env == "paper" and not account_id.startswith("D"):
+        return ("live_account_on_paper", f"{account_id} is a real-money account (paper accounts start with D, "
+                                         "like DU1234567). Set it up on the Live tab instead.")
+    return None
+
+
 def authorise(account_id: str, confirmation: str, limits: dict | None = None, env: str = "paper") -> dict:
     """Bind the confirmed TWS account for this environment and switch orders on."""
     e = get_env(env)
@@ -89,10 +106,12 @@ def authorise(account_id: str, confirmation: str, limits: dict | None = None, en
         raise PaperError("account_required", "Enter the account number.")
     if confirmation != e.authorisation_text.format(account=account_id):
         raise PaperError("confirmation_mismatch", "Tick the authorisation statement for this account.")
-    if e.name == "live" and account_id.startswith("DU"):
-        raise PaperError("paper_account_on_live", "DU accounts are paper accounts. Use the Paper tab for them.")
-    if e.name == "live" and account_id == get_binding(env="paper")["account_id"]:
-        raise PaperError("same_as_paper", "This account is already your paper account.")
+    kind_problem = account_kind_problem(e.name, account_id)
+    if kind_problem:
+        raise PaperError(*kind_problem)
+    other = "paper" if e.name == "live" else "live"
+    if _has_tables(get_env(other).binding_table) and account_id == get_binding(env=other)["account_id"]:
+        raise PaperError(f"same_as_{other}", f"This account is already your {get_env(other).label} account.")
     if settings.get("expected_account") != account_id or not settings.get("account_confirmed"):
         raise PaperError("not_confirmed", "First save this account in the connection settings and confirm "
                                           + ("it is your real-money account." if e.name == "live" else "it is your paper account."))
@@ -185,6 +204,9 @@ def blockers(cur, now: datetime | None = None, *, binding: dict | None = None, e
     if not binding["account_id"] or not binding["authorised_at"]:
         block("not_authorised", f"{_title(e)} has not been authorised yet.")
         return problems
+    kind_problem = account_kind_problem(e.name, binding["account_id"])
+    if kind_problem:
+        block("wrong_account_kind", kind_problem[1])
     if binding["halted"]:
         block("halted", f"The Emergency stop is on. Switch {_title(e).lower()} on again when you are ready.")
     elif not binding["enabled"]:
@@ -388,6 +410,30 @@ def _check_limits(cur, r, binding, now, e: Env):
         if selling + quantity > held:
             raise PaperError("insufficient_shares", f"The {e.label} account holds {held:g} {r['symbol']} "
                                                     f"({selling:g} already being sold). No short selling.")
+        if r["portfolio_id"]:
+            # A portfolio may only sell shares Sapient actually bought for it in this account,
+            # never other portfolios' shares or the user's own holdings.
+            owned = portfolio_broker_shares(cur, r["portfolio_id"], r["symbol"], e.name)
+            cur.execute(f"""SELECT coalesce(decimal_sum(quantity - coalesce(filled_quantity, 0)), '0') AS q
+                            FROM paper_orders WHERE environment=%s AND side='SELL' AND symbol=%s
+                            AND portfolio_id=%s AND state IN ('{working}')""",
+                        (e.name, r["symbol"], r["portfolio_id"]))
+            portfolio_selling = Decimal(str(cur.fetchone()["q"]))
+            if portfolio_selling + quantity > owned:
+                raise PaperError("portfolio_shares", f"Sapient bought {owned:g} {r['symbol']} for this portfolio in the "
+                                                     f"{e.label} account ({portfolio_selling:g} already being sold), so "
+                                                     f"it can't sell {quantity:g}. It never sells shares it didn't buy for "
+                                                     "this portfolio.")
+
+
+def portfolio_broker_shares(cur, portfolio_id: int, symbol: str, env: str) -> Decimal:
+    """Shares of one stock that filled for this portfolio in this environment (buys minus sells)."""
+    cur.execute("""SELECT o.side, coalesce(decimal_sum(f.shares), '0') AS q FROM paper_portfolio_fills f
+                   JOIN paper_orders o ON o.id = f.paper_order_id
+                   WHERE f.portfolio_id=%s AND o.symbol=%s AND o.environment=%s GROUP BY o.side""",
+                (portfolio_id, symbol, env))
+    totals = {row["side"]: Decimal(str(row["q"])) for row in cur.fetchall()}
+    return totals.get("BUY", Decimal(0)) - totals.get("SELL", Decimal(0))
 
 
 # ---- after admission ------------------------------------------------------------

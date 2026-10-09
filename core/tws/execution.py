@@ -20,7 +20,7 @@ Cancels only ever target Sapient's own order ids; reqGlobalCancel is never used.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal, InvalidOperation
 import logging
 
@@ -39,6 +39,10 @@ REJECT_CODES = {103, 110, 200, 201, 203, 321, 10268}
 READ_ONLY_HINT = (" In TWS: File → Global Configuration → API → Settings, untick “Read-Only API” "
                   "(only while logged in to the paper account).")
 FINAL = ("FILLED", "CANCELLED", "REJECTED", "EXPIRED", "BLOCKED")
+SNAPSHOT_MARGIN = timedelta(seconds=30)   # a snapshot this long after a cancel shows its result
+CLOSE_MARGIN = timedelta(minutes=30)      # after the closing auction, DAY orders are gone
+# TWS market-data messages that mean "no permission / no subscription" for the request.
+MARKET_DATA_ERRORS = {354, 10089, 10090, 10091, 10167, 10168, 10186, 10197}
 
 
 def _now() -> datetime:
@@ -138,14 +142,70 @@ class PaperExecutor:
     def step(self) -> None:
         self.session.drain()
         self.apply_events(self.session.take_order_events())
+        self.reconcile_ended_orders()
         self._send_cancels()
         self._submit_next()
         self.session.drain()
         self.apply_events(self.session.take_order_events())
 
+    def reconcile_ended_orders(self, now: datetime | None = None) -> int:
+        """Finish working orders that TWS no longer has.
+
+        Evidence = a fresh open-orders snapshot (taken after the event) that no
+        longer lists the order, with today's executions already applied:
+          * a cancel was sent             -> CANCELLED (fills so far are kept)
+          * its ASX DAY session has ended -> EXPIRED (DAY orders end at the close)
+        If Sapient wasn't connected on the order's own trading day, fills it may
+        have had are no longer in TWS's "today" executions, so the order becomes
+        UNKNOWN for the user to check instead of guessing it never filled.
+        """
+        from core.tws import store
+        now = now or _now()
+        snaps = store.snapshots(self.env.name)
+        open_orders, taken_at = (snaps.get("open_orders") or {}).get("data"), (snaps.get("open_orders") or {}).get("taken_at")
+        executions_at = (snaps.get("executions") or {}).get("taken_at")
+        if not isinstance(open_orders, list) or not taken_at or not executions_at:
+            return 0
+        listed = {o.get("order_id") for o in open_orders if o.get("client_id") in (None, self.client_id)}
+        listed_refs = {o.get("order_ref") for o in open_orders if o.get("order_ref")}
+        finished = 0
+        with db.transaction() as (cur, _):
+            cur.execute("""SELECT * FROM paper_orders WHERE environment=%s AND api_order_id IS NOT NULL
+                           AND state IN ('SUBMITTED','PARTIALLY_FILLED','CANCEL_REQUESTED')""", (self.env.name,))
+            for order in [dict(r) for r in cur.fetchall()]:
+                if order["api_order_id"] in listed or order.get("order_ref") in listed_refs:
+                    continue
+                sent = order.get("submitted_at") or order["created_at"]
+                filled = Decimal(str(order.get("filled_quantity") or 0))
+                kept = f" {filled:g} of {Decimal(order['quantity']):g} filled." if filled else " Nothing filled."
+                if order.get("cancel_sent_at") and taken_at > order["cancel_sent_at"] + SNAPSHOT_MARGIN:
+                    state, detail = "CANCELLED", "Cancelled (TWS no longer has it)." + kept
+                else:
+                    hours = calendar.session(calendar.ASX, calendar.local_date(calendar.ASX, sent))
+                    ended_at = (hours[1] if hours else sent) + CLOSE_MARGIN
+                    if not (now > ended_at and taken_at > ended_at):
+                        continue
+                    if calendar.local_date(calendar.ASX, executions_at) == calendar.local_date(calendar.ASX, sent):
+                        state, detail = "EXPIRED", "Not filled by the close: DAY orders end when the ASX closes." + kept
+                    else:
+                        state, detail = "UNKNOWN", ("This DAY order ended while Sapient was not connected, so any fills "
+                                                    "that day are not visible any more. Check TWS (Trades) and "
+                                                    "resolve it on the Orders page.")
+                self._update(cur, order, state=state, detail=detail)
+                cur.execute("INSERT INTO paper_audit(kind, paper_order_id, payload) VALUES (%s, %s, %s)",
+                            ("paper_order_reconciled", order["id"], {"state": state, "snapshot_at": taken_at.isoformat()}))
+                finished += 1
+        return finished
+
     def _send_cancels(self) -> None:
         with db.transaction() as (cur, _):
             binding = get_binding(cur, self.env.name)
+            if binding["halted"]:
+                # Emergency stop also catches orders that were mid-send when it was pressed
+                # and have since been confirmed by TWS.
+                cur.execute("""UPDATE paper_orders SET state='CANCEL_REQUESTED', detail='Emergency stop: cancel requested.',
+                               updated_at=%s WHERE environment=%s AND state IN ('SUBMITTED','PARTIALLY_FILLED')""",
+                            (_now(), self.env.name))
             states = "('CANCEL_REQUESTED','UNKNOWN')" if binding["halted"] else "('CANCEL_REQUESTED')"
             cur.execute(f"""SELECT id, api_order_id FROM paper_orders WHERE state IN {states} AND environment=%s
                             AND api_order_id IS NOT NULL AND cancel_sent_at IS NULL""", (self.env.name,))
@@ -196,10 +256,11 @@ class PaperExecutor:
 
         symbol = order["symbol"][:-3]  # BHP.AX -> BHP
         live = self.env.realtime_required
+        errors_before = len(self.session.health.errors)
         try:
             snap = self.session.market_snapshot(symbol, "ASX", "AUD", data_type=1 if live else 3)
         except TwsTimeout:
-            return self._block(order["id"], "BLOCKED", "TWS did not send a price in time, so nothing was sent.")
+            return self._block(order["id"], "BLOCKED", self._no_price_reason(symbol, errors_before, live))
         if not snap.get("qualified"):
             return self._block(order["id"], "BLOCKED", f"TWS does not recognise {symbol} on the ASX.")
         reference = Decimal(order["reference_price"])
@@ -268,6 +329,27 @@ class PaperExecutor:
         if not answered:
             self._mark_unknown(order["id"], "TWS did not confirm the order within 10 seconds. "
                                             "Sapient will not resend it; it checks TWS on the next sync.")
+        else:
+            # The wait also ends on a connection drop or a TWS warning; still SUBMITTING = not confirmed.
+            dropped = self.session.health.connection_closed or not self.session.transport.is_connected()
+            self._mark_unknown(order["id"], ("The TWS connection dropped before TWS confirmed the order. " if dropped
+                                             else "TWS answered with a message but has not confirmed the order. ")
+                               + "Sapient will not resend it; it checks TWS on the next sync.")
+
+    def _no_price_reason(self, symbol: str, errors_before: int, live: bool) -> str:
+        """Plain-language reason for a missing TWS price, using TWS's own market-data message if it sent one."""
+        from core.tws.session import REQ_MARKET
+        codes = [e for e in self.session.health.errors[errors_before:]
+                 if e.get("req_id") == REQ_MARKET and e.get("code") in MARKET_DATA_ERRORS]
+        if not codes:
+            return "TWS did not send a price in time, so nothing was sent."
+        code = codes[-1]["code"]
+        if live:
+            return (f"TWS has no real-time price permission for {symbol} (IBKR message {code}). Real-money orders need "
+                    "the ASX Total (Non-Professional) market-data subscription in IBKR Client Portal → Settings → "
+                    "Market Data Subscriptions. Nothing was sent.")
+        return (f"TWS has no market-data permission for {symbol} (IBKR message {code}). In TWS check that delayed "
+                "data is allowed for the paper account. Nothing was sent.")
 
     @staticmethod
     def _mark_unknown(order_id: str, detail: str) -> None:
@@ -285,7 +367,12 @@ class PaperExecutor:
             except Exception:
                 log.exception("could not apply %s", name)
 
-    def _find(self, cur, *, api_order_id=None, order_ref=None, client_id=None):
+    def _find(self, cur, *, api_order_id=None, order_ref=None, client_id=None, perm_id=None):
+        """Sapient's order for a broker message, or None if the message is about someone else's order.
+
+        Order ids are only unique per API client, so a message naming another
+        client, or a permId different from the one TWS gave our order, is ignored.
+        """
         if order_ref and str(order_ref).startswith("sapient:"):
             cur.execute("SELECT * FROM paper_orders WHERE order_ref=%s AND environment=%s", (order_ref, self.env.name))
             row = cur.fetchone()
@@ -295,6 +382,8 @@ class PaperExecutor:
             cur.execute("SELECT * FROM paper_orders WHERE api_order_id=%s AND environment=%s",
                         (api_order_id, self.env.name))
             row = cur.fetchone()
+            if row and perm_id and row["perm_id"] and int(perm_id) != int(row["perm_id"]):
+                return None
             if row:
                 return dict(row)
         return None
@@ -307,7 +396,7 @@ class PaperExecutor:
 
     def _on_orderStatus(self, f: dict) -> None:
         with db.transaction() as (cur, _):
-            order = self._find(cur, api_order_id=f.get("orderId"))
+            order = self._find(cur, api_order_id=f.get("orderId"), client_id=f.get("clientId"), perm_id=f.get("permId"))
             if not order:
                 return
             status = str(f.get("status") or "")
@@ -341,7 +430,7 @@ class PaperExecutor:
         ib_order, ib_state = f.get("order"), f.get("orderState")
         with db.transaction() as (cur, _):
             order = self._find(cur, api_order_id=f.get("orderId"), order_ref=getattr(ib_order, "orderRef", None),
-                               client_id=getattr(ib_order, "clientId", None))
+                               client_id=getattr(ib_order, "clientId", None), perm_id=getattr(ib_order, "permId", None))
             if not order:
                 return
             changes = {"broker_status": str(getattr(ib_state, "status", "") or order.get("broker_status") or "")}
@@ -361,7 +450,8 @@ class PaperExecutor:
         with db.transaction() as (cur, _):
             order = self._find(cur, api_order_id=getattr(execution, "orderId", None),
                                order_ref=getattr(execution, "orderRef", None),
-                               client_id=getattr(execution, "clientId", None))
+                               client_id=getattr(execution, "clientId", None),
+                               perm_id=getattr(execution, "permId", None))
             if not order:
                 return  # not Sapient's: account-level activity, shown via positions
             cur.execute("""INSERT INTO paper_executions(exec_id, paper_order_id, api_order_id, perm_id, order_ref,

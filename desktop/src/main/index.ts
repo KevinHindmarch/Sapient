@@ -5,7 +5,7 @@ import { app, BrowserWindow, ipcMain, Menu, net, protocol, session, shell } from
 import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { EngineCommand, EngineState, EngineSupervisor } from './engine'
+import { EngineCommand, EngineState, EngineSupervisor, haltOffline } from './engine'
 import { errorPage, loadingPage, SHELL_SCRIPT } from './pages'
 import { registerUpdater, RELEASES_URL } from './updater'
 import { Alerts } from './alerts'
@@ -167,6 +167,17 @@ function createWindow(): void {
   onEngineState(engine.current)
 }
 
+/** A TWS connector that keeps crashing is reported straight away (it retries by itself every few minutes). */
+function watchConnector(supervisor: EngineSupervisor, label: string): void {
+  supervisor.on('state', (state: EngineState) => {
+    if (state.kind === 'failed' && !quitting) {
+      alerts?.warn(`Sapient's ${label} TWS connector stopped`,
+        'Orders, fills and cancels for that account are paused. Sapient retries in 5 minutes; '
+        + 'see Brokerage, or open the log folder from Settings.')
+    }
+  })
+}
+
 function registerIpc(): void {
   ipcMain.on('sapient:config', (event) => {
     const state = engine.current
@@ -203,9 +214,11 @@ if (!app.requestSingleInstanceLock()) {
       if (state.kind !== 'ready') { engine.once('state', startConnector); return }
       connector = new EngineSupervisor(engineCommand(), app.getPath('userData'),
         path.join(logDir(), 'tws-connector-process.log'), [], 'worker')
+      watchConnector(connector, 'paper')
       connector.start()
       liveConnector = new EngineSupervisor(engineCommand(), app.getPath('userData'),
         path.join(logDir(), 'tws-connector-live-process.log'), [], 'worker', ['--profile', 'live'])
+      watchConnector(liveConnector, 'live (real-money)')
       liveConnector.start()
     })
     createWindow()
@@ -219,6 +232,7 @@ if (!app.requestSingleInstanceLock()) {
       showWindow,
       path.join(app.getPath('userData'), 'desktop-settings.json'),
       iconPath(),
+      () => haltOffline(engineCommand(), app.getPath('userData')),
     )
     alerts.start()
   })

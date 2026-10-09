@@ -143,8 +143,11 @@ export default function AITradingSettings() {
   const handleKillSwitch = async () => {
     setKilling(true)
     try {
-      await aiApi.killSwitch()
-      toast.success('Halt recorded. Queued intents are blocked; broker cancellation is not confirmed.')
+      const result = await aiApi.killSwitch()
+      const working = Number((result as { paper_orders_cancel_requested?: number })?.paper_orders_cancel_requested ?? 0)
+      toast.success(working
+        ? `Stopped. Cancel requested for ${working} working order(s); TWS confirms each one on the Orders page.`
+        : 'Stopped. AI Trading, paper and real-money trading are off. Sapient had no working orders at IBKR.')
       setShowKillModal(false)
       await load()
     } catch (err) {
@@ -172,7 +175,7 @@ export default function AITradingSettings() {
           <div>
             <h1 className="page-title">AI Trading</h1>
             <p className="page-subtitle">
-              Configure AI trade proposals. Live trading is off; paper orders need your authorisation.
+              Configure AI trade proposals. Paper and real-money orders each need your authorisation on the Brokerage page.
             </p>
           </div>
         </div>
@@ -186,9 +189,10 @@ export default function AITradingSettings() {
           <Shield className="w-5 h-5 shrink-0 mt-0.5" />
           <div className="flex-1">
             <p className="text-sm font-medium">
-              Live trading is off. If you authorised paper trading (Brokerage → Step 4), approved proposals become
-              practice orders in your TWS paper account; Autonomous mode only places them if you also allowed that
-              there. Otherwise approvals queue simulation intents, which are not orders or fills.
+              Each portfolio trades in one place: on paper (practice money) or for real (your live IBKR account),
+              chosen with “Buy on paper / for real &amp; manage” on its page. Approving a proposal places an order in
+              that portfolio's account. Autonomous mode places orders without asking only if you also allowed fully
+              automatic orders for that account (Brokerage → Step 4).
             </p>
           </div>
       </div>
@@ -269,14 +273,6 @@ export default function AITradingSettings() {
           />
         </div>
 
-        <div className={`pt-4 border-t ${isDark ? 'border-slate-700/50' : 'border-slate-200'}`}>
-          <ToggleRow
-            label="Paper trading only"
-            description="Live trading does not exist in Sapient yet; this stays on."
-            checked={settings.paper_only}
-            onChange={(v) => update('paper_only', v)}
-          />
-        </div>
       </section>
 
       {/* Automatic checks and exit rules */}
@@ -287,8 +283,8 @@ export default function AITradingSettings() {
           </h2>
           <p className="text-sm theme-text-muted mt-1">
             While the market is open, Sapient checks every portfolio that has AI Trading on: shortly after the
-            open and shortly before the close. It only creates proposals for the AI Inbox. Sapient must be running
-            and the PC awake.
+            open and shortly before the close. Proposals go to the AI Inbox; in fully automatic mode they become
+            orders straight away. Sapient must be running and the PC awake.
           </p>
         </div>
 
@@ -417,7 +413,7 @@ export default function AITradingSettings() {
           />
           <NumberField
             label="Sector cap (%)"
-            help="max single GICS sector weight"
+            help="no new buys that take one sector above this share of the portfolio"
             value={settings.sector_cap_pct}
             min={10}
             max={100}
@@ -434,7 +430,7 @@ export default function AITradingSettings() {
             Circuit Breakers
           </h2>
           <p className="text-sm theme-text-muted mt-1">
-            Automatic pause conditions based on market and portfolio events.
+            Conditions that pause new buys. Sells (including stop-loss and take-profit) always still run.
           </p>
         </div>
 
@@ -442,10 +438,10 @@ export default function AITradingSettings() {
           <BreakerRow isDark={isDark}>
             <div className="flex-1">
               <h4 className={`font-medium text-sm ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
-                Halt trading on intraday portfolio drawdown
+                Pause buying when the portfolio falls in a day
               </h4>
               <p className="text-xs theme-text-muted mt-1 flex items-center gap-2">
-                Pauses all AI trading when daily drop exceeds
+                No new buys for the rest of the day once the portfolio is down more than
                 <input
                   type="number"
                   step="0.5"
@@ -463,10 +459,10 @@ export default function AITradingSettings() {
           <BreakerRow isDark={isDark}>
             <div className="flex-1">
               <h4 className={`font-medium text-sm ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
-                Pause new signals during market open volatility
+                Don't buy a stock after an unusually big move
               </h4>
               <p className="text-xs theme-text-muted mt-1">
-                Ignores signals generated in the first 15 minutes of trading.
+                Skips buying a stock whose move today is more than 3× its usual daily move (often news or results).
               </p>
             </div>
             <Toggle
@@ -475,20 +471,6 @@ export default function AITradingSettings() {
             />
           </BreakerRow>
 
-          <BreakerRow isDark={isDark}>
-            <div className="flex-1">
-              <h4 className={`font-medium text-sm ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
-                Pause on major news / earnings events
-              </h4>
-              <p className="text-xs theme-text-muted mt-1">
-                Skips signals that overlap with high-impact news for the symbol.
-              </p>
-            </div>
-            <Toggle
-              checked={settings.breaker_on_news_event}
-              onChange={(v) => update('breaker_on_news_event', v)}
-            />
-          </BreakerRow>
         </div>
       </section>
 

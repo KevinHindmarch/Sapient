@@ -209,6 +209,9 @@ class LivePortfolioTests(LiveTestCase):
         from backend.main import app
         from core.database import AISignalService, AITradingSettingsService
         paper.start_portfolio(self.pid, self.user["id"], {"CBA.AX": 150.0}, "live", "suggestions")
+        entry = self.sql("SELECT id FROM paper_orders WHERE origin='entry'", fetch=True)[0]["id"]
+        self.sql("""INSERT INTO paper_portfolio_fills(exec_family, paper_order_id, portfolio_id, shares, price)
+                    VALUES ('e1', %s, %s, '5', '150')""", (entry, self.pid))  # the entry buy filled
         AITradingSettingsService.update(self.user["id"], {"mode": "suggestions"})
         signal = AISignalService.create_many(self.user["id"], [{
             "portfolio_id": self.pid, "symbol": "CBA.AX", "action": "SELL", "quantity": 2, "price_at_signal": 150,

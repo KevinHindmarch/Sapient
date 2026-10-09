@@ -69,7 +69,7 @@ async def health_check():
 
 
 @app.get("/api/profile")
-async def profile():
+def profile():
     from core.database import UserService
     from core.db import data_dir
     user = UserService.get_local_user() or {}
@@ -85,9 +85,9 @@ class ProfileUpdate(BaseModel):
 
 
 @app.put("/api/profile")
-async def update_profile(body: ProfileUpdate):
+def update_profile(body: ProfileUpdate):
     from core.database import UserService
     name = body.display_name.strip() if body.display_name else None
     UserService.update_profile(display_name=name or None, theme=body.theme,
                                complete_onboarding=body.complete_onboarding)
-    return await profile()
+    return profile()
