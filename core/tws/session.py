@@ -30,7 +30,10 @@ STANDARD_TAGS = set(SUMMARY_TAGS.split(","))
 # Request ids used by Sapient's read-only session (one request of each kind at a time).
 # Far above any order id TWS or Sapient uses (live order ids start at 1,000,000,001).
 REQ_SUMMARY, REQ_EXECUTIONS, REQ_CONTRACT, REQ_MARKET = 2_100_000_001, 2_100_000_002, 2_100_000_003, 2_100_000_004
-REQUEST_IDS = {REQ_SUMMARY, REQ_EXECUTIONS, REQ_CONTRACT, REQ_MARKET}
+REQ_LEDGER = 2_100_000_005
+REQUEST_IDS = {REQ_SUMMARY, REQ_EXECUTIONS, REQ_CONTRACT, REQ_MARKET, REQ_LEDGER}
+# Per-currency values Sapient needs (US buys: US$ cash; A$ limits: TWS's exchange rate).
+CURRENCY_KEYS = ("CashBalance", "ExchangeRate")
 
 # Broker evidence about orders. These are kept for the order projector no matter
 # which request the session happened to be waiting for when they arrived.
@@ -179,33 +182,71 @@ class TwsSession:
             return False
 
     def account_summary(self, timeout: float = 20.0) -> dict:
-        """Account totals, then (separately) cash and exchange rate per currency from "$LEDGER:ALL".
+        """Account totals, then cash and exchange rate per currency.
 
-        The ledger is asked for on its own: TWS doesn't reliably answer the
-        per-currency rows when they are mixed into the same request as the totals.
-        Its rows are keyed "Tag:CUR" (CashBalance:USD, ExchangeRate:USD, ...).
+        The per-currency rows come from "$LEDGER:ALL", asked for on its own
+        request id (TWS doesn't reliably answer them mixed into the totals, or
+        on a request id it is still cancelling). If TWS still sends no
+        per-currency cash, they are read from TWS's account updates instead.
+        Rows are keyed "Tag:CUR" (CashBalance:USD, ExchangeRate:USD, ...).
         """
         values = self._summary(SUMMARY_TAGS, timeout, keyed=False)
+        ledger: dict[str, dict] = {}
         try:
-            values.update(self._summary("$LEDGER:ALL", timeout, keyed=True))
+            ledger = self._summary("$LEDGER:ALL", timeout, keyed=True, req_id=REQ_LEDGER)
         except TwsTimeout:
-            pass  # totals still count; US buys explain that the US$ figures are missing
+            pass
+        if not any(key.startswith("CashBalance:") for key in ledger):
+            account = next((v.get("account") for v in values.values() if v.get("account")), None) \
+                or (self.health.accounts[0] if self.health.accounts else None)
+            if account:
+                try:
+                    ledger.update(self.account_values(account, timeout))
+                except TwsTimeout:
+                    pass  # totals still count; US buys explain that the US$ figures are missing
+        values.update(ledger)
         return values
 
-    def _summary(self, tags: str, timeout: float, keyed: bool) -> dict:
+    def _summary(self, tags: str, timeout: float, keyed: bool, req_id: int = REQ_SUMMARY) -> dict:
         values: dict[str, dict] = {}
+        refused: list[dict] = []
 
         def collect(name, fields):
-            if name == "accountSummary" and fields.get("reqId") == REQ_SUMMARY:
+            if name == "error" and fields.get("reqId") == req_id and _code(fields) not in INFORMATIONAL_CODES:
+                refused.append(fields)
+            if name == "accountSummary" and fields.get("reqId") == req_id:
                 tag, currency = str(fields.get("tag")), _plain(fields.get("currency"))
                 entry = {"value": _plain(fields.get("value")), "currency": currency,
                          "account": _plain(fields.get("account"))}
                 values[f"{tag}:{currency}" if keyed or tag not in STANDARD_TAGS else tag] = entry
-        self.transport.request("reqAccountSummary", REQ_SUMMARY, "All", tags)
+
+        def done(name, fields):  # the end of the rows, or TWS refusing this request
+            return fields.get("reqId") == req_id and (name == "accountSummaryEnd" or (
+                name == "error" and _code(fields) not in INFORMATIONAL_CODES))
+        self.transport.request("reqAccountSummary", req_id, "All", tags)
         try:
-            self._wait(lambda n, f: n == "accountSummaryEnd" and f.get("reqId") == REQ_SUMMARY, timeout, collect)
+            self._wait(done, timeout, collect)
         finally:
-            self.transport.request("cancelAccountSummary", REQ_SUMMARY)
+            self.transport.request("cancelAccountSummary", req_id)
+        if refused and not values:
+            raise TwsTimeout(f"TWS refused the account summary: {refused[0].get('errorString', '')}"[:300])
+        return values
+
+    def account_values(self, account: str, timeout: float = 20.0) -> dict:
+        """Cash and exchange rate per currency from TWS's account updates (read-only)."""
+        values: dict[str, dict] = {}
+
+        def collect(name, fields):
+            if name == "updateAccountValue" and fields.get("accountName") in (account, "", None):
+                key, currency = str(fields.get("key")), _plain(fields.get("currency"))
+                if key in CURRENCY_KEYS and currency and currency != "BASE":
+                    values[f"{key}:{currency}"] = {"value": _plain(fields.get("val")), "currency": currency,
+                                                   "account": account}
+        self.transport.request("reqAccountUpdates", True, account)
+        try:
+            self._wait(lambda n, f: n == "accountDownloadEnd", timeout, collect)
+        finally:
+            self.transport.request("reqAccountUpdates", False, account)
         return values
 
     def positions(self, timeout: float = 20.0) -> list[dict]:

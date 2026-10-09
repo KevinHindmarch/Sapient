@@ -76,6 +76,9 @@ class FakeTws:
             for tag, value in (("AccountType", "INDIVIDUAL"), ("NetLiquidation", "100000.00")):
                 self.emit("accountSummary", reqId=req, account=account, tag=tag, value=value, currency="USD")
             self.emit("accountSummaryEnd", reqId=req)
+        elif name == "reqAccountUpdates":
+            if args[0]:
+                self.emit("accountDownloadEnd", accountName=account)
         elif name == "reqPositions":
             contract = SimpleNamespace(conId=1, symbol="BHP", secType="STK", exchange="ASX",
                                        primaryExchange="ASX", currency="AUD", localSymbol="BHP")
