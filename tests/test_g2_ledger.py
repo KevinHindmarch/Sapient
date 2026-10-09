@@ -175,9 +175,15 @@ class RebalanceTests(Helpers, PaperTestCase):
             placed = client.post(f"/api/portfolio/{traded}/execute-rebalance", headers=auth,
                                  json={"legs": [leg], "idempotency_key": "k"}).json()
             self.assertEqual((placed["queued"], placed["environment"]), (1, "paper"))
-            again = client.post(f"/api/portfolio/{traded}/execute-rebalance", headers=auth,
-                                json={"legs": [leg], "idempotency_key": "k"}).json()
-            self.assertEqual(again["results"][0]["order_id"], placed["results"][0]["order_id"])  # never twice
+            for key in ("k", "k2"):  # pressed again (same or new plan) while the order is still open: never twice
+                again = client.post(f"/api/portfolio/{traded}/execute-rebalance", headers=auth,
+                                    json={"legs": [leg], "idempotency_key": key}).json()
+                self.assertEqual((again["queued"], again["results"][0]["code"]), (0, "order_open"))
+            plan = client.get(f"/api/portfolio/{traded}/rebalance-plan", headers=auth).json()
+            self.assertEqual(plan["legs"], [])                       # the open order's stock is left out
+            self.assertIn("still working in TWS", plan["notes"])
+            self.sql("UPDATE paper_orders SET state='CANCELLED'")
+            self.assertEqual(paper.open_order_quantities(traded, "paper"), {})
 
 
 class SimulationRetiredTests(Helpers, PaperTestCase):
