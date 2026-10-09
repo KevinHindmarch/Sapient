@@ -1,38 +1,37 @@
 # Sapient codebase reference
 
-Snapshot of the code as of 2026-10-09 (after migration Phases A–B). Summary and rules live in
+Snapshot of the code as of 2026-10-09 (after migration Phases A–C). Summary and rules live in
 [CLAUDE.md](../CLAUDE.md). Line numbers drift; re-check before relying on them.
 
-## 1. Backend entry (`backend/main.py`)
+## 1. Backend entry (`backend/main.py`, `backend/desktop_main.py`)
 
-- Lifespan hook is intentionally empty: startup must never mutate the database.
-- CORS: `CORS_ORIGINS` comma list, `*` filtered out, empty when unset.
-- Routers: `/api/auth`, `/api/stocks`, `/api/portfolio`, `/api/indicators`,
-  `/api/broker`, `/api/ai`, `/api/execution`; plus `GET /api/health`.
-- If `frontend/dist` exists: `/` → index.html (no-cache), `/assets` static mount,
-  catch-all serves files or falls back to index.html (paths starting `api` → 404 JSON).
-- Launchers: `server.py` (uvicorn `127.0.0.1:$PORT`), `run_dev.py` /
-  backend 8000 + Vite 5000; both bind 127.0.0.1.
+- Startup (lifespan): `core.migrations.migrate()` then `UserService.ensure_local_user()`
+  unless `SAPIENT_SKIP_MIGRATIONS=1` (desktop_main does both itself first so it can
+  report errors as JSON).
+- Middleware: `LocalAccessMiddleware` (loopback Host + launch token), then CORS
+  for `SAPIENT_ALLOWED_ORIGINS` only (no wildcard, no credentials).
+- Routers: `/api/stocks`, `/api/portfolio`, `/api/indicators`, `/api/broker`,
+  `/api/ai`, `/api/execution`; plus `GET /api/health` (public) and
+  `GET /api/profile` (display name + data folder).
+- The backend no longer serves the frontend; Vite (dev) or Electron (Phase D) does.
+- `desktop_main.py --data-dir D [--port 0] [--allowed-origin O]`: reads the token
+  from stdin, migrates, binds 127.0.0.1 (free port by default), prints
+  `{"event":"ready","port":N}` or `{"event":"error",...}`, exits when stdin closes.
 
-## 2. Auth (`backend/auth_utils.py`)
+## 2. Access control (`backend/security.py`)
 
-HS256 JWT via python-jose, secret `SESSION_SECRET` (must be ≥32 chars or 503),
-24h lifetime, `sub` = user id. `get_current_user` uses HTTPBearer and loads the
-user with `UserService.get_user_by_id`; any failure → 401. bcrypt hashing in
-`core.database.UserService`.
+Single local user (`users.id = 1`, created at startup). No passwords or JWTs.
+Every `/api/*` request except `/api/health` must send
+`Authorization: Bearer $SAPIENT_API_TOKEN` (≥32 chars; constant-time compare;
+503 if unset) and a loopback `Host` (`127.0.0.1`, `localhost`, `[::1]`), which
+blocks DNS rebinding from web pages. `get_current_user()` returns the local profile.
 
 ## 3. Endpoints
 
-Auth column: JWT = `Depends(get_current_user)`; public = none.
+All routes below require the launch token (section 2). The "Old auth" column in
+the portfolio table records which routes were public before Phase C.
 
-### `/api/auth`
-| Method | Path | Service | Auth |
-|---|---|---|---|
-| POST | /register | UserService.create_user + token | public |
-| POST | /login | UserService.authenticate | public |
-| GET | /me | current user | JWT |
-
-### `/api/stocks` (all public)
+### `/api/stocks`
 | Method | Path | Service |
 |---|---|---|
 | GET | /search?q&market | search_stocks (static lists, ≤15); live `yf.Ticker.info` fallback for ticker-like queries, 4s timeout |
@@ -43,7 +42,7 @@ Auth column: JWT = `Depends(get_current_user)`; public = none.
 | GET | /validate/{symbol} | validate_stock |
 | GET | /rank | rank_stocks_by_sharpe over ASX200, 3y |
 
-### `/api/indicators` (all public)
+### `/api/indicators`
 | Method | Path | Service |
 |---|---|---|
 | GET | /analyze/{symbol}?period&market | TechnicalIndicatorService.analyze_stock |
@@ -51,7 +50,7 @@ Auth column: JWT = `Depends(get_current_user)`; public = none.
 | GET | /rsi-screener?market&signal | scan_rsi_signals over ASX200/S&P500 (3mo) |
 
 ### `/api/portfolio`
-| Method | Path | Service | Auth |
+| Method | Path | Service | Old auth |
 |---|---|---|---|
 | POST | /optimize | stock data + dividends + risk-free rate → optimize_portfolio | public |
 | POST | /backtest | backtest_portfolio | public |
@@ -73,25 +72,22 @@ Auth column: JWT = `Depends(get_current_user)`; public = none.
 | GET | /{id}/rebalance-plan | drift legs (threshold 1.5pp) | JWT |
 | POST | /{id}/execute-rebalance | IntentService.admit_batch, origin rebalance, account `SIM:{uid}` | JWT |
 
-### `/api/broker` (all JWT)
-POST/GET/DELETE `/credentials` (Fernet-encrypted OAuth creds — obsolete for TWS),
-POST `/test` and GET `/account` (synthetic simulation data), POST `/orders`
-(202, IntentService.admit_batch origin manual, `execution_enabled: false`),
-GET `/orders/recent` (legacy broker_orders table).
+### `/api/broker`
+GET `/status` (truthful: simulation, TWS not configured, execution disabled),
+POST `/orders` (202, IntentService.admit_batch origin manual,
+`execution_enabled: false`), GET `/orders/recent` (legacy broker_orders table).
+The OAuth credential vault (`/credentials`, `/test`, `/account`) was removed.
 
-### `/api/ai` (all JWT)
+### `/api/ai`
 GET/PUT `/settings` (PUT also halts + invalidates the safety account),
 POST `/kill-switch` (IntentService.halt), GET `/signals?status&limit`,
 POST `/signals/{id}/approve` (202, admit origin ai_approval), `/reject`,
 `/snooze`, POST `/scan/{portfolio_id}` (ai_engine.scan_portfolio), GET `/audit`.
 
 ### `/api/execution`
-SafetyError → 409 `{code,message}`. JWT routes: POST `/simulation/bind`,
-GET `/intents`, POST `/intents/{id}/cancel`, POST `/halt`, POST `/resume`,
-POST `/pairings`, POST `/devices`, DELETE `/devices/{id}`.
-Device-token routes (`X-Device-Token`, no JWT): POST `/worker/{uid}/lease`,
-GET `/worker/{uid}/commands` (halt/cancel only), POST `/worker/{uid}/evidence`
-(quarantined). Not called by the frontend.
+SafetyError → 409 `{code,message}`. POST `/simulation/bind`, GET `/intents`,
+POST `/intents/{id}/cancel`, POST `/halt`, POST `/resume`. The cloud-era
+pairing/device/worker routes were removed (the TWS worker will be local).
 
 ## 4. Database (SQLite, `core/db.py` + `core/migrations.py`)
 
@@ -138,9 +134,11 @@ off and reports `broker_confirmed: False`.
 
 ## 6. Other core services
 
+- `yahoo.py`: cached yfinance drop-in (TTL: 15 min for 1d/5d/1mo, 6 h for
+  longer history and downloads, 24 h `.info`, 7 days statements; empty results
+  are not cached; ≤8 concurrent requests; `<data>/market_cache.db`).
 - `stocks.py`: static lists; `yf.download(..., auto_adjust=True)` for closes;
   `.info` for details/dividends; hard-coded risk-free (ASX 4.35%, US 4.5%).
-  No caching anywhere.
 - `optimizer.py`: scipy `minimize` max-Sharpe, geometric (log) returns,
   backtest, strategy comparison, beta vs `^AXJO`.
 - `fundamentals.py`: value/quality/growth/momentum/size composite, 10-thread scan.
@@ -148,26 +146,29 @@ off and reports `broker_confirmed: False`.
 - `indicators.py`: RSI/MACD/SMA/EMA/Bollinger/Stochastic, 15-thread RSI screener.
 - `ai_engine.py`: RSI buy/sell with MACD confidence boost, 12h signal TTL,
   guardrails, autonomous → `IntentService.admit` (docstring still stale).
-- `ibkr_client.py`: `IBKR_SIMULATION_MODE = True`, synthetic account `SIM:{uid}`;
-  `place_order`/`cancel_order`/`assert_execution_allowed` always raise.
-- `crypto.py`: Fernet keyed by `BROKER_ENCRYPTION_KEY`.
+- `ibkr_client.py`: `connection_status()` and an `IBKRClient` whose
+  `place_order`/`cancel_order` always raise. No OAuth, no stored credentials.
 
 ## 7. Frontend details
 
-- Vite: port 5000, `/api` proxy → 8000, no `base` (absolute `/assets`).
-- No `import.meta.env`, no external fonts/CDNs, no CSP meta.
-- Absolute paths: `/logo.png` (Layout, Login, Register), `/vite.svg` favicon,
-  `window.location.href = '/login'` in api.ts 401 handler.
-- `target="_blank"` links: BrokerageSettings (IBKR site), StockAnalysis (company site).
-- Unused API
-  functions include `/api/execution/*`, backtest, compareStrategies, trade.
-- Dashboard does an N+1 fetch (list → detail per portfolio → info per position).
+- Vite: port 5000, `/api` proxy → 8000, `base: './'` (relative asset paths).
+- `HashRouter`, so routes work when loaded from disk / `app://` in Electron.
+- `lib/runtime.ts`: API base + token from `window.sapient` (Electron preload)
+  or `/api` + `VITE_SAPIENT_API_TOKEN` (dev). No login pages or auth context.
+- Logo imported from `src/assets/logo.png`; favicon `./favicon.png`.
+- External links go through `window.sapient.openExternal` when present.
+- Unused API functions include backtest, compareStrategies, trade.
+- Dashboard does an N+1 fetch (list → detail per portfolio → info per
+  position); the Yahoo cache softens it, a batch endpoint is still TODO.
 
 ## 8. Tests
 
 - `test_safety_spec.py` — 46 tests of the SQLite reference model (S01–S32).
 - `test_tws_readonly_check.py` — 11 offline tests with mocked ibapi.
 - `test_execution_safety_unit.py` — normalisation + simulation client refusal.
+- `test_local_api.py` — launch-token/Host/CORS checks, removed routes, truthful
+  broker status, desktop entrypoint (ready line, exit on stdin close, no token),
+  Yahoo cache hits/expiry/empty results.
 - `test_execution_safety_sqlite.py` — 36 tests on disposable SQLite files:
   concurrent claims/limits/reservations via threads, trigger-injected rollback,
   a subprocess killed mid-transaction, backup/restore, migration checksums,

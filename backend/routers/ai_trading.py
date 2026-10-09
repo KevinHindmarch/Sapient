@@ -20,7 +20,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from backend.auth_utils import get_current_user
+from backend.security import get_current_user
 from backend.schemas.ai_trading import (
     AISignal,
     AITradingSettings,
@@ -36,10 +36,8 @@ from core.database import (
     AIAuditService,
     AISignalService,
     AITradingSettingsService,
-    BrokerCredentialService,
     BrokerOrderService,
 )
-from core.ibkr_client import IBKR_SIMULATION_MODE, IBKRClient
 
 
 router = APIRouter()
@@ -72,13 +70,6 @@ def _signal_to_schema(d: dict) -> AISignal:
         expires_at=d.get("expires_at"),
         executed_order_id=d.get("executed_order_id"),
     )
-
-
-def _build_client_or_400(user_id: int) -> IBKRClient:
-    creds = BrokerCredentialService.get_decrypted(user_id)
-    if creds is None:
-        raise HTTPException(status_code=400, detail="No broker credentials saved")
-    return IBKRClient(creds)
 
 
 # ---------------------------------------------------------------------------

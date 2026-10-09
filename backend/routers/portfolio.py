@@ -25,7 +25,7 @@ from core.optimizer import PortfolioOptimizerService
 from core.database import PortfolioService
 from core.fundamentals import FundamentalsService
 from core.capm import CAPMService
-from backend.auth_utils import get_current_user
+from backend.security import get_current_user
 from backend.schemas.broker import PlaceOrdersRequest
 
 router = APIRouter()

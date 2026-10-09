@@ -5,7 +5,7 @@ Core portfolio optimizer
 import numpy as np
 import pandas as pd
 from scipy.optimize import minimize
-import yfinance as yf
+from core import yahoo as yf
 from typing import Dict, List, Optional
 
 from core.stocks import StockDataService

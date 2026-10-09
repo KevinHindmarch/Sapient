@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { portfolioApi, stocksApi } from '../lib/api'
 import { Portfolio, Position } from '../types'
-import { useAuth } from '../lib/auth'
 import { useTheme } from '../lib/theme'
 import { Briefcase, TrendingUp, TrendingDown, Wand2, Wrench, ArrowRight, Sparkles, RefreshCw } from 'lucide-react'
 
@@ -18,7 +17,6 @@ function SkeletonPulse({ className }: { className?: string }) {
 }
 
 export default function Dashboard() {
-  const { user } = useAuth()
   const { theme } = useTheme()
   const isDark = theme === 'dark'
   const [portfolios, setPortfolios] = useState<Portfolio[]>([])
@@ -110,7 +108,7 @@ export default function Dashboard() {
         <div className="flex items-center gap-2">
           <Sparkles className="w-8 h-8 text-sky-400" />
           <h1 className="page-title">
-            Welcome back, <span className="gradient-text">{user?.display_name || 'Investor'}</span>!
+            Welcome back, <span className="gradient-text">Investor</span>!
           </h1>
         </div>
         <p className="page-subtitle">

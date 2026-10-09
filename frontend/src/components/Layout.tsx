@@ -1,5 +1,5 @@
-import { Outlet, NavLink, useNavigate } from 'react-router-dom'
-import { useAuth } from '../lib/auth'
+import { Outlet, NavLink } from 'react-router-dom'
+import logo from '../assets/logo.png'
 import { useTheme } from '../lib/theme'
 import { 
   LayoutDashboard, 
@@ -8,7 +8,6 @@ import {
   Activity,
   Briefcase, 
   LineChart, 
-  LogOut,
   Menu,
   X,
   Settings,
@@ -37,16 +36,9 @@ const tradingNavItems = [
 ]
 
 export default function Layout() {
-  const { user, logout } = useAuth()
   const { theme, toggleTheme } = useTheme()
-  const navigate = useNavigate()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [showHelp, setShowHelp] = useState(false)
-
-  const handleLogout = () => {
-    logout()
-    navigate('/login')
-  }
 
   const isDark = theme === 'dark'
 
@@ -65,7 +57,7 @@ export default function Layout() {
       >
         <div className={`p-5 border-b transition-colors duration-300 ${isDark ? 'border-slate-700/30' : 'border-slate-200/50'}`}>
           <div className="flex items-center gap-1">
-            <img src="/logo.png" alt="Sapient" className="w-20 h-20 rounded-xl" />
+            <img src={logo} alt="Sapient" className="w-20 h-20 rounded-xl" />
             <h1 className="text-2xl font-bold gradient-text -ml-2">Sapient</h1>
           </div>
           <p className={`text-xs mt-1 ml-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
@@ -119,13 +111,13 @@ export default function Layout() {
             }}
           >
             <div className="w-10 h-10 rounded-full bg-gradient-to-br from-sky-400 to-indigo-500 flex items-center justify-center text-sm font-bold text-white shadow-lg">
-              {user?.display_name?.[0] || user?.email?.[0] || 'U'}
+              S
             </div>
             <div className="flex-1 min-w-0">
               <p className={`text-sm font-semibold truncate ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
-                {user?.display_name || user?.email}
+                Local profile
               </p>
-              <p className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Premium Investor</p>
+              <p className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Data stays on this PC</p>
             </div>
           </div>
           
@@ -176,18 +168,6 @@ export default function Layout() {
               {isDark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
               {isDark ? 'Light Mode' : 'Dark Mode'}
             </button>
-            
-            <button
-              onClick={handleLogout}
-              className={`flex items-center gap-3 px-4 py-2.5 w-full rounded-xl transition-all duration-300 ${
-                isDark 
-                  ? 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200'
-                  : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-              }`}
-            >
-              <LogOut className="w-5 h-5" />
-              Sign Out
-            </button>
           </div>
         </div>
       </aside>
@@ -209,7 +189,7 @@ export default function Layout() {
             >
               {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
             </button>
-            <img src="/logo.png" alt="Sapient" className="w-20 h-20 rounded-lg" />
+            <img src={logo} alt="Sapient" className="w-20 h-20 rounded-lg" />
             <h1 className="text-xl font-bold gradient-text -ml-4">Sapient</h1>
           </div>
           <button
@@ -299,17 +279,6 @@ export default function Layout() {
               <Settings className="w-5 h-5" />
               Settings
             </NavLink>
-            <button
-              onClick={handleLogout}
-              className={`flex items-center gap-3 px-4 py-3 w-full rounded-xl transition-all ${
-                isDark
-                  ? 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200'
-                  : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-              }`}
-            >
-              <LogOut className="w-5 h-5" />
-              Sign Out
-            </button>
           </div>
         )}
 

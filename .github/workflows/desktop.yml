@@ -1,0 +1,68 @@
+name: Desktop app
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  windows-installer:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            desktop/package-lock.json
+
+      - name: Python dependencies
+        run: uv sync --frozen
+
+      - name: Freeze the engine (PyInstaller)
+        run: uv run --with pyinstaller==6.22.3 pyinstaller packaging/sapient-api.spec --noconfirm --distpath packaging/dist --workpath packaging/build
+
+      - name: Engine smoke test
+        run: uv run python packaging/smoke_engine.py packaging/dist/sapient-api/sapient-api.exe
+
+      - name: Build the UI
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build the installer
+        working-directory: desktop
+        run: |
+          npm ci
+          npm run dist:win
+
+      - name: Install silently
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem desktop/release/Sapient-Setup-*.exe | Select-Object -First 1
+          Start-Process -FilePath $installer.FullName -ArgumentList '/S', "/D=$env:RUNNER_TEMP\SapientApp" -Wait
+          if (-not (Test-Path "$env:RUNNER_TEMP\SapientApp\Sapient.exe")) { throw "Sapient.exe was not installed" }
+          if (-not (Test-Path "$env:RUNNER_TEMP\SapientApp\resources\engine\sapient-api.exe")) { throw "engine missing" }
+
+      - name: Installed app smoke test
+        working-directory: desktop
+        shell: pwsh
+        run: node e2e/smoke.mjs "$env:RUNNER_TEMP\SapientApp\Sapient.exe" "$env:RUNNER_TEMP"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sapient-windows-installer
+          path: |
+            desktop/release/Sapient-Setup-*.exe
+            ${{ runner.temp }}/*.png
+          if-no-files-found: warn
+          retention-days: 14

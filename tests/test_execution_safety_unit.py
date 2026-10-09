@@ -3,7 +3,7 @@ import unittest
 from datetime import datetime, timezone, timedelta
 
 from core.execution_safety import normalize_request, SafetyError, signal_request
-from core.ibkr_client import IBKRClient, IBKRCredentials, ExecutionPolicyError
+from core.ibkr_client import IBKRClient, ExecutionPolicyError, connection_status
 
 
 class AdmissionContractTests(unittest.TestCase):
@@ -29,14 +29,14 @@ class AdmissionContractTests(unittest.TestCase):
                 normalize_request({**self.request(), **patch})
 
     def test_real_and_direct_simulation_sends_refused(self):
-        for environment in ("paper", "live"):
-            client = IBKRClient(IBKRCredentials("", "", "", "", environment), user_id=7)
-            self.assertEqual(client.get_account_summary().account_id, "SIM:7")
-            self.assertEqual(client.get_account_summary().environment, "simulation")
-            with self.assertRaises(ExecutionPolicyError):
-                client.place_order("SIM:7", "BHP.AX", "BUY", 1)
-            with self.assertRaises(ExecutionPolicyError):
-                client.cancel_order("SIM:7", "SIM-OLD")
+        client = IBKRClient(user_id=7)
+        with self.assertRaises(ExecutionPolicyError):
+            client.place_order("SIM:7", "BHP.AX", "BUY", 1)
+        with self.assertRaises(ExecutionPolicyError):
+            client.cancel_order("SIM:7", "SIM-OLD")
+        status = connection_status()
+        self.assertEqual(status["mode"], "simulation")
+        self.assertFalse(status["execution_enabled"])
 
     def test_signal_requires_expiry(self):
         with self.assertRaises(SafetyError):

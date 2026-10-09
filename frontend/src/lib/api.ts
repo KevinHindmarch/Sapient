@@ -1,27 +1,21 @@
 import axios from 'axios'
+import { toast } from 'sonner'
+import { apiBase, apiToken } from './runtime'
 
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: apiBase,
   headers: {
     'Content-Type': 'application/json',
+    Authorization: `Bearer ${apiToken}`,
   },
-})
-
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token')
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`
-  }
-  return config
 })
 
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem('token')
-      localStorage.removeItem('user')
-      window.location.href = '/login'
+    if (error.response?.status === 401 || error.response?.status === 403) {
+      // The per-launch key didn't match: the engine was restarted separately.
+      toast.error('Lost connection to the Sapient engine. Please restart Sapient.', { id: 'engine-auth' })
     }
     return Promise.reject(error)
   }
@@ -36,12 +30,8 @@ export function apiErrorMessage(error: unknown, fallback: string): string {
   return fallback
 }
 
-export const authApi = {
-  login: (email: string, password: string) =>
-    api.post('/auth/login', { email, password }),
-  register: (email: string, password: string, display_name?: string) =>
-    api.post('/auth/register', { email, password, display_name }),
-  me: () => api.get('/auth/me'),
+export const profileApi = {
+  get: () => api.get<{ display_name: string; data_dir: string }>('/profile'),
 }
 
 export const stocksApi = {
@@ -104,14 +94,6 @@ export const indicatorsApi = {
     api.get(`/indicators/rsi-screener?market=${market}&signal=${signal}`),
 }
 
-export interface BrokerCredentialsPayload {
-  consumer_key: string
-  access_token: string
-  access_token_secret: string
-  private_key_pem: string
-  environment: 'paper' | 'live'
-}
-
 export interface BrokerOrderPayload {
   symbol: string
   side: 'BUY' | 'SELL'
@@ -146,13 +128,16 @@ export interface IntentQueueResponse {
   failed?: { symbol: string; error: string }[]
 }
 
+export interface BrokerStatus {
+  mode: 'simulation' | 'tws_paper' | 'tws_live'
+  tws_configured: boolean
+  worker: string
+  execution_enabled: boolean
+  message: string
+}
+
 export const brokerApi = {
-  getStatus: () => api.get('/broker/credentials'),
-  saveCredentials: (payload: BrokerCredentialsPayload) =>
-    api.post('/broker/credentials', payload),
-  deleteCredentials: () => api.delete('/broker/credentials'),
-  account: () => api.get('/broker/account'),
-  test: () => api.post('/broker/test'),
+  getStatus: () => api.get<BrokerStatus>('/broker/status'),
   placeOrders: (orders: BrokerOrderPayload[], idempotency_key: string) =>
     api.post<IntentQueueResponse>('/broker/orders', { orders, idempotency_key, environment: 'simulation' }),
   recentOrders: (limit: number = 25) =>

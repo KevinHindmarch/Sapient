@@ -13,7 +13,7 @@ Where:
 import pandas as pd
 import numpy as np
 from typing import Dict, List, Optional
-import yfinance as yf
+from core import yahoo as yf
 from datetime import datetime, timedelta
 
 RISK_FREE_RATE = 0.0435  # Australian 10-year government bond yield

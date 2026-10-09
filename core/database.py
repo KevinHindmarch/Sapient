@@ -2,10 +2,6 @@
 Core database module
 """
 
-from datetime import datetime
-import bcrypt
-import sqlite3
-
 from core import db
 
 
@@ -25,68 +21,27 @@ def init_database():
     return migrate()
 
 
+LOCAL_USER_ID = 1
+
+
 class UserService:
-    """Handle user authentication and management."""
-    
+    """The single local profile of the desktop app (no passwords, no login)."""
+
     @staticmethod
-    def hash_password(password: str) -> str:
-        """Hash a password using bcrypt."""
-        salt = bcrypt.gensalt()
-        return bcrypt.hashpw(password.encode('utf-8'), salt).decode('utf-8')
-    
-    @staticmethod
-    def verify_password(password: str, hashed: str) -> bool:
-        """Verify a password against its hash."""
-        return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
-    
-    @staticmethod
-    def create_user(email: str, password: str, display_name: str = None) -> dict:
-        """Create a new user account."""
+    def ensure_local_user() -> dict:
+        """Create the local profile row on first run; all data hangs off it."""
         with get_db_cursor() as (cur, conn):
-            try:
-                password_hash = UserService.hash_password(password)
-                cur.execute("""
-                    INSERT INTO users (email, password_hash, display_name)
-                    VALUES (%s, %s, %s)
-                    RETURNING id, email, display_name, created_at
-                """, (email.lower(), password_hash, display_name or email.split('@')[0]))
-                
-                user = dict(cur.fetchone())
-                conn.commit()
-                return {'success': True, 'user': user}
-            except sqlite3.IntegrityError:
-                return {'success': False, 'error': 'Email already registered'}
-            except Exception as e:
-                return {'success': False, 'error': str(e)}
-    
+            cur.execute("""
+                INSERT INTO users (id, email, password_hash, display_name)
+                VALUES (%s, 'local@sapient.invalid', '!', 'Investor')
+                ON CONFLICT(id) DO NOTHING
+            """, (LOCAL_USER_ID,))
+        return UserService.get_local_user()
+
     @staticmethod
-    def authenticate(email: str, password: str) -> dict:
-        """Authenticate a user and return their info."""
-        with get_db_cursor() as (cur, conn):
-            try:
-                cur.execute("""
-                    SELECT id, email, password_hash, display_name, created_at
-                    FROM users WHERE email = %s
-                """, (email.lower(),))
-                
-                user = cur.fetchone()
-                if not user:
-                    return {'success': False, 'error': 'Invalid email or password'}
-                
-                if not UserService.verify_password(password, user['password_hash']):
-                    return {'success': False, 'error': 'Invalid email or password'}
-                
-                cur.execute("""
-                    UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = %s
-                """, (user['id'],))
-                conn.commit()
-                
-                user_dict = dict(user)
-                del user_dict['password_hash']
-                return {'success': True, 'user': user_dict}
-            except Exception as e:
-                return {'success': False, 'error': str(e)}
-    
+    def get_local_user() -> dict:
+        return UserService.get_user_by_id(LOCAL_USER_ID)
+
     @staticmethod
     def get_user_by_id(user_id: int) -> dict:
         """Get user by ID."""
@@ -106,7 +61,7 @@ class PortfolioService:
                        investment_amount: float, mode: str = 'auto',
                        risk_tolerance: str = 'moderate', market: str = 'ASX') -> dict:
         """Save a generated portfolio to the database."""
-        import yfinance as yf
+        from core import yahoo as yf
         
         with get_db_cursor() as (cur, conn):
             try:
@@ -503,100 +458,6 @@ class PortfolioService:
 # ============================================================================
 # IBKR / AI trading service classes
 # ============================================================================
-
-
-class BrokerCredentialService:
-    """Encrypted IBKR credentials per user."""
-
-    @staticmethod
-    def upsert(user_id: int, consumer_key: str, access_token: str,
-               access_token_secret: str, private_key_pem: str,
-               environment: str = 'paper') -> dict:
-        from core.crypto import encrypt_str, mask_secret
-        with get_db_cursor() as (cur, conn):
-            try:
-                cur.execute("""
-                    INSERT INTO broker_credentials (
-                        user_id, broker, environment,
-                        consumer_key_enc, access_token_enc,
-                        access_token_secret_enc, private_key_pem_enc,
-                        consumer_key_masked
-                    )
-                    VALUES (%s, 'IBKR', %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (user_id) DO UPDATE SET
-                        environment = EXCLUDED.environment,
-                        consumer_key_enc = EXCLUDED.consumer_key_enc,
-                        access_token_enc = EXCLUDED.access_token_enc,
-                        access_token_secret_enc = EXCLUDED.access_token_secret_enc,
-                        private_key_pem_enc = EXCLUDED.private_key_pem_enc,
-                        consumer_key_masked = EXCLUDED.consumer_key_masked,
-                        connected_at = CURRENT_TIMESTAMP
-                    RETURNING id, environment, consumer_key_masked, connected_at
-                """, (
-                    user_id, environment,
-                    encrypt_str(consumer_key),
-                    encrypt_str(access_token),
-                    encrypt_str(access_token_secret),
-                    encrypt_str(private_key_pem),
-                    mask_secret(consumer_key),
-                ))
-                row = dict(cur.fetchone())
-                conn.commit()
-                return {'success': True, **row}
-            except Exception as e:
-                return {'success': False, 'error': str(e)}
-
-    @staticmethod
-    def get_status(user_id: int) -> dict:
-        with get_db_cursor() as (cur, conn):
-            cur.execute("""
-                SELECT environment, consumer_key_masked, connected_at,
-                       last_test_at, last_test_ok
-                FROM broker_credentials WHERE user_id = %s
-            """, (user_id,))
-            row = cur.fetchone()
-            if not row:
-                return {'connected': False}
-            return {'connected': True, **dict(row)}
-
-    @staticmethod
-    def get_decrypted(user_id: int):
-        """Returns IBKRCredentials or None."""
-        from core.crypto import decrypt_str
-        from core.ibkr_client import IBKRCredentials
-        with get_db_cursor() as (cur, conn):
-            cur.execute("""
-                SELECT environment, consumer_key_enc, access_token_enc,
-                       access_token_secret_enc, private_key_pem_enc
-                FROM broker_credentials WHERE user_id = %s
-            """, (user_id,))
-            row = cur.fetchone()
-            if not row:
-                return None
-            return IBKRCredentials(
-                consumer_key=decrypt_str(row['consumer_key_enc']),
-                access_token=decrypt_str(row['access_token_enc']),
-                access_token_secret=decrypt_str(row['access_token_secret_enc']),
-                private_key_pem=decrypt_str(row['private_key_pem_enc']),
-                environment=row['environment'],
-            )
-
-    @staticmethod
-    def record_test(user_id: int, ok: bool) -> None:
-        with get_db_cursor() as (cur, conn):
-            cur.execute("""
-                UPDATE broker_credentials
-                SET last_test_at = CURRENT_TIMESTAMP, last_test_ok = %s
-                WHERE user_id = %s
-            """, (ok, user_id))
-            conn.commit()
-
-    @staticmethod
-    def delete(user_id: int) -> dict:
-        with get_db_cursor() as (cur, conn):
-            cur.execute("DELETE FROM broker_credentials WHERE user_id = %s", (user_id,))
-            conn.commit()
-            return {'success': True}
 
 
 class AITradingSettingsService:

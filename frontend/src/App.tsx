@@ -1,8 +1,4 @@
-import React from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
-import { useAuth } from './lib/auth'
-import Login from './pages/Login'
-import Register from './pages/Register'
 import Dashboard from './pages/Dashboard'
 import ManualBuilder from './pages/ManualBuilder'
 import AutoBuilder from './pages/AutoBuilder'
@@ -16,37 +12,10 @@ import AITradingSettings from './pages/AITradingSettings'
 import AITradingInbox from './pages/AITradingInbox'
 import Layout from './components/Layout'
 
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth()
-  
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-sky-500"></div>
-      </div>
-    )
-  }
-  
-  if (!user) {
-    return <Navigate to="/login" replace />
-  }
-  
-  return <>{children}</>
-}
-
 function App() {
   return (
     <Routes>
-      <Route path="/login" element={<Login />} />
-      <Route path="/register" element={<Register />} />
-      <Route
-        path="/"
-        element={
-          <ProtectedRoute>
-            <Layout />
-          </ProtectedRoute>
-        }
-      >
+      <Route path="/" element={<Layout />}>
         <Route index element={<Dashboard />} />
         <Route path="manual-builder" element={<ManualBuilder />} />
         <Route path="auto-builder" element={<AutoBuilder />} />
@@ -59,6 +28,7 @@ function App() {
         <Route path="ai-trading" element={<AITradingSettings />} />
         <Route path="brokerage" element={<BrokerageSettings />} />
         <Route path="settings" element={<Settings />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>
   )

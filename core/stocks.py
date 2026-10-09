@@ -2,7 +2,7 @@
 Core stock data service
 """
 
-import yfinance as yf
+from core import yahoo as yf
 import pandas as pd
 import numpy as np
 from typing import List, Dict, Optional

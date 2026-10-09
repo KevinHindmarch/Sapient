@@ -1,0 +1,35 @@
+appId: com.sapient.desktop
+productName: Sapient
+copyright: Sapient
+directories:
+  output: release
+  buildResources: build
+files:
+  - dist/**
+  - renderer/**
+  - build/icon.png
+  - package.json
+extraResources:
+  - from: ../packaging/dist/sapient-api
+    to: engine
+asar: true
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: build/icon.png
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  shortcutName: Sapient
+  license: build/license.txt
+  include: build/installer.nsh
+  deleteAppDataOnUninstall: false
+  runAfterFinish: true
+  artifactName: Sapient-Setup-${version}.${ext}
+linux:
+  target: dir
+  icon: build/icon.png

@@ -16,6 +16,7 @@ TEST_PATTERNS = (
     "test_tws_readonly_check.py",
     "test_execution_safety_unit.py",
     "test_execution_safety_sqlite.py",
+    "test_local_api.py",
 )
 
 
@@ -30,7 +31,7 @@ def main():
     args = parser.parse_args()
 
     for pattern in TEST_PATTERNS:
-        run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", pattern])
+        run([sys.executable, "-m", "unittest", "discover", "-v", "-s", "tests", "-p", pattern])
     run([sys.executable, "-m", "compileall", "-q", "core", "backend", "safety_spec", "scripts"])
 
     if not args.no_frontend:
