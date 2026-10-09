@@ -9,6 +9,7 @@ import secrets
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 from unittest import mock
 
@@ -87,9 +88,11 @@ class DesktopEntrypointTests(unittest.TestCase):
     def start(self, token_line):
         temp = tempfile.TemporaryDirectory(prefix="sapient-desktop-")
         self.addCleanup(temp.cleanup)
+        self.stderr = open(Path(temp.name) / "stderr.log", "w+")
+        self.addCleanup(self.stderr.close)
         proc = subprocess.Popen(
             [sys.executable, str(ROOT / "backend" / "desktop_main.py"), "--data-dir", temp.name],
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, cwd=ROOT)
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.stderr, text=True, cwd=ROOT)
         def stop():
             if proc.poll() is None:
                 proc.kill()
@@ -102,23 +105,36 @@ class DesktopEntrypointTests(unittest.TestCase):
         proc.stdin.flush()
         return proc, Path(temp.name)
 
+    def read_event(self, proc, timeout=90):
+        """Next JSON line from the engine, failing (not hanging) with its stderr."""
+        result = {}
+        reader = threading.Thread(target=lambda: result.update(line=proc.stdout.readline()), daemon=True)
+        reader.start()
+        reader.join(timeout)
+        if "line" not in result:
+            proc.kill()
+            self.stderr.seek(0)
+            self.fail(f"engine printed nothing within {timeout}s; stderr:\n{self.stderr.read()[-4000:]}")
+        return json.loads(result["line"])
+
     def test_ready_then_exits_when_parent_closes_stdin(self):
         proc, data = self.start(TOKEN + "\n")
-        event = json.loads(proc.stdout.readline())
+        event = self.read_event(proc)
         self.assertEqual(event["event"], "ready")
         self.assertGreater(event["port"], 0)
         import httpx
         base = f"http://127.0.0.1:{event['port']}"
-        self.assertEqual(httpx.get(base + "/api/profile").status_code, 401)
-        self.assertEqual(httpx.get(base + "/api/profile", headers={"Authorization": f"Bearer {TOKEN}"})
-                         .json()["display_name"], "Investor")
+        with httpx.Client(trust_env=False, timeout=30) as client:
+            self.assertEqual(client.get(base + "/api/profile").status_code, 401)
+            self.assertEqual(client.get(base + "/api/profile", headers={"Authorization": f"Bearer {TOKEN}"})
+                             .json()["display_name"], "Investor")
         self.assertTrue((data / "sapient.db").exists())
         proc.stdin.close()
         self.assertEqual(proc.wait(timeout=20), 0)
 
     def test_refuses_to_start_without_token(self):
         proc, _ = self.start("\n")
-        self.assertEqual(json.loads(proc.stdout.readline())["code"], "token_missing")
+        self.assertEqual(self.read_event(proc)["code"], "token_missing")
         self.assertEqual(proc.wait(timeout=20), 2)
 
 
