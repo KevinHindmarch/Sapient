@@ -76,3 +76,24 @@ async def account(user=Depends(get_current_user)):
     """Latest read-only snapshots from TWS (summary, positions, open orders, executions)."""
     status = store.get_status()
     return {"state": status["state"], "account": status["account"], "snapshots": store.snapshots()}
+
+
+@router.get("/compare/{portfolio_id}")
+async def compare_with_broker(portfolio_id: int, user=Depends(get_current_user)):
+    """Model holdings of one portfolio next to the latest TWS positions (read-only)."""
+    from core.database import PortfolioService
+    from core.tws.compare import compare
+
+    details = PortfolioService.get_portfolio_details(portfolio_id, user["id"])
+    if not details:
+        raise HTTPException(404, "Portfolio not found")
+    status = store.get_status()
+    snapshot = store.snapshots().get("positions")
+    broker = snapshot["data"] if snapshot and isinstance(snapshot.get("data"), list) else None
+    return {
+        "state": status["state"],
+        "account": status["account"],
+        "positions_taken_at": snapshot["taken_at"] if snapshot else None,
+        "available": broker is not None,
+        "rows": compare(details.get("positions") or [], broker or [], status["account"]) if broker is not None else [],
+    }

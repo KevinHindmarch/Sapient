@@ -3,7 +3,7 @@ import { useTheme } from '../lib/theme'
 import { profileApi } from '../lib/api'
 import { useProfile } from '../lib/profile'
 import { toast } from 'sonner'
-import { Moon, Sun, User, Palette } from 'lucide-react'
+import { Moon, Sun, User, Palette, MonitorSmartphone } from 'lucide-react'
 import UpdatesCard from '../components/UpdatesCard'
 
 export default function Settings() {
@@ -23,6 +23,19 @@ export default function Settings() {
   useEffect(() => {
     profileApi.get().then((res) => setDataDir(res.data.data_dir)).catch(() => setDataDir(''))
   }, [])
+
+  // Desktop app only: keep running in the system tray when the window is closed.
+  const desktop = window.sapient?.desktop
+  const [closeToTray, setCloseToTray] = useState<boolean | null>(null)
+  useEffect(() => {
+    desktop?.settings().then((s) => setCloseToTray(s.closeToTray)).catch(() => setCloseToTray(null))
+  }, [desktop])
+  const toggleTray = async (value: boolean) => {
+    if (!desktop) return
+    const saved = await desktop.setCloseToTray(value)
+    setCloseToTray(saved.closeToTray)
+    toast.success(saved.closeToTray ? 'Sapient will keep running in the tray' : 'Closing the window will quit Sapient')
+  }
 
   return (
     <div className="max-w-2xl mx-auto space-y-6 animate-fade-in">
@@ -131,6 +144,28 @@ export default function Settings() {
           </div>
         </div>
       </div>
+
+      {desktop && closeToTray !== null && (
+        <div className="card" data-testid="background-card">
+          <div className="flex items-start gap-3">
+            <div className="p-2 rounded-lg bg-gradient-to-br from-emerald-500/20 to-sky-500/20 border border-emerald-500/30">
+              <MonitorSmartphone className="w-5 h-5 text-emerald-500" />
+            </div>
+            <div className="flex-1">
+              <h3 className="font-semibold theme-text">Running in the background</h3>
+              <p className="text-sm theme-text-secondary mt-1">
+                Automatic checks and trade alerts only happen while Sapient is running and the PC is awake.
+                Turn this on to keep Sapient in the system tray (bottom-right, near the clock) when you close the
+                window. Use the tray icon to reopen it, press <strong>Emergency stop</strong>, or quit.
+              </p>
+              <label className="flex items-center gap-2 mt-3 text-sm theme-text cursor-pointer">
+                <input type="checkbox" checked={closeToTray} onChange={(e) => { void toggleTray(e.target.checked) }} />
+                Keep Sapient running in the tray when I close the window
+              </label>
+            </div>
+          </div>
+        </div>
+      )}
 
       <UpdatesCard />
 

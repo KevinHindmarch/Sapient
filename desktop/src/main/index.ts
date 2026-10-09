@@ -8,6 +8,7 @@ import { pathToFileURL } from 'node:url'
 import { EngineCommand, EngineState, EngineSupervisor } from './engine'
 import { errorPage, loadingPage, SHELL_SCRIPT } from './pages'
 import { registerUpdater, RELEASES_URL } from './updater'
+import { Alerts } from './alerts'
 
 const SCHEME = 'app'
 const HOST = 'sapient'
@@ -22,6 +23,8 @@ let mainWindow: BrowserWindow | null = null
 let engine: EngineSupervisor
 let connector: EngineSupervisor | null = null  // read-only TWS connector process
 let shellPage = ''  // HTML for app://sapient/__shell while starting or failed
+let alerts: Alerts | null = null  // tray, notifications, emergency stop
+let quitting = false
 
 function rendererDir(): string {
   return path.join(__dirname, '..', '..', 'renderer')
@@ -110,6 +113,17 @@ function onEngineState(state: EngineState): void {
   }
 }
 
+function iconPath(): string {
+  return path.join(__dirname, '..', '..', 'build', 'icon.png')
+}
+
+function showWindow(): void {
+  if (!mainWindow) { createWindow(); return }
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
+}
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -117,7 +131,7 @@ function createWindow(): void {
     minWidth: 1024,
     minHeight: 700,
     title: 'Sapient',
-    icon: path.join(__dirname, '..', '..', 'build', 'icon.png'),
+    icon: iconPath(),
     backgroundColor: '#f8fafc',
     show: false,
     webPreferences: {
@@ -131,6 +145,14 @@ function createWindow(): void {
   })
   mainWindow.once('ready-to-show', () => mainWindow?.show())
   mainWindow.on('closed', () => { mainWindow = null })
+  // Optional: closing the window keeps Sapient (and its automatic checks) running in the tray.
+  mainWindow.on('close', (event) => {
+    if (!quitting && alerts?.closeToTray) {
+      event.preventDefault()
+      mainWindow?.hide()
+      alerts.hiddenToTray()
+    }
+  })
 
   // Never navigate away from the app; open https links in the user's browser.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -163,12 +185,7 @@ function registerIpc(): void {
 if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
-  app.on('second-instance', () => {
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore()
-      mainWindow.focus()
-    }
-  })
+  app.on('second-instance', () => showWindow())
 
   app.whenReady().then(() => {
     Menu.setApplicationMenu(null)
@@ -188,12 +205,24 @@ if (!app.requestSingleInstanceLock()) {
       connector.start()
     })
     createWindow()
+    if (process.platform === 'win32') app.setAppUserModelId('com.sapient.desktop')  // toast notifications
+    alerts = new Alerts(
+      () => mainWindow,
+      () => {
+        const state = engine.current
+        return state.kind === 'ready' ? { apiBase: state.info.apiBase, token: state.info.token } : null
+      },
+      showWindow,
+      path.join(app.getPath('userData'), 'desktop-settings.json'),
+      iconPath(),
+    )
+    alerts.start()
   })
 
-  let quitting = false
   app.on('before-quit', (event) => {
     if (quitting) return
     quitting = true
+    alerts?.stop()
     event.preventDefault()
     void Promise.allSettled([engine.stop(), connector?.stop()]).finally(() => app.exit(0))
   })

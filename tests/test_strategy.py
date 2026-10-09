@@ -267,3 +267,44 @@ class EngineRuleTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BrokerCompareTests(unittest.TestCase):
+    def test_symbols_map_to_yahoo_style(self):
+        from core.tws.compare import yahoo_symbol
+        self.assertEqual(yahoo_symbol({"symbol": "BHP", "secType": "STK", "currency": "AUD"}), "BHP.AX")
+        self.assertEqual(yahoo_symbol({"symbol": "BRK B", "secType": "STK", "currency": "USD"}), "BRK-B")
+        self.assertEqual(yahoo_symbol({"symbol": "CBA", "exchange": "ASX", "currency": ""}), "CBA.AX")
+        self.assertIsNone(yahoo_symbol({"symbol": "ES", "secType": "FUT"}))
+
+    def test_compare_marks_each_holding(self):
+        from core.tws.compare import compare
+        model = [{"symbol": "BHP.AX", "quantity": 10}, {"symbol": "CBA.AX", "quantity": 5},
+                 {"symbol": "WES.AX", "quantity": 3}, {"symbol": "OLD.AX", "quantity": 9, "status": "closed"}]
+        broker = [{"account": "DU1", "symbol": "BHP", "secType": "STK", "currency": "AUD", "position": 10.0},
+                  {"account": "DU1", "symbol": "CBA", "secType": "STK", "currency": "AUD", "position": 4.0},
+                  {"account": "DU1", "symbol": "AAPL", "secType": "STK", "currency": "USD", "position": 2.0},
+                  {"account": "DU1", "symbol": "NAB", "secType": "STK", "currency": "AUD", "position": 0.0},
+                  {"account": "DU9", "symbol": "WES", "secType": "STK", "currency": "AUD", "position": 3.0}]
+        rows = {r["symbol"]: (r["status"], r["difference"]) for r in compare(model, broker, "DU1")}
+        self.assertEqual(rows, {"AAPL": ("broker_only", 2.0), "BHP.AX": ("match", 0.0),
+                                "CBA.AX": ("differs", -1.0), "WES.AX": ("model_only", -3.0)})
+
+
+class BrokerCompareRouteTests(DataDirTest):
+    def test_route_without_and_with_a_positions_snapshot(self):
+        from fastapi.testclient import TestClient
+        from backend.main import app
+        from core.tws import store
+        token = "t" * 40
+        with mock.patch.dict(os.environ, {"SAPIENT_API_TOKEN": token, "SAPIENT_SKIP_MIGRATIONS": "1"}):
+            client = TestClient(app, base_url="http://127.0.0.1")
+            auth = {"Authorization": f"Bearer {token}"}
+            pid = self.portfolio("ASX income")
+            self.sql("INSERT INTO portfolio_positions(portfolio_id, symbol, quantity, avg_cost, status) VALUES (%s,'BHP.AX',10,40,'active')", (pid,))
+            first = client.get(f"/api/tws/compare/{pid}", headers=auth).json()
+            self.assertEqual((first["available"], first["rows"]), (False, []))
+            store.save_snapshot("positions", [{"account": None, "symbol": "BHP", "secType": "STK", "currency": "AUD", "position": 7}])
+            rows = client.get(f"/api/tws/compare/{pid}", headers=auth).json()["rows"]
+            self.assertEqual([(r["symbol"], r["status"], r["broker_quantity"]) for r in rows], [("BHP.AX", "differs", 7.0)])
+            self.assertEqual(client.get("/api/tws/compare/9999", headers=auth).status_code, 404)

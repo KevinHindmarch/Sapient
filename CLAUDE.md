@@ -127,10 +127,13 @@ core/                Service layer (all business logic)
                      that refuses every direct place/cancel
   tws/               read-only TWS connector: sdk (find official ibapi), transport
                      (127.0.0.1, READ_ONLY_REQUESTS allowlist), session, diagnostics
-                     (Test connection steps + fixes), worker (state machine), store
+                     (Test connection steps + fixes), worker (state machine), store,
+                     compare (model holdings vs TWS positions, read-only)
 desktop/             Electron shell (TypeScript): src/main (window, app:// protocol,
                      CSP, EngineSupervisor, updater.ts = manual GitHub-release
-                     updates + encrypted token), src/preload (window.sapient bridge),
+                     updates + encrypted token, alerts.ts = tray icon, proposal
+                     notifications, Emergency stop, optional close-to-tray saved in
+                     <data>/desktop-settings.json), src/preload (window.sapient bridge),
                      electron-builder.yml (NSIS installer), build/ (icon, licence,
                      installer.nsh), e2e/smoke.mjs (Playwright Electron test)
 packaging/           sapient-api.spec (PyInstaller onedir engine), smoke_engine.py
