@@ -80,15 +80,65 @@ def _slot():
         yield
 
 
+class YahooUnavailable(RuntimeError):
+    """Yahoo is rate-limiting or unreachable and there is no earlier copy of the data."""
+
+
+STALE_LIMIT = 7 * 24 * 60 * 60   # an older copy beats nothing when Yahoo fails
+NEGATIVE_TTL = 10 * 60           # "Yahoo had nothing" is remembered briefly so scans don't hammer it
+RATE_LIMIT_PAUSE = 60.0
+_paused_until = 0.0
+
+
+def _is_rate_limit(exc: Exception) -> bool:
+    text = f"{exc.__class__.__name__} {exc}".lower()
+    return "ratelimit" in text or "rate limit" in text or "too many requests" in text or "429" in text
+
+
 def _cached(key, ttl, fetch, keep):
+    """Fresh cache, else Yahoo, else the last good copy (up to a week old)."""
+    global _paused_until
     hit, value = _get(key, ttl)
     if hit:
         return value
-    with _slot():
-        value = fetch()
+    empty_hit, empty = _get("empty:" + key, NEGATIVE_TTL)
+    if empty_hit or time.time() < _paused_until:
+        stale_hit, stale = _get(key, STALE_LIMIT)
+        if stale_hit:
+            return stale
+        if empty_hit:
+            return empty
+        raise YahooUnavailable("Yahoo Finance is limiting requests; try again in a minute.")
+    try:
+        with _slot():
+            value = fetch()
+    except Exception as exc:
+        if _is_rate_limit(exc):
+            _paused_until = time.time() + RATE_LIMIT_PAUSE
+            log.warning("Yahoo rate limit: pausing requests for %.0f s", RATE_LIMIT_PAUSE)
+        stale_hit, stale = _get(key, STALE_LIMIT)
+        if stale_hit:
+            return stale
+        raise
     if keep(value):
         _put(key, value)
+        return value
+    stale_hit, stale = _get(key, STALE_LIMIT)
+    if stale_hit:
+        return stale
+    _put("empty:" + key, value)
     return value
+
+
+def prune(max_age: float = 30 * 24 * 60 * 60) -> int:
+    """Delete cache rows older than ``max_age`` seconds (the file never grows without bound)."""
+    try:
+        with _lock:
+            cur = _conn().execute("DELETE FROM cache WHERE stored_at < ?", (time.time() - max_age,))
+            return cur.rowcount
+    except Exception:
+        log.warning("market cache prune failed", exc_info=True)
+        return 0
 
 
 def _non_empty(value):

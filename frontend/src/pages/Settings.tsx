@@ -5,6 +5,8 @@ import { useProfile } from '../lib/profile'
 import { toast } from 'sonner'
 import { Moon, Sun, User, Palette, MonitorSmartphone } from 'lucide-react'
 import UpdatesCard from '../components/UpdatesCard'
+import BackupsCard from '../components/BackupsCard'
+import type { DesktopSettings } from '../lib/runtime'
 
 export default function Settings() {
   const { theme, setTheme } = useTheme()
@@ -26,15 +28,20 @@ export default function Settings() {
 
   // Desktop app only: keep running in the system tray when the window is closed.
   const desktop = window.sapient?.desktop
-  const [closeToTray, setCloseToTray] = useState<boolean | null>(null)
+  const [desktopSettings, setDesktopSettings] = useState<DesktopSettings | null>(null)
+  const closeToTray = desktopSettings ? desktopSettings.closeToTray : null
   useEffect(() => {
-    desktop?.settings().then((s) => setCloseToTray(s.closeToTray)).catch(() => setCloseToTray(null))
+    desktop?.settings().then(setDesktopSettings).catch(() => setDesktopSettings(null))
   }, [desktop])
   const toggleTray = async (value: boolean) => {
     if (!desktop) return
     const saved = await desktop.setCloseToTray(value)
-    setCloseToTray(saved.closeToTray)
+    setDesktopSettings(saved)
     toast.success(saved.closeToTray ? 'Sapient will keep running in the tray' : 'Closing the window will quit Sapient')
+  }
+  const toggleSetting = async (key: 'openAtLogin' | 'keepAwake', value: boolean) => {
+    if (!desktop?.setSetting) return
+    setDesktopSettings(await desktop.setSetting(key, value))
   }
 
   return (
@@ -162,10 +169,26 @@ export default function Settings() {
                 <input type="checkbox" checked={closeToTray} onChange={(e) => { void toggleTray(e.target.checked) }} />
                 Keep Sapient running in the tray when I close the window
               </label>
+              {desktop?.setSetting && (
+                <>
+                  <label className="flex items-center gap-2 mt-2 text-sm theme-text cursor-pointer">
+                    <input type="checkbox" checked={!!desktopSettings?.openAtLogin} data-testid="open-at-login"
+                      onChange={(e) => { void toggleSetting('openAtLogin', e.target.checked) }} />
+                    Start Sapient when I log in to Windows (in the tray)
+                  </label>
+                  <label className="flex items-center gap-2 mt-2 text-sm theme-text cursor-pointer">
+                    <input type="checkbox" checked={desktopSettings?.keepAwake !== false} data-testid="keep-awake"
+                      onChange={(e) => { void toggleSetting('keepAwake', e.target.checked) }} />
+                    Keep the PC awake while the ASX or US market is open
+                  </label>
+                </>
+              )}
             </div>
           </div>
         </div>
       )}
+
+      <BackupsCard />
 
       <UpdatesCard />
 

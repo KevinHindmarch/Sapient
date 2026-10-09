@@ -26,6 +26,7 @@ let liveConnector: EngineSupervisor | null = null  // TWS connector for the live
 let shellPage = ''  // HTML for app://sapient/__shell while starting or failed
 let alerts: Alerts | null = null  // tray, notifications, emergency stop
 let quitting = false
+let startHidden = process.argv.includes('--hidden')
 
 function rendererDir(): string {
   return path.join(__dirname, '..', '..', 'renderer')
@@ -118,7 +119,34 @@ function iconPath(): string {
   return path.join(__dirname, '..', '..', 'build', 'icon.png')
 }
 
+/**
+ * A restore chosen in Settings → Backups is applied here, before the engine opens the
+ * database: the current file is kept as backups/before-restore-<time>.db.
+ */
+function applyPendingRestore(dataDir: string, logFile: string): void {
+  const requestFile = path.join(dataDir, 'restore-request.json')
+  if (!fs.existsSync(requestFile)) return
+  const note = (line: string) => fs.appendFileSync(logFile, `[${new Date().toISOString()}] ${line}\n`)
+  try {
+    const request = JSON.parse(fs.readFileSync(requestFile, 'utf8')) as { backup?: string }
+    const name = String(request.backup ?? '')
+    const source = path.join(dataDir, 'backups', name)
+    if (!/^[A-Za-z0-9._-]+\.db$/.test(name) || !fs.existsSync(source)) throw new Error(`backup ${name} not found`)
+    const database = path.join(dataDir, 'sapient.db')
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+    if (fs.existsSync(database)) fs.copyFileSync(database, path.join(dataDir, 'backups', `before-restore-${stamp}.db`))
+    for (const extra of ['-wal', '-shm']) fs.rmSync(database + extra, { force: true })
+    fs.copyFileSync(source, database)
+    note(`restored database from backups/${name}`)
+  } catch (error) {
+    note(`restore failed: ${(error as Error).message}`)
+  } finally {
+    fs.rmSync(requestFile, { force: true })
+  }
+}
+
 function showWindow(): void {
+  startHidden = false
   if (!mainWindow) { createWindow(); return }
   if (mainWindow.isMinimized()) mainWindow.restore()
   mainWindow.show()
@@ -144,7 +172,8 @@ function createWindow(): void {
       spellcheck: false,
     },
   })
-  mainWindow.once('ready-to-show', () => mainWindow?.show())
+  // Started with Windows: stay in the tray until the user opens Sapient.
+  mainWindow.once('ready-to-show', () => { if (!startHidden) mainWindow?.show() })
   mainWindow.on('closed', () => { mainWindow = null })
   // Optional: closing the window keeps Sapient (and its automatic checks) running in the tray.
   mainWindow.on('close', (event) => {
@@ -205,6 +234,7 @@ if (!app.requestSingleInstanceLock()) {
     serveApp()
     registerIpc()
     const origins = devRendererUrl ? [new URL(devRendererUrl).origin] : [APP_ORIGIN]
+    applyPendingRestore(app.getPath('userData'), path.join(logDir(), 'engine.log'))
     engine = new EngineSupervisor(engineCommand(), app.getPath('userData'),
       path.join(logDir(), 'engine.log'), origins)
     engine.on('state', onEngineState)

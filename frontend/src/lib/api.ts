@@ -414,3 +414,18 @@ export function normaliseWeights(weights: Record<string, number>): Record<string
   if (total <= 0) return weights
   return Object.fromEntries(Object.entries(weights).filter(([, w]) => w > 0).map(([s, w]) => [s, w / total]))
 }
+
+export interface BackupFile { name: string; kind: string; size: number; modified_at: string }
+export interface BackupsInfo {
+  backups: BackupFile[]
+  status: { last_backup_at?: string; last_check_ok?: boolean; last_check_detail?: string }
+  pending_restore: { backup: string } | null
+  folder: string
+}
+
+export const backupsApi = {
+  list: () => api.get<BackupsInfo>('/backups'),
+  now: () => api.post('/backups/now'),
+  restore: (name: string) => api.post('/backups/restore', { name }),
+  cancelRestore: () => api.delete('/backups/restore'),
+}

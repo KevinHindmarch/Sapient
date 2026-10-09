@@ -17,6 +17,8 @@ contextBridge.exposeInMainWorld('sapient', {
   desktop: {
     settings: () => ipcRenderer.invoke('sapient:desktop-settings'),
     setCloseToTray: (value: boolean) => ipcRenderer.invoke('sapient:set-close-to-tray', value),
+    setSetting: (key: 'closeToTray' | 'openAtLogin' | 'keepAwake', value: boolean) =>
+      ipcRenderer.invoke('sapient:set-desktop-setting', key, value),
     emergencyStop: () => ipcRenderer.invoke('sapient:emergency-stop'),
   },
   updates: {

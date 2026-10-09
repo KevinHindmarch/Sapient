@@ -33,6 +33,7 @@ export type EngineState =
 const READY_TIMEOUT_MS = 90_000 // first launch unpacks scipy/pandas and migrates the database
 const MAX_RESTARTS = 3
 const RESTART_WINDOW_MS = 60_000
+const LOG_LIMIT_BYTES = 5 * 1024 * 1024
 const WORKER_RETRY_MS = 5 * 60_000 // a failed TWS connector tries again on its own every 5 minutes
 
 /** Emergency stop without the API (`sapient-api --halt`): returns how many orders it asked TWS to cancel. */
@@ -104,6 +105,9 @@ export class EngineSupervisor extends EventEmitter {
 
   private log(line: string): void {
     fs.mkdirSync(path.dirname(this.logFile), { recursive: true })
+    try {  // keep one previous file; the log never grows without bound
+      if (fs.statSync(this.logFile).size > LOG_LIMIT_BYTES) fs.renameSync(this.logFile, this.logFile + '.1')
+    } catch { /* no log yet */ }
     fs.appendFileSync(this.logFile, `[${new Date().toISOString()}] ${line}\n`)
   }
 

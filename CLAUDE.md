@@ -232,6 +232,8 @@ python -m unittest discover -s tests -p 'test_g1_safety.py' -v   # audit fixes: 
 python -m unittest discover -s tests -p 'test_g2_ledger.py' -v   # cash, realised profit, commissions, holdings = fills, rebalance
 python -m unittest discover -s tests -p 'test_g3_trading.py' -v  # proposals fit limits/cash/caps, no duplicates, re-entry
 python -m unittest discover -s tests -p 'test_g4_us.py' -v       # US shares: SMART/USD, US hours, US$ cash, A$ limits
+python -m unittest discover -s tests -p 'test_g5_research.py' -v # optimiser maths, dividend units, stock lists
+python -m unittest discover -s tests -p 'test_g6_ops.py' -v      # daily backups, integrity check, restore requests
 python -m compileall -q core backend
 cd frontend && npm run build && npm run lint
 ```
@@ -261,6 +263,13 @@ cd frontend && npm run build && npm run lint
   using TWS's `ExchangeRate:USD`.
 - API route handlers are plain `def` (thread pool): blocking work on the event
   loop froze the Emergency stop.
+- Always-on (G6): the API process makes a daily integrity-checked backup
+  (`core/backups.py`, last 7 + 5 pre-upgrade kept) and prunes the market cache;
+  Settings → Backups requests a restore that Electron applies before starting
+  the engine. Desktop settings (`desktop-settings.json`): close to tray (default
+  on), start with Windows (`--hidden`, default off), keep the PC awake while a
+  market is open (default on). Yahoo failures fall back to the last good copy
+  (≤ 7 days); rate limits pause requests for 60 s.
 - Upgrades must keep user data: never edit an applied (released) migration,
   never store data in the install folder, and new first-run steps must be
   skipped for existing users (mark them done in the migration).

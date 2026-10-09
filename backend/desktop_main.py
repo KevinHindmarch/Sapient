@@ -125,10 +125,29 @@ def main(argv=None) -> int:
         from core.strategy.scheduler import run_forever
         threading.Thread(target=run_forever, args=(lambda: server.should_exit,), name="scheduler",
                          daemon=True).start()
+        threading.Thread(target=maintenance, args=(lambda: server.should_exit,), name="maintenance",
+                         daemon=True).start()
     threading.Thread(target=announce, name="announce", daemon=True).start()
 
     server.run(sockets=[sock])
     return 0
+
+
+def maintenance(should_stop, interval: float = 3600.0) -> None:
+    """Daily database backup (with an integrity check) and market-cache clean-up, hourly checks."""
+    import logging
+    from core import backups, yahoo
+    log = logging.getLogger("sapient.maintenance")
+    while not should_stop():
+        try:
+            backups.daily_backup()
+            yahoo.prune()
+        except Exception:
+            log.exception("maintenance failed")
+        for _ in range(int(interval)):
+            if should_stop():
+                return
+            time.sleep(1)
 
 
 def run_worker(data_dir: Path, profile: str = "paper") -> int:
