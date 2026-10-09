@@ -127,6 +127,13 @@ for (let i = 0; i < 60 && !tws?.worker_running; i++) {
   if (!tws.worker_running) await new Promise((r) => setTimeout(r, 1000))
 }
 check(tws?.worker_running, `TWS connector is running (state ${tws?.state})`)
+// The market-hours scheduler runs in the same background process (needs bundled time zones).
+let sched = null
+for (let i = 0; i < 60 && !sched?.running; i++) {
+  sched = await api('/ai/scheduler')
+  if (!sched.running) await new Promise((r) => setTimeout(r, 1000))
+}
+check(sched?.running && sched.markets.length === 2, `scheduler is running (${sched?.detail})`)
 // Attached, not visible: a narrow window hides the sidebar (the pill is then in the menu).
 await page.waitForSelector('[data-testid="tws-pill"]', { state: 'attached', timeout: 30_000 })
 

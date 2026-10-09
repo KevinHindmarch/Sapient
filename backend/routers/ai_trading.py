@@ -273,3 +273,44 @@ async def list_audit(
         )
         for r in rows
     ]
+
+
+# ---------------------------------------------------------------------------
+# Scheduler (automatic market-hours checks)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/scheduler")
+async def scheduler_status(current_user: dict = Depends(get_current_user)):
+    """What the automatic checks are doing, market hours, and the latest runs."""
+    from core import db
+    from core.strategy import calendar
+
+    now = datetime.now(timezone.utc)
+    with db.transaction() as (cur, _):
+        cur.execute("SELECT heartbeat_at, detail, next_check_at FROM scheduler_status WHERE id = 1")
+        status = dict(cur.fetchone() or {})
+        cur.execute("""SELECT r.portfolio_id, p.name AS portfolio_name, r.window_key, r.outcome,
+                              r.result, r.started_at, r.finished_at
+                       FROM scheduler_runs r JOIN portfolios p ON p.id = r.portfolio_id
+                       WHERE p.user_id = %s ORDER BY r.id DESC LIMIT 20""", (current_user["id"],))
+        runs = [dict(r) for r in cur.fetchall()]
+    heartbeat = status.get("heartbeat_at")
+    markets = []
+    for market in calendar.MARKETS.values():
+        hours = calendar.session(market, calendar.local_date(market, now))
+        markets.append({
+            "code": market.code, "name": market.name,
+            "open_now": calendar.is_open(market, now),
+            "today": {"open": hours[0], "close": hours[1]} if hours else None,
+            "next_open": calendar.next_open(market, now),
+            "calendar_up_to_date": calendar.known_year(market, calendar.local_date(market, now)),
+        })
+    return {
+        "running": bool(heartbeat and (now - heartbeat).total_seconds() < 120),
+        "detail": status.get("detail"),
+        "heartbeat_at": heartbeat,
+        "next_check_at": status.get("next_check_at"),
+        "markets": markets,
+        "recent_runs": runs,
+    }

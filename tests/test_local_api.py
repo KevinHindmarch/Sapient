@@ -102,6 +102,21 @@ class LocalApiTests(unittest.TestCase):
         self.assertFalse(broker["execution_enabled"])
         self.client.put("/api/tws/settings", headers=self.auth(), json={"enabled": False, "expected_account": ""})
 
+    def test_strategy_settings_and_scheduler_status(self):
+        saved = self.client.put("/api/ai/settings", headers=self.auth(),
+                                json={"scheduler_enabled": True, "stop_loss_pct": 8, "approval_timeout_minutes": 20}).json()
+        self.assertEqual((saved["scheduler_enabled"], saved["stop_loss_pct"], saved["approval_timeout_minutes"]),
+                         (True, 8.0, 20))
+        off = self.client.put("/api/ai/settings", headers=self.auth(), json={"stop_loss_pct": 0}).json()
+        self.assertIsNone(off["stop_loss_pct"])
+        self.assertEqual(self.client.put("/api/ai/settings", headers=self.auth(),
+                                         json={"approval_timeout_minutes": 0}).status_code, 422)
+        status = self.client.get("/api/ai/scheduler", headers=self.auth()).json()
+        self.assertFalse(status["running"], "no background process in this test")
+        self.assertEqual({m["code"] for m in status["markets"]}, {"ASX", "US"})
+        self.assertEqual(status["recent_runs"], [])
+        self.client.put("/api/ai/settings", headers=self.auth(), json={"scheduler_enabled": False})
+
     def test_removed_login_and_oauth_routes_are_gone(self):
         for method, path in (("post", "/api/auth/login"), ("post", "/api/auth/register"),
                              ("post", "/api/broker/credentials"), ("get", "/api/broker/account"),

@@ -128,6 +128,11 @@ def run_worker(data_dir: Path) -> int:
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
     logging.basicConfig(level=logging.INFO, handlers=[handler])
     emit("ready")
+    # Market-hours RSI checks live in the same background process as the TWS
+    # connector; they only create proposals, never orders.
+    import threading
+    from core.strategy.scheduler import run_forever
+    threading.Thread(target=run_forever, args=(lambda: False,), name="scheduler", daemon=True).start()
     TwsWorker().run()
     return 0
 

@@ -19,6 +19,7 @@ TEST_PATTERNS = (
     "test_local_api.py",
     "test_tws.py",
     "test_upgrades.py",
+    "test_strategy.py",
 )
 
 

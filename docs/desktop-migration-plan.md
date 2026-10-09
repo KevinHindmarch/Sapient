@@ -298,6 +298,10 @@ account-to-portfolio allocation screen.
 
 - **E sign-off (user):** install TWS + the IBKR API on the PC, log in to
   Paper Trading, run **Test connection**, send the result.
+- **F1 (built, no orders):** market calendar, stop-loss/take-profit, sizing,
+  market-hours scheduler with expiring proposals (migration 5). Next, still
+  without orders: desktop notifications, tray Emergency stop, AI Trading
+  screens around TWS (broker vs model holdings).
 - **F — Paper orders:** only after the user says "authorise paper trading" and
   unticks Read-Only on the paper TWS. Real paper orders through
   `IntentService` → outbox → connector; approvals inbox, desktop notifications,

@@ -2,6 +2,8 @@
 Core database module
 """
 
+from datetime import datetime, timezone
+
 from core import db
 
 
@@ -496,7 +498,31 @@ class AITradingSettingsService:
         'breaker_on_volatility_spike': True,
         'breaker_on_news_event': True,
         'last_kill_switch_at': None,
+        'stop_loss_pct': None,
+        'take_profit_pct': None,
+        'approval_timeout_minutes': 15,
+        'scheduler_enabled': False,
+        'check_after_open_minutes': 15,
+        'check_before_close_minutes': 30,
     }
+    # Changing these alters order admission policy, so it halts the safety account.
+    POLICY_KEYS = {
+        'mode', 'rsi_buy_threshold', 'rsi_sell_threshold', 'max_trade_pct',
+        'max_daily_trades', 'max_daily_turnover_pct', 'sector_cap_pct',
+        'paper_only', 'breaker_on_loss_pct', 'breaker_on_volatility_spike',
+        'breaker_on_news_event',
+    }
+    # Scan schedule and exit rules only change what gets proposed.
+    STRATEGY_KEYS = {
+        'stop_loss_pct', 'take_profit_pct', 'approval_timeout_minutes',
+        'scheduler_enabled', 'check_after_open_minutes', 'check_before_close_minutes',
+    }
+    COLUMNS = '''mode, rsi_buy_threshold, rsi_sell_threshold, max_trade_pct,
+                 max_daily_trades, max_daily_turnover_pct, sector_cap_pct,
+                 paper_only, breaker_on_loss_pct, breaker_on_volatility_spike,
+                 breaker_on_news_event, last_kill_switch_at, stop_loss_pct,
+                 take_profit_pct, approval_timeout_minutes, scheduler_enabled,
+                 check_after_open_minutes, check_before_close_minutes'''
 
     @staticmethod
     def _row_to_dict(row) -> dict:
@@ -504,7 +530,8 @@ class AITradingSettingsService:
             return None
         d = dict(row)
         for k in ('rsi_buy_threshold', 'rsi_sell_threshold', 'max_trade_pct',
-                  'max_daily_turnover_pct', 'sector_cap_pct', 'breaker_on_loss_pct'):
+                  'max_daily_turnover_pct', 'sector_cap_pct', 'breaker_on_loss_pct',
+                  'stop_loss_pct', 'take_profit_pct'):
             if d.get(k) is not None:
                 d[k] = float(d[k])
         return d
@@ -512,22 +539,12 @@ class AITradingSettingsService:
     @staticmethod
     def get(user_id: int) -> dict:
         with get_db_cursor() as (cur, conn):
-            cur.execute("""
-                SELECT mode, rsi_buy_threshold, rsi_sell_threshold, max_trade_pct,
-                       max_daily_trades, max_daily_turnover_pct, sector_cap_pct,
-                       paper_only, breaker_on_loss_pct, breaker_on_volatility_spike,
-                       breaker_on_news_event, last_kill_switch_at
-                FROM ai_trading_settings WHERE user_id = %s
-            """, (user_id,))
+            cols = AITradingSettingsService.COLUMNS
+            cur.execute(f"SELECT {cols} FROM ai_trading_settings WHERE user_id = %s", (user_id,))
             row = cur.fetchone()
             if row is None:
-                cur.execute("""
-                    INSERT INTO ai_trading_settings (user_id) VALUES (%s)
-                    RETURNING mode, rsi_buy_threshold, rsi_sell_threshold, max_trade_pct,
-                              max_daily_trades, max_daily_turnover_pct, sector_cap_pct,
-                              paper_only, breaker_on_loss_pct, breaker_on_volatility_spike,
-                              breaker_on_news_event, last_kill_switch_at
-                """, (user_id,))
+                cur.execute(f"INSERT INTO ai_trading_settings (user_id) VALUES (%s) RETURNING {cols}",
+                            (user_id,))
                 row = cur.fetchone()
                 conn.commit()
             return AITradingSettingsService._row_to_dict(row)
@@ -535,18 +552,20 @@ class AITradingSettingsService:
     @staticmethod
     def update(user_id: int, updates: dict) -> dict:
         AITradingSettingsService.get(user_id)  # ensure row exists
-        allowed = {
-            'mode', 'rsi_buy_threshold', 'rsi_sell_threshold', 'max_trade_pct',
-            'max_daily_trades', 'max_daily_turnover_pct', 'sector_cap_pct',
-            'paper_only', 'breaker_on_loss_pct', 'breaker_on_volatility_spike',
-            'breaker_on_news_event',
-        }
+        allowed = AITradingSettingsService.POLICY_KEYS | AITradingSettingsService.STRATEGY_KEYS
+        nullable = {'stop_loss_pct', 'take_profit_pct'}  # None/0 = rule off
         sets = []
         params = []
+        changed = set()
         for k, v in updates.items():
-            if k in allowed and v is not None:
+            if k in nullable:
+                sets.append(f"{k} = %s")
+                params.append(v if v else None)
+                changed.add(k)
+            elif k in allowed and v is not None:
                 sets.append(f"{k} = %s")
                 params.append(v)
+                changed.add(k)
         if not sets:
             return AITradingSettingsService.get(user_id)
         sets.append("updated_at = CURRENT_TIMESTAMP")
@@ -554,7 +573,7 @@ class AITradingSettingsService:
         with get_db_cursor() as (cur, conn):
             # Same write transaction as admission (BEGIN IMMEDIATE). Policy changes
             # never leave old queued authority or reservations usable.
-            if db.table_exists(cur, "safety_accounts"):
+            if changed & AITradingSettingsService.POLICY_KEYS and db.table_exists(cur, "safety_accounts"):
                 cur.execute("SELECT user_id FROM safety_accounts WHERE user_id=%s", (user_id,))
                 if cur.fetchone():
                     from core.execution_safety import IntentService
@@ -676,6 +695,20 @@ class AISignalService:
             if row is None:
                 return None
         return AISignalService.get(user_id, signal_id)
+
+    @staticmethod
+    def expire_stale(now=None) -> list:
+        """Unanswered proposals past their deadline expire; they are never acted on."""
+        now = now or datetime.now(timezone.utc)
+        with get_db_cursor() as (cur, conn):
+            cur.execute("""
+                UPDATE ai_signals SET status = 'expired', decided_by = 'system', decided_at = %s
+                WHERE status IN ('pending', 'snoozed') AND expires_at IS NOT NULL AND expires_at <= %s
+                RETURNING id, user_id, portfolio_id, symbol, action
+            """, (now, now))
+            rows = [dict(r) for r in cur.fetchall()]
+            conn.commit()
+        return rows
 
 
 class BrokerOrderService:

@@ -104,7 +104,7 @@ core/                Service layer (all business logic)
   db.py              SQLite connection layer (WAL, FULL sync, BEGIN IMMEDIATE,
                      %s→? placeholders, Sapient-specific column-type converters)
   migrations.py      versioned checksummed schema (1 core, 2 safety, 3 tws,
-                     4 profile); migrate()
+                     4 profile, 5 strategy); migrate()
                      runs at API startup after backing up the DB
   database.py        User (local profile)/Portfolio/AITradingSettings/AISignal/
                      BrokerOrder/AIAudit services (SQL via core.db)
@@ -116,7 +116,12 @@ core/                Service layer (all business logic)
   fundamentals.py    FundamentalsService (yfinance .info/financials, threadpool scan)
   capm.py            CAPMService (beta vs ^AXJO, CAPM expected returns)
   indicators.py      TechnicalIndicatorService (RSI/MACD/BB/SMA/EMA/Stoch, RSI screener)
-  ai_engine.py       scan_portfolio → signals; autonomous → IntentService.admit
+  ai_engine.py       scan_portfolio → signals (rules from core/strategy); autonomous →
+                     IntentService.admit
+  strategy/          calendar (ASX/US hours, holidays 2026–27), rules (stop-loss,
+                     take-profit, RSI exit/entry), sizing (weights → whole shares),
+                     scheduler (2 checks per trading day per portfolio, runs in the
+                     connector process, unique window rows, expires unanswered proposals)
   execution_safety.py IntentService: the single order admission boundary
   ibkr_client.py     connection_status() (reads TWS connector state) + IBKRClient
                      that refuses every direct place/cancel
@@ -190,6 +195,7 @@ python -m unittest discover -s tests -p 'test_execution_safety_sqlite.py' -v  # 
 python -m unittest discover -s tests -p 'test_local_api.py' -v   # token/Host checks, desktop entrypoint, Yahoo cache, profile, /api/tws
 python -m unittest discover -s tests -p 'test_tws.py' -v         # fake TWS: diagnostics, read-only transport, worker
 python -m unittest discover -s tests -p 'test_upgrades.py' -v    # fresh install vs upgrade keeps data, no repeat wizard
+python -m unittest discover -s tests -p 'test_strategy.py' -v    # calendar, rules, sizing, scheduler
 python -m compileall -q core backend
 cd frontend && npm run build && npm run lint
 ```

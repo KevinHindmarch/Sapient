@@ -633,6 +633,7 @@ dependencies = [
     { name = "pandas" },
     { name = "protobuf" },
     { name = "scipy" },
+    { name = "tzdata" },
     { name = "uvicorn" },
     { name = "yfinance" },
 ]
@@ -649,6 +650,7 @@ requires-dist = [
     { name = "pandas", specifier = ">=2.3.3" },
     { name = "protobuf", specifier = ">=5.29" },
     { name = "scipy", specifier = ">=1.16.2" },
+    { name = "tzdata", specifier = ">=2024.1" },
     { name = "uvicorn", specifier = ">=0.40.0" },
     { name = "yfinance", specifier = ">=0.2.66" },
 ]

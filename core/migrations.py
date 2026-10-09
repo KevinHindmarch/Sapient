@@ -352,12 +352,44 @@ ALTER TABLE users ADD COLUMN onboarded_at UTCTIME;
 UPDATE users SET onboarded_at = COALESCE(created_at, strftime('%Y-%m-%d %H:%M:%f','now'))
 """
 
+STRATEGY_V1 = f"""
+ALTER TABLE ai_trading_settings ADD COLUMN stop_loss_pct DECNUM(5, 2);
+ALTER TABLE ai_trading_settings ADD COLUMN take_profit_pct DECNUM(5, 2);
+ALTER TABLE ai_trading_settings ADD COLUMN approval_timeout_minutes INTEGER NOT NULL DEFAULT 15
+  CHECK (approval_timeout_minutes BETWEEN 1 AND 1440);
+ALTER TABLE ai_trading_settings ADD COLUMN scheduler_enabled FLAG NOT NULL DEFAULT FALSE;
+ALTER TABLE ai_trading_settings ADD COLUMN check_after_open_minutes INTEGER NOT NULL DEFAULT 15
+  CHECK (check_after_open_minutes BETWEEN 0 AND 300);
+ALTER TABLE ai_trading_settings ADD COLUMN check_before_close_minutes INTEGER NOT NULL DEFAULT 30
+  CHECK (check_before_close_minutes BETWEEN 5 AND 300);
+CREATE TABLE scheduler_runs (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ portfolio_id INTEGER NOT NULL REFERENCES portfolios(id) ON DELETE CASCADE,
+ window_key TEXT NOT NULL,
+ outcome TEXT NOT NULL DEFAULT 'running'
+   CHECK (outcome IN ('running','done','failed','missed','abandoned')),
+ result JSONTEXT,
+ started_at UTCTIME NOT NULL DEFAULT {_NOW},
+ finished_at UTCTIME,
+ UNIQUE (portfolio_id, window_key)
+);
+CREATE TABLE scheduler_status (
+ id INTEGER PRIMARY KEY CHECK (id = 1),
+ heartbeat_at UTCTIME,
+ detail TEXT,
+ next_check_at UTCTIME
+);
+INSERT INTO scheduler_status(id) VALUES (1);
+CREATE INDEX ai_signals_open ON ai_signals(expires_at) WHERE status IN ('pending','snoozed');
+"""
+
 # (version, name, sql). Append only.
 MIGRATIONS = (
     (1, "core", CORE_V1),
     (2, "safety", SAFETY_V1),
     (3, "tws", TWS_V1),
     (4, "profile", PROFILE_V1),
+    (5, "strategy", STRATEGY_V1),
 )
 SAFETY_SCHEMA_VERSION = 2
 

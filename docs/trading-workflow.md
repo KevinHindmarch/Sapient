@@ -1,6 +1,8 @@
 # Sapient trading workflow — RSI portfolio lifecycle
 
-Date: 2026-10-09. Status: **target design for the desktop app, not implemented.**
+Date: 2026-10-09. Status: **partly built.** Done (no orders): market calendar,
+stop-loss/take-profit/RSI rules, whole-share sizing, market-hours scheduler,
+answer-by expiry. Not yet: entry batches, broker-backed holdings, paper orders.
 Companion to [desktop-migration-plan.md](desktop-migration-plan.md). Safety rules in
 [ibkr-architecture.md](ibkr-architecture.md) override anything here.
 
