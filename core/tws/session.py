@@ -34,6 +34,9 @@ REQ_LEDGER = 2_100_000_005
 REQUEST_IDS = {REQ_SUMMARY, REQ_EXECUTIONS, REQ_CONTRACT, REQ_MARKET, REQ_LEDGER}
 # Per-currency values Sapient needs (US buys: US$ cash; A$ limits: TWS's exchange rate).
 CURRENCY_KEYS = ("CashBalance", "ExchangeRate")
+# Price tick types (live and delayed): last, bid, ask. See docs/ibkr-tws-api-notes.md.
+LAST_TICKS = {"4", "68"}
+PRICE_TICKS = LAST_TICKS | {"1", "2", "66", "67"}
 # TWS setting "Prepend $LEDGER- prefix to per-currency account values" (on by default for
 # new TWS users) renames per-currency values, e.g. "$LEDGER-CashBalance". Both forms are read.
 LEDGER_PREFIX = "$LEDGER-"
@@ -331,7 +334,8 @@ class TwsSession:
         return rows
 
     def market_snapshot(self, symbol: str, exchange: str, currency: str, timeout: float = 15.0,
-                        data_type: int = 3, primary_exchanges: set[str] | None = None) -> dict:
+                        data_type: int = 3, primary_exchanges: set[str] | None = None,
+                        stream_timeout: float = 6.0) -> dict:
         """Qualify one stock and take a price snapshot.
 
         data_type 3 = delayed if not subscribed (paper); 1 = real-time only (live
@@ -370,5 +374,28 @@ class TwsSession:
         self._wait(finished, timeout, collect_ticks)
         if refused:  # no permission: the caller explains it from health.errors
             raise TwsTimeout(f"TWS refused market data ({refused[0]})")
+        if not prices.keys() & PRICE_TICKS:
+            # A snapshot only returns what ticks during its 11 seconds; delayed US
+            # stocks often send no last/bid/ask in that time. Listen briefly instead.
+            self._stream_prices(found[0], stream_timeout, collect_ticks, refused)
         result["prices"] = prices
         return result
+
+    def _stream_prices(self, contract, timeout: float, collect_ticks, refused: list) -> None:
+        """Streaming (not snapshot) prices until a last/bid/ask arrives or ``timeout``; always cancelled."""
+        got: list = []
+
+        def finished(name, fields):
+            if name == "error" and fields.get("reqId") == REQ_MARKET and _code(fields) in NO_MARKET_DATA:
+                refused.append(_code(fields))
+                return True
+            if name == "tickPrice" and fields.get("reqId") == REQ_MARKET and str(fields.get("tickType")) in PRICE_TICKS:
+                got.append(fields)
+            return len(got) >= 3 or any(str(f.get("tickType")) in LAST_TICKS for f in got)
+        self.transport.request("reqMktData", REQ_MARKET, contract, "", False, False, [])
+        try:
+            self._wait(finished, timeout, collect_ticks)
+        except TwsTimeout:
+            pass  # whatever arrived is used; the caller refuses if there is no price
+        finally:
+            self.transport.request("cancelMktData", REQ_MARKET)

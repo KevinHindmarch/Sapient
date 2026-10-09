@@ -267,7 +267,11 @@ class ExecutorTests(PaperTestCase):
         limit, reason = choose_limit("BUY", {"68": 50}, Decimal("45.70"), Decimal("3"))
         self.assertIsNone(limit)
         self.assertIn("away from the Yahoo price", reason)
-        self.assertIsNone(choose_limit("BUY", {"67": 45.7}, Decimal("45.7"), Decimal("3"))[0], "no last price: no guess")
+        self.assertIsNone(choose_limit("BUY", {"67": 45.7}, Decimal("45.7"), Decimal("3"))[0], "ask only: no guess")
+        # No trade in the delayed feed yet: the middle of the delayed bid and ask, rounded cautiously.
+        self.assertEqual(choose_limit("BUY", {"66": 45.60, "67": 45.71}, Decimal("45.7"), Decimal("3"))[0], Decimal("45.65"))
+        self.assertEqual(choose_limit("SELL", {"66": 45.60, "67": 45.71}, Decimal("45.7"), Decimal("3"))[0], Decimal("45.66"))
+        self.assertIsNone(choose_limit("BUY", {"66": 46, "67": 45}, Decimal("45.5"), Decimal("3"))[0], "crossed: no guess")
 
     def test_happy_path_saves_before_sending_once(self):
         queued = self.order()

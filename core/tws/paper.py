@@ -616,6 +616,20 @@ def signal_order(signal: dict, origin: str, env: str = "paper") -> dict:
 
 
 # ---- portfolios trading at the broker -------------------------------------------
+def open_order_quantities(portfolio_id: int, env: str) -> dict[str, Decimal]:
+    """Shares still to come from this portfolio's open orders: + for buys, - for sells."""
+    working = "','".join(WORKING)
+    with db.transaction() as (cur, _):
+        cur.execute(f"""SELECT symbol, side, coalesce(decimal_sum(quantity - coalesce(filled_quantity, 0)), '0') AS q
+                        FROM paper_orders WHERE portfolio_id=%s AND environment=%s AND state IN ('{working}')
+                        GROUP BY symbol, side""", (portfolio_id, get_env(env).name))
+        pending: dict[str, Decimal] = {}
+        for row in cur.fetchall():
+            q = Decimal(str(row["q"]))
+            pending[row["symbol"]] = pending.get(row["symbol"], Decimal(0)) + (q if row["side"] == "BUY" else -q)
+    return {symbol: q for symbol, q in pending.items() if q}
+
+
 def start_portfolio(portfolio_id: int, user_id: int, prices: dict[str, float], env: str = "paper",
                     mode: str | None = None) -> dict:
     """Buy a portfolio's planned holdings in this environment, then let AI Trading manage it.

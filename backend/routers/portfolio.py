@@ -774,14 +774,23 @@ def get_rebalance_plan(
     actives = [p for p in positions if p.get("status") == "active"]
     prices = ledger.latest_prices([p["symbol"] for p in actives])
     summary = ledger.summarise(portfolio, positions, ledger.totals(portfolio_id), prices)
-    legs, portfolio_value = _compute_rebalance_legs(positions, prices, summary["cash"])
-    total_drift = sum(l["estimated_value"] for l in legs)
     env = portfolio.get("trading_environment")
+    # Open orders count as done: their shares are on the way and their buys already use the cash.
+    pending = paper.open_order_quantities(portfolio_id, env) if env else {}
+    planned_positions = [{**p, "quantity": float(p["quantity"]) + float(pending.get(p["symbol"], 0))}
+                         if p.get("status") == "active" else p for p in positions]
+    cash = summary["cash"] - sum(float(q) * float(prices.get(s) or 0) for s, q in pending.items())
+    legs, portfolio_value = _compute_rebalance_legs(planned_positions, prices, cash)
+    legs = [l for l in legs if l["symbol"] not in pending]
+    total_drift = sum(l["estimated_value"] for l in legs)
 
     if summary["prices_missing"]:
         notes = f"No current price for {', '.join(summary['prices_missing'])}; those holdings are left out. "
     else:
         notes = ""
+    if pending:
+        notes += f"Open orders for {', '.join(sorted(pending))} are still working in TWS; those stocks are left " \
+                 "out until they fill or are cancelled. "
     if not legs:
         notes += "Portfolio is within tolerance — no rebalance needed (drift under 1.5 points on every holding)."
     else:
@@ -792,7 +801,7 @@ def get_rebalance_plan(
     return _RebalancePlan(
         portfolio_id=portfolio_id,
         portfolio_value=round(portfolio_value, 2),
-        cash=round(summary["cash"], 2),
+        cash=round(cash, 2),
         total_drift_value=round(total_drift, 2),
         legs=[_RebalanceLeg(**l) for l in legs],
         notes=notes,
@@ -818,8 +827,14 @@ def execute_rebalance(
                                          "message": "Buy this portfolio on paper or for real first; then rebalancing "
                                                     "places orders in that account."})
     results = []
+    pending = paper.open_order_quantities(portfolio_id, env)
     ordered = sorted(payload.legs, key=lambda l: l.side != "SELL")
     for index, leg in enumerate(ordered):
+        if leg.symbol in pending:  # never stack a second order on one still working in TWS
+            results.append({"symbol": leg.symbol, "side": leg.side, "ok": False, "code": "order_open",
+                            "message": f"An order for {leg.symbol} is still open in TWS; wait for it to fill or "
+                                       "cancel it, then rebalance again."})
+            continue
         try:
             order = paper.admit({"origin": "manual", "idempotency_key": f"rebalance:{payload.idempotency_key}:{index}",
                                  "symbol": leg.symbol, "side": leg.side, "quantity": int(leg.quantity),
