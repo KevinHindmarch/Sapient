@@ -304,6 +304,17 @@ function BrokerageAccount({ profile }: { profile: TradingEnv }) {
               </div>
             ))}
           </div>
+          {(() => {
+            const cash = Object.entries(summary).filter(([tag]) => tag.startsWith('CashBalance:') && tag !== 'CashBalance:BASE')
+            const source = (summary._cash_source ?? {}) as { detail?: string }
+            return (
+              <p className="text-sm theme-text-secondary mb-6" data-testid="cash-by-currency">
+                Cash by currency (US buys use the US$ figure):{' '}
+                {cash.length ? cash.map(([tag, v]) => `${tag.slice(12)} ${Number(v.value).toLocaleString(undefined, { maximumFractionDigits: 2 })}`).join(' · ')
+                  : `not sent by TWS yet${source.detail ? ` (${source.detail})` : ''}`}
+              </p>
+            )
+          })()}
           <h3 className="font-semibold theme-text mb-2">Positions ({positions.length})</h3>
           {positions.length === 0 ? <p className="text-sm theme-text-secondary mb-4">No positions.</p> : (
             <table className="w-full text-sm mb-6">

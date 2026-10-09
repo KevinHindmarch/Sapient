@@ -77,6 +77,12 @@ def _code(fields: dict) -> int | None:
     return code if isinstance(code, int) else None
 
 
+def _describe(name: str, rows: dict) -> str:
+    """Short note of which per-currency cash rows arrived (for the user's error message)."""
+    cash = sorted(key.split(":", 1)[1] for key in rows if key.startswith("CashBalance:"))
+    return f"{name}: {len(rows)} values, cash in {', '.join(cash) or 'no currency'}"
+
+
 class TwsSession:
     def __init__(self, transport: Transport):
         self.transport = transport
@@ -191,20 +197,31 @@ class TwsSession:
         Rows are keyed "Tag:CUR" (CashBalance:USD, ExchangeRate:USD, ...).
         """
         values = self._summary(SUMMARY_TAGS, timeout, keyed=False)
+        notes: list[str] = []  # what TWS sent, shown when US$ cash is missing
         ledger: dict[str, dict] = {}
         try:
             ledger = self._summary("$LEDGER:ALL", timeout, keyed=True, req_id=REQ_LEDGER)
-        except TwsTimeout:
-            pass
+            notes.append(_describe("ledger", ledger))
+        except TwsTimeout as exc:
+            notes.append(f"ledger: {exc}")
+        source = "ledger"
         if not any(key.startswith("CashBalance:") for key in ledger):
+            source = "none"
             account = next((v.get("account") for v in values.values() if v.get("account")), None) \
                 or (self.health.accounts[0] if self.health.accounts else None)
             if account:
                 try:
-                    ledger.update(self.account_values(account, timeout))
-                except TwsTimeout:
-                    pass  # totals still count; US buys explain that the US$ figures are missing
+                    updates = self.account_values(account, timeout)
+                    notes.append(_describe("account updates", updates))
+                    ledger.update(updates)
+                    if any(key.startswith("CashBalance:") for key in updates):
+                        source = "account_updates"
+                except TwsTimeout as exc:
+                    notes.append(f"account updates: {exc}")
+            else:
+                notes.append("account updates: no account id")
         values.update(ledger)
+        values["_cash_source"] = {"value": source, "currency": None, "detail": "; ".join(notes)[:500]}
         return values
 
     def _summary(self, tags: str, timeout: float, keyed: bool, req_id: int = REQ_SUMMARY) -> dict:
