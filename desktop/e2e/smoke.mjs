@@ -51,7 +51,7 @@ await page.screenshot({ path: path.join(shots, 'brokerage.png') })
 check(true, 'Brokerage setup guide renders')
 
 await page.evaluate(() => { location.hash = '#/settings' })
-await page.waitForSelector('text=Local profile', { timeout: 30_000 })
+await page.waitForSelector('h2:has-text("Local profile")', { timeout: 30_000 })
 const shownDir = (await page.locator('.font-mono').first().textContent())?.trim()
 check(shownDir === userData, `Settings shows the data folder (${shownDir})`)
 check(fs.existsSync(path.join(userData, 'sapient.db')), 'database created in the data folder')
