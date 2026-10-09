@@ -56,3 +56,19 @@ independent of paper, real-time-only pricing, live id range, paper/live
 executors ignore each other's orders, Emergency stop covers both, buy-for-real
 sets environment and mode, approvals of live portfolios go to live, live
 worker read-only until authorised.
+
+## US shares (G4, user decision 2026-10-09)
+
+US portfolios trade like ASX ones, in USD on IBKR's SMART routing to the
+stock's US primary listing, during US hours (Sydney night time). Rules:
+
+- US buys need **US dollars already in the account**. Sapient never borrows
+  and never converts A$ to US$ itself: convert in TWS first (Forex trade or
+  IBKR's currency conversion).
+- Your limits stay in A$; Sapient converts with TWS's own exchange rate.
+- Real-money US orders need US real-time market data in IBKR (for example the
+  "US Securities Snapshot and Futures Value Bundle", about US$10/month, often
+  waived when monthly commissions reach US$30). Without it, live US orders are
+  refused with an explanation. Paper uses free delayed data.
+- Automatic checks for US portfolios run during US market hours, so Sapient
+  (and TWS) must be running overnight Australian time for them.

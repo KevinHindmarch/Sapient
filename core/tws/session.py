@@ -24,6 +24,8 @@ DATA_FARM_BROKEN = {2103, 2105, 2157}
 # Market-data refusals that mean no prices will come (10167 "showing delayed data" is not one).
 NO_MARKET_DATA = {354, 10089, 10090, 10091, 10168, 10186, 10197}
 SUMMARY_TAGS = "AccountType,NetLiquidation,TotalCashValue,BuyingPower,AvailableFunds,GrossPositionValue"
+# Tags outside SUMMARY_TAGS come from "$LEDGER:ALL": one row per currency (CashBalance:USD, ExchangeRate:USD, ...).
+STANDARD_TAGS = set(SUMMARY_TAGS.split(","))
 
 # Request ids used by Sapient's read-only session (one request of each kind at a time).
 # Far above any order id TWS or Sapient uses (live order ids start at 1,000,000,001).
@@ -181,10 +183,14 @@ class TwsSession:
 
         def collect(name, fields):
             if name == "accountSummary" and fields.get("reqId") == REQ_SUMMARY:
-                values[str(fields.get("tag"))] = {"value": _plain(fields.get("value")),
-                                                  "currency": _plain(fields.get("currency")),
-                                                  "account": _plain(fields.get("account"))}
-        self.transport.request("reqAccountSummary", REQ_SUMMARY, "All", SUMMARY_TAGS)
+                tag, currency = str(fields.get("tag")), _plain(fields.get("currency"))
+                entry = {"value": _plain(fields.get("value")), "currency": currency,
+                         "account": _plain(fields.get("account"))}
+                if tag not in STANDARD_TAGS:  # one row per currency: CashBalance:AUD, ExchangeRate:USD, ...
+                    values[f"{tag}:{currency}"] = entry
+                else:
+                    values[tag] = entry
+        self.transport.request("reqAccountSummary", REQ_SUMMARY, "All", SUMMARY_TAGS + ",$LEDGER:ALL")
         try:
             self._wait(lambda n, f: n == "accountSummaryEnd" and f.get("reqId") == REQ_SUMMARY, timeout, collect)
         finally:
@@ -244,7 +250,7 @@ class TwsSession:
         return rows
 
     def market_snapshot(self, symbol: str, exchange: str, currency: str, timeout: float = 15.0,
-                        data_type: int = 3) -> dict:
+                        data_type: int = 3, primary_exchanges: set[str] | None = None) -> dict:
         """Qualify one stock and take a price snapshot.
 
         data_type 3 = delayed if not subscribed (paper); 1 = real-time only (live
@@ -258,8 +264,11 @@ class TwsSession:
                 found.append(getattr(fields.get("contractDetails"), "contract", None))
         self.transport.request("reqContractDetails", REQ_CONTRACT, contract)
         self._wait(lambda n, f: n == "contractDetailsEnd" and f.get("reqId") == REQ_CONTRACT, timeout, collect_contract)
-        if len(found) != 1 or found[0] is None:
-            return {"qualified": False}
+        found = [c for c in found if c is not None]
+        if primary_exchanges and len(found) > 1:  # SMART can list a stock's other venues too
+            found = [c for c in found if str(getattr(c, "primaryExchange", "") or "").upper() in primary_exchanges]
+        if len(found) != 1:
+            return {"qualified": False, "matches": len(found)}
         prices: dict = {}
         result = {"qualified": True, "contract": _contract(found[0]), "market_data_type": None}
 

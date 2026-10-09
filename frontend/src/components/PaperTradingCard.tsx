@@ -99,15 +99,16 @@ export default function PaperTradingCard({ status, account, paperConfirmed, onCh
       </div>
       {live ? (
         <p className="text-sm theme-text-secondary">
-          Sapient places <strong>real orders with your money</strong> in your IBKR <strong>live</strong> account: ASX shares
-          only, whole shares, limit orders during ASX hours, never borrowing or short selling. Each order is priced from
+          Sapient places <strong>real orders with your money</strong> in your IBKR <strong>live</strong> account: ASX and US
+          shares, whole shares, limit orders during each market's hours, never borrowing or short selling (US buys
+          need US dollars already in the account). Each order is priced from
           TWS's <strong>real-time</strong> price at that moment (buy at the current ask, sell at the current bid), and is
           refused if real-time prices aren't available or differ from Yahoo by more than your price check.
         </p>
       ) : (
         <p className="text-sm theme-text-secondary">
-          Sapient sends <strong>practice orders</strong> to your IBKR <strong>paper</strong> account: ASX shares only, whole
-          shares, limit orders during ASX hours. Prices come from TWS's free <strong>delayed</strong> data (15–20 minutes old),
+          Sapient sends <strong>practice orders</strong> to your IBKR <strong>paper</strong> account: ASX and US shares,
+          whole shares, limit orders during each market's hours (US buys need US dollars in the paper account). Prices come from TWS's free <strong>delayed</strong> data (15–20 minutes old),
           so Sapient never adds a premium: a buy is priced at the delayed price or lower, a sell at it or higher. Some orders
           may simply not fill.
         </p>

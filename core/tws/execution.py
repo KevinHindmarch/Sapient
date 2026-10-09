@@ -26,6 +26,7 @@ import logging
 
 from core import db
 from core.strategy import calendar
+from core.tws import markets
 from core.tws.environments import get as get_env
 from core.tws.paper import get_binding
 from core.tws.session import TwsSession, TwsTimeout
@@ -50,11 +51,7 @@ def _now() -> datetime:
 
 
 def asx_tick(price: Decimal) -> Decimal:
-    if price < Decimal("0.10"):
-        return Decimal("0.001")
-    if price < Decimal("2.00"):
-        return Decimal("0.005")
-    return Decimal("0.01")
+    return markets.tick(markets.ASX, price)
 
 
 def _first_price(prices: dict, keys) -> Decimal | None:
@@ -68,7 +65,8 @@ def _first_price(prices: dict, keys) -> Decimal | None:
     return None
 
 
-def choose_limit(side: str, prices: dict, reference: Decimal, max_gap_pct: Decimal) -> tuple[Decimal | None, str]:
+def choose_limit(side: str, prices: dict, reference: Decimal, max_gap_pct: Decimal,
+                 market: "markets.Market" = markets.ASX) -> tuple[Decimal | None, str]:
     """Cautious limit price from a TWS snapshot, or (None, reason)."""
     last = _first_price(prices, LAST)
     if last is None:
@@ -76,12 +74,12 @@ def choose_limit(side: str, prices: dict, reference: Decimal, max_gap_pct: Decim
     if side == "BUY":
         ask = _first_price(prices, ASK)
         raw = min(last, ask) if ask else last
-        tick = asx_tick(raw)
+        tick = markets.tick(market, raw)
         limit = (raw / tick).to_integral_value(ROUND_FLOOR) * tick
     else:
         bid = _first_price(prices, BID)
         raw = max(last, bid) if bid else last
-        tick = asx_tick(raw)
+        tick = markets.tick(market, raw)
         limit = (raw / tick).to_integral_value(ROUND_CEILING) * tick
     gap = abs(limit - reference) / reference * 100
     if gap > max_gap_pct:
@@ -90,7 +88,8 @@ def choose_limit(side: str, prices: dict, reference: Decimal, max_gap_pct: Decim
     return limit, ""
 
 
-def choose_live_limit(side: str, prices: dict, reference: Decimal, max_gap_pct: Decimal) -> tuple[Decimal | None, str]:
+def choose_live_limit(side: str, prices: dict, reference: Decimal, max_gap_pct: Decimal,
+                      market: "markets.Market" = markets.ASX) -> tuple[Decimal | None, str]:
     """Real-money limit from a REAL-TIME snapshot: buy at the ask, sell at the bid (fills at today's price).
 
     Delayed ticks are ignored; without a real-time price nothing is sent.
@@ -100,13 +99,13 @@ def choose_live_limit(side: str, prices: dict, reference: Decimal, max_gap_pct: 
         raw = _first_price(prices, REALTIME_ASK) or last
         if raw is None:
             return None, "No real-time price from TWS, so no real-money order was sent."
-        tick = asx_tick(raw)
+        tick = markets.tick(market, raw)
         limit = (raw / tick).to_integral_value(ROUND_CEILING) * tick
     else:
         raw = _first_price(prices, REALTIME_BID) or last
         if raw is None:
             return None, "No real-time price from TWS, so no real-money order was sent."
-        tick = asx_tick(raw)
+        tick = markets.tick(market, raw)
         limit = (raw / tick).to_integral_value(ROUND_FLOOR) * tick
     gap = abs(limit - reference) / reference * 100
     if gap > max_gap_pct:
@@ -251,30 +250,38 @@ class PaperExecutor:
             return self._block(order["id"], "BLOCKED", "TWS is logged in to a different account.")
         if unresolved:
             return  # wait (expiry applies) until the earlier order's outcome is known
-        if not calendar.is_open(calendar.ASX, now):
-            return self._block(order["id"], "BLOCKED", "The ASX closed before the order could be sent.")
+        market = markets.for_symbol(order["symbol"])
+        if market is None:
+            return self._block(order["id"], "BLOCKED", "Sapient can't trade this symbol.")
+        if not calendar.is_open(market.hours, now):
+            return self._block(order["id"], "BLOCKED", f"The {market.label} market closed before the order could be sent.")
 
-        symbol = order["symbol"][:-3]  # BHP.AX -> BHP
+        symbol = markets.ib_symbol(order["symbol"])  # BHP.AX -> BHP, BRK-B -> BRK B
         live = self.env.realtime_required
         errors_before = len(self.session.health.errors)
         try:
-            snap = self.session.market_snapshot(symbol, "ASX", "AUD", data_type=1 if live else 3)
+            snap = self.session.market_snapshot(
+                symbol, market.exchange, market.currency, data_type=1 if live else 3,
+                primary_exchanges=markets.US_PRIMARY_EXCHANGES if market.code == "US" else None)
         except TwsTimeout:
-            return self._block(order["id"], "BLOCKED", self._no_price_reason(symbol, errors_before, live))
+            return self._block(order["id"], "BLOCKED", self._no_price_reason(symbol, errors_before, live, market))
         if not snap.get("qualified"):
-            return self._block(order["id"], "BLOCKED", f"TWS does not recognise {symbol} on the ASX.")
+            return self._block(order["id"], "BLOCKED", f"TWS does not recognise {symbol} on the {market.label} market"
+                                                       + (" (more than one listing matched)." if snap.get("matches") else "."))
         reference = Decimal(order["reference_price"])
         if live and snap.get("market_data_type") != 1:
             return self._block(order["id"], "BLOCKED", "TWS sent delayed prices, not real-time. Real-money orders need "
-                                                       "the ASX real-time data subscription, so nothing was sent.")
+                                                       f"{market.label} real-time market data, so nothing was sent.")
         pick = choose_live_limit if live else choose_limit
-        limit, reason = pick(order["side"], snap.get("prices") or {}, reference, binding["max_price_gap_pct"])
+        limit, reason = pick(order["side"], snap.get("prices") or {}, reference, binding["max_price_gap_pct"], market)
         if limit is None:
             return self._block(order["id"], "BLOCKED", reason)
         quantity = Decimal(order["quantity"])
-        if quantity * limit > binding["max_order_value"]:
+        rate = self._rate_to_base(market.currency)
+        if rate is None or quantity * limit * rate > binding["max_order_value"]:
             return self._block(order["id"], "BLOCKED", "At TWS's price the order is above your per-order limit.")
-        con_id = (snap.get("contract") or {}).get("conId")
+        contract_info = snap.get("contract") or {}
+        con_id = contract_info.get("conId")
         if not con_id:
             return self._block(order["id"], "BLOCKED", "TWS did not return a contract id.")
 
@@ -300,20 +307,24 @@ class PaperExecutor:
             api_order_id = max(int(next_valid or 0), high_water + 1, used + 1, self.env.order_id_base + 1)
             cur.execute(f"UPDATE {self.env.ids_table} SET high_water=%s WHERE id=1", (api_order_id,))
             cur.execute("""UPDATE paper_orders SET state='SUBMITTING', api_order_id=%s, order_ref=%s, limit_price=%s,
-                             quote=%s, con_id=%s, exchange='ASX', currency='AUD', submitted_at=%s, updated_at=%s,
+                             quote=%s, con_id=%s, exchange=%s, currency=%s, submitted_at=%s, updated_at=%s,
                              detail=%s
                            WHERE id=%s AND state='QUEUED' RETURNING id""",
-                        (api_order_id, order_ref, format(limit, "f"), quote, con_id, _now(), _now(),
+                        (api_order_id, order_ref, format(limit, "f"), quote, con_id, market.exchange, market.currency,
+                         _now(), _now(),
                          f"Sending to TWS{' (REAL MONEY)' if live else ''}: {order['side']} {order['quantity']} {symbol} "
-                         f"limit A${limit}" + (" (delayed price)" if quote["delayed"] else " (real-time price)"
-                                               if live else ""), order["id"]))
+                         f"limit {'US$' if market.currency == 'USD' else 'A$'}{limit}"
+                         + (" (delayed price)" if quote["delayed"] else " (real-time price)" if live else ""),
+                         order["id"]))
             if not cur.fetchone():
                 return  # cancelled or blocked meanwhile
             cur.execute("INSERT INTO paper_audit(kind, paper_order_id, payload) VALUES ('paper_order_submitting', %s, %s)",
                         (order["id"], {"api_order_id": api_order_id, "limit": format(limit, "f"), "quote": quote}))
 
         transport = self.session.transport
-        contract = transport.make_contract(conId=con_id, symbol=symbol, secType="STK", exchange="ASX", currency="AUD")
+        contract = transport.make_contract(conId=con_id, symbol=symbol, secType="STK", exchange=market.exchange,
+                                           currency=market.currency,
+                                           primaryExchange=contract_info.get("primaryExchange") or "")
         ib_order = transport.make_order(action=order["side"], totalQuantity=quantity, orderType="LMT",
                                         lmtPrice=float(limit), tif="DAY", account=self.account,
                                         orderRef=order_ref, transmit=True, outsideRth=False)
@@ -336,7 +347,19 @@ class PaperExecutor:
                                              else "TWS answered with a message but has not confirmed the order. ")
                                + "Sapient will not resend it; it checks TWS on the next sync.")
 
-    def _no_price_reason(self, symbol: str, errors_before: int, live: bool) -> str:
+    def _rate_to_base(self, currency: str) -> Decimal | None:
+        """TWS's own exchange rate to A$ from the latest account snapshot (AUD = 1)."""
+        if currency == "AUD":
+            return Decimal(1)
+        from core.tws import store
+        summary = (store.snapshots(self.env.name).get("summary") or {}).get("data") or {}
+        try:
+            return Decimal(str(((summary.get(f"ExchangeRate:{currency}") or {}).get("value"))))
+        except (InvalidOperation, TypeError):
+            return None
+
+    def _no_price_reason(self, symbol: str, errors_before: int, live: bool,
+                         market: "markets.Market" = markets.ASX) -> str:
         """Plain-language reason for a missing TWS price, using TWS's own market-data message if it sent one."""
         from core.tws.session import REQ_MARKET
         codes = [e for e in self.session.health.errors[errors_before:]
@@ -345,8 +368,10 @@ class PaperExecutor:
             return "TWS did not send a price in time, so nothing was sent."
         code = codes[-1]["code"]
         if live:
+            needed = ("the ASX Total (Non-Professional)" if market.code == "ASX" else
+                      "a US real-time (e.g. US Securities Snapshot and Futures Value Bundle)")
             return (f"TWS has no real-time price permission for {symbol} (IBKR message {code}). Real-money orders need "
-                    "the ASX Total (Non-Professional) market-data subscription in IBKR Client Portal → Settings → "
+                    f"{needed} market-data subscription in IBKR Client Portal → Settings → "
                     "Market Data Subscriptions. Nothing was sent.")
         return (f"TWS has no market-data permission for {symbol} (IBKR message {code}). In TWS check that delayed "
                 "data is allowed for the paper account. Nothing was sent.")

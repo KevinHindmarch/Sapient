@@ -11,8 +11,11 @@ Environments (core.tws.environments):
          the confirmed live account, real-time prices and the user's limits
          (docs/live-trading.md). Nothing is sent without that authorisation.
 
-Scope: long-only whole-share ASX stocks (AUD), DAY limit orders during ASX
-trading hours. US stocks need USD cash and are refused.
+Scope: long-only whole-share stocks, DAY limit orders during that market's
+hours: ASX shares (.AX, AUD) and US shares (SMART, USD; G4, user decision
+2026-10-09). US buys need USD cash already in the account: Sapient never
+borrows and never converts currency. Limits are in A$ (US values converted with
+TWS's own exchange rate).
 """
 from __future__ import annotations
 
@@ -25,6 +28,7 @@ import uuid
 from core import db
 from core.strategy import calendar
 from core.tws import store
+from core.tws import markets
 from core.tws.environments import ENVS, Env, get as get_env
 
 AUTHORISATION_TEXT = ENVS["paper"].authorisation_text  # kept for existing callers
@@ -191,8 +195,12 @@ def _summary_value(summary, tag) -> Decimal | None:
         return None
 
 
-def blockers(cur, now: datetime | None = None, *, binding: dict | None = None, env: str = "paper") -> list[dict]:
-    """Everything that currently prevents a new order in this environment, in plain language."""
+def blockers(cur, now: datetime | None = None, *, binding: dict | None = None, env: str = "paper",
+             market: "markets.Market | None" = markets.ASX) -> list[dict]:
+    """Everything that currently prevents a new order in this environment, in plain language.
+
+    ``market`` adds that exchange's trading hours (None = account readiness only).
+    """
     e = get_env(env)
     now = now or _now()
     binding = binding or get_binding(cur, e.name)
@@ -242,8 +250,9 @@ def blockers(cur, now: datetime | None = None, *, binding: dict | None = None, e
                     or (o.get("client_id") == client_id and o.get("order_id") not in ours)]
         if external:
             block("external_orders", "TWS shows open orders that Sapient did not place. Sapient waits until they are gone.")
-    if not calendar.is_open(calendar.ASX, now):
-        block("market_closed", "The ASX is closed. Orders can only be placed during ASX trading hours.")
+    if market is not None and not calendar.is_open(market.hours, now):
+        block("market_closed", f"The {market.label} market is closed. Orders can only be placed during "
+                               f"{market.label} trading hours.")
     return problems
 
 
@@ -262,19 +271,20 @@ def admit(request: dict, user_id: int, env: str = "paper") -> dict:
             return dict(existing)
         now = _now()
         binding = get_binding(cur, e.name)
-        problems = blockers(cur, now, binding=binding, env=e.name)
+        market = markets.for_symbol(r["symbol"])
+        problems = blockers(cur, now, binding=binding, env=e.name, market=market)
         if problems:
             raise PaperError(problems[0]["code"], problems[0]["message"])
         portfolio = _check_ownership(cur, r, user_id, now, e)
         _check_ai_mode(cur, r, portfolio, user_id, binding, e)
-        _check_limits(cur, r, binding, now, e)
+        _check_limits(cur, r, binding, now, e, market)
         order_id = str(uuid.uuid4())
         cur.execute("""INSERT INTO paper_orders(id, idempotency_key, request_hash, origin, account_id, portfolio_id,
-                         signal_id, symbol, side, quantity, reference_price, expires_at, environment)
-                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *""",
+                         signal_id, symbol, side, quantity, reference_price, expires_at, environment, exchange, currency)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *""",
                     (order_id, r["idempotency_key"], digest, r["origin"], binding["account_id"], r["portfolio_id"],
                      r["signal_id"], r["symbol"], r["side"], r["quantity"], r["reference_price"],
-                     now + SEND_WINDOW, e.name))
+                     now + SEND_WINDOW, e.name, market.exchange, market.currency))
         row = dict(cur.fetchone())
         if r["signal_id"]:
             cur.execute("""UPDATE ai_signals SET status='claimed', decided_at=%s, decided_by=%s
@@ -297,9 +307,8 @@ def _normalise(request: dict) -> dict:
     if not isinstance(key, str) or not key.strip() or len(key) > 128:
         raise PaperError("invalid_key", "Invalid request key.")
     symbol = str(r["symbol"] or "").strip().upper()
-    if not symbol.endswith(".AX") or len(symbol) > 12 or not symbol[:-3].replace("-", "").isalnum():
-        raise PaperError("asx_only", "Orders are for ASX shares (symbols ending in .AX) for now. "
-                                     "US shares need USD cash, which Sapient does not handle yet.")
+    if markets.for_symbol(symbol) is None:
+        raise PaperError("unsupported_symbol", "Orders are for ASX shares (like BHP.AX) or US shares (like AAPL).")
     r["symbol"] = symbol
     if r["side"] not in ("BUY", "SELL"):
         raise PaperError("invalid_side", "Side must be BUY or SELL.")
@@ -363,39 +372,71 @@ def _check_ai_mode(cur, r, portfolio, user_id, binding, e: Env):
             raise PaperError("portfolio_not_started", f"Start {e.label} trading for this portfolio first (portfolio page).")
 
 
-def _check_limits(cur, r, binding, now, e: Env):
+def _rate_to_base(summary: dict, currency: str) -> Decimal | None:
+    """How many A$ (the account's base currency) one unit of ``currency`` is worth, from TWS's own ledger."""
+    if currency == "AUD":
+        return Decimal(1)
+    return _summary_value(summary, f"ExchangeRate:{currency}")
+
+
+def _cash(summary: dict, currency: str) -> Decimal | None:
+    """Cash in one currency. AUD falls back to the account total for older snapshots."""
+    value = _summary_value(summary, f"CashBalance:{currency}")
+    if value is None and currency == "AUD":
+        value = _summary_value(summary, "TotalCashValue")
+    return value
+
+
+def _check_limits(cur, r, binding, now, e: Env, market: "markets.Market" = markets.ASX):
     quantity, reference = Decimal(r["quantity"]), Decimal(r["reference_price"])
-    # Worst case the connector may set the limit this far from the reference price.
-    worst = quantity * reference * (1 + binding["max_price_gap_pct"] / 100)
-    if worst > binding["max_order_value"]:
-        raise PaperError("order_too_large", f"Order value up to A${worst:,.2f} is above your {e.label} limit of "
-                                            f"A${binding['max_order_value']:,.2f} per order.")
     summary, _ = _snapshot(cur, "summary", e.name)
+    rate = _rate_to_base(summary, market.currency)
+    if rate is None:
+        raise PaperError("no_exchange_rate", f"TWS hasn't sent the {market.currency}/AUD exchange rate yet; "
+                                             "try again after the next account update.")
+    # Worst case the connector may set the limit this far from the reference price, in A$.
+    worst_local = quantity * reference * (1 + binding["max_price_gap_pct"] / 100)
+    worst = worst_local * rate
+    shown = f"A${worst:,.2f}" + (f" (US${worst_local:,.2f})" if market.currency == "USD" else "")
+    if worst > binding["max_order_value"]:
+        raise PaperError("order_too_large", f"Order value up to {shown} is above your {e.label} limit of "
+                                            f"A${binding['max_order_value']:,.2f} per order.")
     nav = _summary_value(summary, "NetLiquidation")
-    cash = _summary_value(summary, "TotalCashValue")
-    if nav is None or cash is None:
-        raise PaperError("no_account_values", "Account values from TWS are missing.")
+    cash = _cash(summary, market.currency)
+    if nav is None or (r["side"] == "BUY" and cash is None):
+        raise PaperError("no_account_values", f"Account values from TWS are missing"
+                                              + (f" (no {market.currency} cash balance)." if nav is not None else "."))
     cur.execute("SELECT max_trade_pct, max_daily_trades FROM ai_trading_settings ORDER BY id LIMIT 1")
     legacy = cur.fetchone() or {}
     max_trade_pct = Decimal(str(legacy.get("max_trade_pct") or 5))
     if worst > nav * max_trade_pct / 100:
         raise PaperError("trade_pct_limit", f"Order is more than {max_trade_pct}% of the account value.")
     start = datetime.combine(calendar.local_date(calendar.ASX, now), datetime.min.time(), calendar.ASX.tz)
-    cur.execute("""SELECT count(*) AS n, coalesce(decimal_sum(quantity * reference_price), '0') AS value
-                   FROM paper_orders WHERE environment=%s AND created_at >= %s""",
+    cur.execute("""SELECT count(*) AS n FROM paper_orders WHERE environment=%s AND created_at >= %s""",
                 (e.name, start.astimezone(timezone.utc)))
-    today = cur.fetchone()
+    today_count = cur.fetchone()["n"]
+    cur.execute("""SELECT coalesce(currency, 'AUD') AS currency,
+                          coalesce(decimal_sum(quantity * reference_price), '0') AS value
+                   FROM paper_orders WHERE environment=%s AND created_at >= %s GROUP BY coalesce(currency, 'AUD')""",
+                (e.name, start.astimezone(timezone.utc)))
+    today_value = sum((Decimal(str(row["value"])) * (_rate_to_base(summary, row["currency"]) or Decimal(1))
+                       for row in cur.fetchall()), Decimal(0))
     daily_cap = min(binding["max_orders_per_day"], int(legacy.get("max_daily_trades") or binding["max_orders_per_day"]))
-    if today["n"] >= daily_cap:
+    if today_count >= daily_cap:
         raise PaperError("daily_order_limit", f"Daily limit of {daily_cap} {e.label} orders reached.")
-    if Decimal(str(today["value"])) + worst > binding["max_value_per_day"]:
+    if today_value + worst > binding["max_value_per_day"]:
         raise PaperError("daily_value_limit", f"Daily {e.label} order value limit reached.")
     working = "','".join(WORKING)
     if r["side"] == "BUY":
         cur.execute(f"""SELECT coalesce(decimal_sum(quantity * coalesce(limit_price, reference_price) * 1.1), '0') AS v
-                        FROM paper_orders WHERE environment=%s AND side='BUY' AND state IN ('{working}')""", (e.name,))
+                        FROM paper_orders WHERE environment=%s AND side='BUY' AND state IN ('{working}')
+                        AND coalesce(currency, 'AUD')=%s""", (e.name, market.currency))
         reserved = Decimal(str(cur.fetchone()["v"]))
-        if reserved + worst > cash:
+        if reserved + worst_local > cash:
+            if market.currency == "USD":
+                raise PaperError("insufficient_cash", f"Not enough US dollars in the {e.label} account (US${cash:,.2f} "
+                                                      "cash). Convert A$ to US$ in TWS first; Sapient never borrows "
+                                                      "or converts currency itself.")
             raise PaperError("insufficient_cash", f"Not enough cash in the {e.label} account (no borrowing).")
     else:
         positions, _ = _snapshot(cur, "positions", e.name)
@@ -499,8 +540,11 @@ def status(env: str = "paper") -> dict:
     e = get_env(env)
     with db.transaction() as (cur, _):
         binding = get_binding(cur, e.name)
-        problems = blockers(cur, binding=binding, env=e.name)
+        problems = blockers(cur, binding=binding, env=e.name, market=None)
+    now = _now()
+    open_now = {m.code: calendar.is_open(m.hours, now) for m in (markets.ASX, markets.US)}
     return {"environment": e.name, "binding": binding, "ready": not problems, "blockers": problems,
+            "markets_open": open_now,
             "authorisation_text": e.authorisation_text, "realtime_required": e.realtime_required}
 
 
@@ -562,8 +606,6 @@ def start_portfolio(portfolio_id: int, user_id: int, prices: dict[str, float], e
         portfolio = cur.fetchone()
         if not portfolio:
             raise PaperError("portfolio_not_found", "Portfolio not found.")
-        if (portfolio.get("market") or "ASX").upper() != "ASX":
-            raise PaperError("asx_only", "Only ASX portfolios can be traded for now.")
         current = portfolio.get("trading_environment")
         if current and current != e.name:
             raise PaperError("wrong_environment", f"This portfolio already trades in {get_env(current).label}. "
@@ -634,7 +676,7 @@ def autonomy_checklist(user_id: int) -> dict:
     """What must be true for Sapient to trade each portfolio without asking."""
     with db.transaction() as (cur, _):
         bindings = {name: get_binding(cur, name) for name in ENVS}
-        problems = {name: blockers(cur, binding=bindings[name], env=name) for name in ENVS}
+        problems = {name: blockers(cur, binding=bindings[name], env=name, market=None) for name in ENVS}
         cur.execute("SELECT mode, scheduler_enabled FROM ai_trading_settings WHERE user_id=%s", (user_id,))
         settings = cur.fetchone() or {}
         cur.execute("""SELECT id, name, ai_mode, market, paper_started_at, live_started_at, trading_environment
@@ -666,7 +708,6 @@ def autonomy_checklist(user_id: int) -> dict:
         items = [
             {"key": "portfolio_autonomous", "ok": (p.get("ai_mode") or "off") == "autonomous",
              "text": "This portfolio is set to fully automatic (AI mode Autonomous on the portfolio page)."},
-            {"key": "asx", "ok": (p.get("market") or "ASX").upper() == "ASX", "text": "It is an ASX portfolio."},
             {"key": "started", "ok": bool(p.get(e.started_column)),
              "text": f"It was bought in {e.label} (“Buy {'for real' if name == 'live' else 'on paper'} & manage” on the portfolio page)."},
         ] + env_items(name)

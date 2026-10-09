@@ -230,6 +230,8 @@ python -m unittest discover -s tests -p 'test_paper.py' -v       # paper admissi
 python -m unittest discover -s tests -p 'test_live.py' -v        # live: separate auth, real-time only, separation from paper
 python -m unittest discover -s tests -p 'test_g1_safety.py' -v   # audit fixes: account kinds, portfolio-owned sells, DAY-order expiry
 python -m unittest discover -s tests -p 'test_g2_ledger.py' -v   # cash, realised profit, commissions, holdings = fills, rebalance
+python -m unittest discover -s tests -p 'test_g3_trading.py' -v  # proposals fit limits/cash/caps, no duplicates, re-entry
+python -m unittest discover -s tests -p 'test_g4_us.py' -v       # US shares: SMART/USD, US hours, US$ cash, A$ limits
 python -m compileall -q core backend
 cd frontend && npm run build && npm run lint
 ```
@@ -252,6 +254,11 @@ cd frontend && npm run build && npm run lint
   shares Sapient bought for it in that account (`paper_portfolio_fills`).
 - Paper accounts start with D; a paper setup never accepts another account,
   and live never accepts a D account.
+- Markets (G4, `core/tws/markets.py`): ASX (.AX, AUD) and US (SMART, USD, the
+  stock's US primary listing). Each order uses its own market's hours and tick.
+  US buys need US$ cash already in the account (`CashBalance:USD` from
+  `$LEDGER:ALL`); Sapient never borrows or converts currency. Limits stay in A$
+  using TWS's `ExchangeRate:USD`.
 - API route handlers are plain `def` (thread pool): blocking work on the event
   loop froze the Emergency stop.
 - Upgrades must keep user data: never edit an applied (released) migration,
