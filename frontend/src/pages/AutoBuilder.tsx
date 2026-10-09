@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { portfolioApi } from '../lib/api'
+import { portfolioApi, normaliseWeights } from '../lib/api'
 import { toast } from 'sonner'
 import { Wand2, Save, TrendingUp, Loader2, CheckCircle, Info, AlertTriangle, Target, Globe, SlidersHorizontal } from 'lucide-react'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts'
@@ -245,8 +245,9 @@ export default function AutoBuilder() {
 
     setSaving(true)
     try {
-      const resultToSave = editedWeights ? { ...result, weights: editedWeights } : result
+      const resultToSave = editedWeights ? { ...result, weights: normaliseWeights(editedWeights) } : result
       const saved = await portfolioApi.save(portfolioName.trim(), resultToSave, investmentAmount, 'auto', riskTolerance, market)
+      if (saved.data.warning) toast.warning(`${saved.data.warning}. Those stocks were left out of the saved portfolio.`)
       toast.success('Portfolio saved. Buy it on paper or for real from its page.')
       if (saved.data?.portfolio_id) navigate(`/portfolios/${saved.data.portfolio_id}`)
       setShowSaveModal(false)

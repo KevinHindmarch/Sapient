@@ -9,6 +9,8 @@ from typing import Dict, List, Optional, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 
+from core.stocks import dividend_yield_fraction
+
 
 class FundamentalsService:
     """Service for fetching and analyzing stock fundamentals."""
@@ -177,7 +179,7 @@ class FundamentalsService:
                 'years_of_data': historical_growth.get('years_of_data', 0),
                 
                 # Income metrics
-                'dividend_yield': info.get('dividendYield'),
+                'dividend_yield': dividend_yield_fraction(info),
                 'payout_ratio': info.get('payoutRatio'),
                 
                 # EPS

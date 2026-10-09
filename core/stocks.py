@@ -519,6 +519,63 @@ SP500_STOCKS = {
 }
 
 
+# Companies taken over, merged, renamed or delisted since the lists were written
+# (checked October 2026). Kept out so scans don't waste Yahoo calls on them.
+RETIRED_ASX = {"OZL", "AWC", "CTX", "CCL", "ALU", "LNK", "CWN", "CIM", "SKI", "AST", "OSH", "WSA", "APT",
+               "Z1P", "SZL", "PPH", "ORE", "AKE", "CGC", "BAL", "TGR", "IVC", "RED", "PDL", "BKL", "NCM",
+               "SYD", "ABC", "VUK", "ENB", "IPL", "GOR", "DEG", "PTM"}
+for _code in RETIRED_ASX:
+    ASX200_STOCKS.pop(f"{_code}.AX", None)
+    ASX_STOCKS.pop(f"{_code}.AX", None)
+ASX200_STOCKS.update({
+    'DNL.AX': ('Dyno Nobel (was Incitec Pivot)', 'Materials'),
+    'VAU.AX': ('Vault Minerals (was Red 5)', 'Materials'),
+})
+for _old, _new in (("PXD", None), ("FISV", ("FI", "Fiserv Inc")), ("SQ", ("XYZ", "Block Inc"))):
+    _row = SP500_STOCKS.pop(_old, None)
+    if _new and _row:
+        SP500_STOCKS[_new[0]] = (_new[1], _row[1])
+
+# Popular ASX-listed ETFs (searchable and usable in the Manual Builder; fund data scans skip them).
+ASX_ETFS = {
+    'VAS.AX': ('Vanguard Australian Shares ETF', 'ETF'),
+    'A200.AX': ('Betashares Australia 200 ETF', 'ETF'),
+    'IOZ.AX': ('iShares Core S&P/ASX 200 ETF', 'ETF'),
+    'STW.AX': ('SPDR S&P/ASX 200 Fund', 'ETF'),
+    'VHY.AX': ('Vanguard Australian Shares High Yield ETF', 'ETF'),
+    'VGS.AX': ('Vanguard MSCI Index International Shares ETF', 'ETF'),
+    'IVV.AX': ('iShares S&P 500 ETF', 'ETF'),
+    'NDQ.AX': ('Betashares Nasdaq 100 ETF', 'ETF'),
+    'VTS.AX': ('Vanguard US Total Market Shares ETF', 'ETF'),
+    'IOO.AX': ('iShares Global 100 ETF', 'ETF'),
+    'QUAL.AX': ('VanEck MSCI International Quality ETF', 'ETF'),
+    'ETHI.AX': ('Betashares Global Sustainability Leaders ETF', 'ETF'),
+    'VDHG.AX': ('Vanguard Diversified High Growth ETF', 'ETF'),
+    'VAF.AX': ('Vanguard Australian Fixed Interest ETF', 'ETF'),
+    'GOLD.AX': ('Global X Physical Gold', 'ETF'),
+}
+
+
+def dividend_yield_fraction(info: dict) -> float:
+    """Dividend yield as a fraction (0.045 = 4.5%), whatever unit Yahoo used.
+
+    ``trailingAnnualDividendYield`` and rate/price are fractions; current yfinance
+    reports ``dividendYield`` in percent (0.45 = 0.45%), older versions as a fraction.
+    """
+    info = info or {}
+    trailing = info.get('trailingAnnualDividendYield')
+    if isinstance(trailing, (int, float)) and 0 <= trailing < 1:
+        return float(trailing)
+    rate = info.get('dividendRate') or info.get('trailingAnnualDividendRate')
+    price = info.get('currentPrice') or info.get('regularMarketPrice') or info.get('previousClose')
+    if isinstance(rate, (int, float)) and isinstance(price, (int, float)) and price > 0:
+        return float(rate) / float(price)
+    value = info.get('dividendYield')
+    if isinstance(value, (int, float)) and value > 0:
+        return float(value) / 100 if value >= 0.2 else float(value)  # 0.2 = 20% as a fraction is implausible
+    return 0.0
+
+
 class StockDataService:
     """Manages fetching and processing of stock data for ASX and US markets."""
     
@@ -562,18 +619,17 @@ class StockDataService:
             if data is None or data.empty:
                 return None
             
-            if len(symbols) == 1:
-                if 'Close' in data.columns:
-                    data = pd.DataFrame({symbols[0]: data['Close']})
-                else:
+            # Newer yfinance always returns (field, ticker) columns, even for one ticker.
+            if isinstance(data.columns, pd.MultiIndex):
+                if 'Close' not in data.columns.get_level_values(0):
                     return None
+                data = data['Close']
+            elif 'Close' in data.columns:
+                data = pd.DataFrame({symbols[0]: data['Close']}) if len(symbols) == 1 else data[['Close']]
             else:
-                if hasattr(data.columns, 'get_level_values') and 'Close' in data.columns.get_level_values(0):
-                    data = data['Close']
-                elif 'Close' in data.columns:
-                    data = data['Close']
-                else:
-                    return None
+                return None
+            if isinstance(data, pd.Series):
+                data = data.to_frame(symbols[0])
             
             # Remove columns (stocks) with too much missing data (>50% NaN)
             valid_threshold = len(data) * 0.5
@@ -648,12 +704,7 @@ class StockDataService:
                 ticker = yf.Ticker(symbol)
                 info = ticker.info
                 
-                div_yield = info.get('dividendYield', 0)
-                
-                if div_yield and div_yield > 0.5:
-                    div_yield = div_yield / 100
-                
-                dividend_yields[symbol] = div_yield if div_yield else 0
+                dividend_yields[symbol] = dividend_yield_fraction(info)
             except:
                 dividend_yields[symbol] = 0
         
@@ -686,7 +737,7 @@ class StockDataService:
         else:
             # Combine ASX_STOCKS (legacy) and ASX200_STOCKS into one search pool
             combined: Dict[str, str] = dict(ASX_STOCKS)
-            for s, data in ASX200_STOCKS.items():
+            for s, data in {**ASX200_STOCKS, **ASX_ETFS}.items():
                 if s not in combined:
                     combined[s] = data[0]
             for code, name in combined.items():
@@ -727,9 +778,8 @@ class StockDataService:
         ASX: Australian 10-year government bond (~4.35%)
         US: US 10-year Treasury (~4.5%)
         """
-        if market.upper() == "US":
-            return 0.045
-        return 0.0435
+        from core.optimizer import risk_free_for
+        return risk_free_for(market)
     
     @staticmethod
     def rank_stocks_by_sharpe(symbols: List[str], period: str = "2y") -> List[Dict]:
