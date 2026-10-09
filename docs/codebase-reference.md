@@ -107,6 +107,15 @@ open orders, executions snapshots), GET `/compare/{portfolio_id}` (model
 holdings vs the latest TWS positions: match / differs / model_only /
 broker_only; symbols mapped BHP→BHP.AX for AUD/ASX, "BRK B"→BRK-B).
 
+### `/api/paper` (paper trading, F2)
+GET `/status` (binding, ready, blockers, authorisation text), POST
+`/authorise` (exact statement for the confirmed TWS paper account + limits),
+PUT `/limits`, POST `/disable`, GET `/orders` (with fills), POST `/orders`
+(manual ticket; Yahoo reference price), POST `/orders/{id}/cancel`, POST
+`/orders/{id}/resolve` (user confirms an unknown order is not in TWS).
+PaperError → 409 `{code, message}`. `/api/ai/signals/{id}/approve` queues a
+paper order instead of a simulation intent while paper trading is on.
+
 ## 4. Database (SQLite, `core/db.py` + `core/migrations.py`)
 
 One file at `SAPIENT_DB_PATH` or `<SAPIENT_DATA_DIR>/sapient.db` (default
@@ -145,6 +154,12 @@ a changed checksum or an unknown newer version refuses to start:
    check_after_open_minutes, check_before_close_minutes; `scheduler_runs`
    (UNIQUE portfolio + window key, outcome running/done/failed/missed/abandoned),
    `scheduler_status` (heartbeat, next check).
+6. `paper` — `paper_binding` (single row: account, enabled, authorised text/time,
+   halted, limits, autonomous_allowed), `paper_orders` (state machine QUEUED →
+   SUBMITTING → SUBMITTED/PARTIALLY_FILLED/FILLED, CANCEL_REQUESTED/CANCELLED,
+   REJECTED/EXPIRED/BLOCKED/UNKNOWN; api_order_id/order_ref unique),
+   `paper_executions` (execId PK, commission), `paper_order_ids` (high-water),
+   `paper_audit`.
 4. `profile` — `users.theme` (NULL until saved, so upgrades keep the theme on
    screen) and `users.onboarded_at`; existing users are marked onboarded so an
    upgrade never re-runs the welcome wizard.
@@ -243,6 +258,9 @@ off and reports `broker_confirmed: False`.
 - `test_strategy.py` — calendar (DST, holidays, early close), rules, sizing,
   settings halting rules, scheduler (once per window, missed windows, close cap,
   failures isolated, crash not retried, expiry).
+- `test_paper.py` — authorisation, every admission blocker, limit pricing,
+  persist-before-send, ids never reused, unknown never resent, read-only
+  rejection, fills/corrections, cancel, Emergency stop, worker order mode, API.
 - `test_strategy.py` also covers broker symbol mapping and the compare route.
 - `test_upgrades.py` — fresh install vs upgrade from 0.1.0 (data kept, no
   wizard, one backup) and future migrations keep profile + TWS settings.

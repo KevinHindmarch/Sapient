@@ -95,5 +95,6 @@ async def compare_with_broker(portfolio_id: int, user=Depends(get_current_user))
         "account": status["account"],
         "positions_taken_at": snapshot["taken_at"] if snapshot else None,
         "available": broker is not None,
+        "paper_started_at": details["portfolio"].get("paper_started_at"),
         "rows": compare(details.get("positions") or [], broker or [], status["account"]) if broker is not None else [],
     }

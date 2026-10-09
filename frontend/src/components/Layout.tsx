@@ -16,7 +16,8 @@ import {
   Sun,
   HelpCircle,
   Sparkles,
-  ShieldCheck
+  ShieldCheck,
+  ClipboardList
 } from 'lucide-react'
 import { useState } from 'react'
 import HelpModal from './HelpModal'
@@ -34,6 +35,7 @@ const navItems = [
 
 const tradingNavItems = [
   { path: '/brokerage', label: 'Brokerage', icon: ShieldCheck },
+  { path: '/paper-orders', label: 'Paper orders', icon: ClipboardList },
   { path: '/ai-trading', label: 'AI Settings', icon: Sparkles },
 ]
 

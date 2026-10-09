@@ -12,6 +12,7 @@ import Settings from './pages/Settings'
 import BrokerageSettings from './pages/BrokerageSettings'
 import AITradingSettings from './pages/AITradingSettings'
 import AITradingInbox from './pages/AITradingInbox'
+import PaperOrders from './pages/PaperOrders'
 import Layout from './components/Layout'
 
 function App() {
@@ -51,6 +52,7 @@ function App() {
         <Route path="ai-inbox" element={<AITradingInbox />} />
         <Route path="ai-trading" element={<AITradingSettings />} />
         <Route path="brokerage" element={<BrokerageSettings />} />
+        <Route path="paper-orders" element={<PaperOrders />} />
         <Route path="settings" element={<Settings />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

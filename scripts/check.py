@@ -20,6 +20,7 @@ TEST_PATTERNS = (
     "test_tws.py",
     "test_upgrades.py",
     "test_strategy.py",
+    "test_paper.py",
 )
 
 

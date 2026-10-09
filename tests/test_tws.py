@@ -190,8 +190,13 @@ FAKE_IBAPI = {
             def isConnected(self): return self.conn
             def serverVersion(self): return 187
             def reqPositions(self): self.calls.append('reqPositions')
-            def placeOrder(self, *args): raise AssertionError('placeOrder must never be reachable')
+            def reqIds(self, numIds): self.calls.append('reqIds')
+            def placeOrder(self, orderId, contract, order): self.calls.append(('placeOrder', orderId, order))
+            def cancelOrder(self, orderId, orderCancel): self.calls.append(('cancelOrder', orderId, type(orderCancel).__name__))
+            def reqGlobalCancel(self, *args): raise AssertionError('reqGlobalCancel must never be reachable')
     """),
+    "order.py": "class Order:\n    def __init__(self):\n        self.eTradeOnly = True\n        self.firmQuoteOnly = True\n",
+    "order_cancel.py": "class OrderCancel:\n    pass\n",
     "contract.py": "class Contract:\n    pass\n",
     "execution.py": "class ExecutionFilter:\n    pass\n",
 }
@@ -235,6 +240,30 @@ class SdkAndTransportTests(unittest.TestCase):
             (older / name).write_text(body)
         info = find_sdk(None, drive=drive)
         self.assertIn("TWS API 1051.01", info.folder)
+
+    def test_order_calls_need_an_order_enabled_transport(self):
+        from core.tws.transport import OrdersNotAllowed
+        read_only = IbapiTransport(find_sdk(str(self.root)))
+        read_only.connect("127.0.0.1", 7497, 71)
+        for call in (lambda: read_only.place_order(1, None, None), lambda: read_only.cancel_order(1),
+                     lambda: read_only.make_order(action="BUY"), lambda: read_only.request("reqIds", -1)):
+            with self.assertRaises(ReadOnlyViolation):
+                call()
+        self.assertTrue(issubclass(OrdersNotAllowed, ReadOnlyViolation))
+
+        paper = IbapiTransport(find_sdk(str(self.root)), allow_orders=True)
+        paper.connect("127.0.0.1", 7497, 71)
+        order = paper.make_order(action="BUY", orderType="LMT")
+        self.assertEqual((order.eTradeOnly, order.firmQuoteOnly), (False, False))
+        paper.place_order(7, "contract", order)
+        paper.cancel_order(7)
+        paper.request("reqIds", -1)
+        calls = paper._app.calls
+        self.assertEqual(calls[0][:2], ("placeOrder", 7))
+        self.assertEqual(calls[1], ("cancelOrder", 7, "OrderCancel"))
+        for name in ("reqGlobalCancel", "reqAutoOpenOrders"):
+            with self.subTest(name=name), self.assertRaises(ReadOnlyViolation):
+                paper.request(name)
 
     def test_transport_blocks_orders_and_binds_callbacks_by_name(self):
         transport = IbapiTransport(find_sdk(str(self.root)))

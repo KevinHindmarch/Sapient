@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Circle, Loader2, PlugZap, RefreshCw, ShieldCheck, XCircle } from 'lucide-react'
 import { toast } from 'sonner'
-import { apiErrorMessage, TwsAccount, TwsCommand, TwsSettings, TwsStatus, TwsTestStep, twsApi } from '../lib/api'
+import { apiErrorMessage, PaperStatus, paperApi, TwsAccount, TwsCommand, TwsSettings, TwsStatus, TwsTestStep, twsApi } from '../lib/api'
 import TwsSetupGuide from '../components/TwsSetupGuide'
+import PaperTradingCard from '../components/PaperTradingCard'
 import { TWS_STATE_LABELS } from '../components/TwsStatusPill'
 
 type SdkInfo = { found: boolean; folder: string | null; version: string | null }
@@ -27,6 +28,8 @@ export default function BrokerageSettings() {
   const [sdk, setSdk] = useState<SdkInfo | null>(null)
   const [status, setStatus] = useState<TwsStatus | null>(null)
   const [account, setAccount] = useState<TwsAccount | null>(null)
+  const [paper, setPaper] = useState<PaperStatus | null>(null)
+  const loadPaper = useCallback(() => { paperApi.status().then((res) => setPaper(res.data)).catch(() => undefined) }, [])
   const [saving, setSaving] = useState(false)
   const [test, setTest] = useState<TwsCommand | null>(null)
   const [testing, setTesting] = useState(false)
@@ -53,6 +56,7 @@ export default function BrokerageSettings() {
         const res = await twsApi.status()
         if (!alive) return
         setStatus(res.data)
+        paperApi.status().then((p) => { if (alive) setPaper(p.data) }).catch(() => undefined)
         if (res.data.state === 'READY' || res.data.state === 'IBKR_DISCONNECTED') {
           const acc = await twsApi.account()
           if (alive) setAccount(acc.data)
@@ -118,6 +122,7 @@ export default function BrokerageSettings() {
   const state = status?.state ?? 'NOT_CONFIGURED'
   const label = TWS_STATE_LABELS[state] ?? { text: state, tone: 'amber' }
   const isPaper = !!status?.account?.startsWith('DU') && !!settings?.paper_confirmed
+  const paperOn = !!(paper?.binding.enabled && paper.binding.account_id && paper.binding.account_id === status?.account)
   const summary = (account?.snapshots.summary?.data ?? {}) as Record<string, { value: string; currency: string }>
   const positions = (account?.snapshots.positions?.data ?? []) as Array<Record<string, string>>
   const openOrders = (account?.snapshots.open_orders?.data ?? []) as Array<Record<string, string>>
@@ -132,7 +137,7 @@ export default function BrokerageSettings() {
           <ShieldCheck className="w-8 h-8 text-sky-400" />
           <h1 className="page-title">Interactive Brokers</h1>
         </div>
-        <p className="page-subtitle">Connect Sapient to Trader Workstation (TWS) on this PC — read-only for now</p>
+        <p className="page-subtitle">Connect Sapient to Trader Workstation (TWS) on this PC — read-only, or paper orders once you authorise them</p>
       </div>
 
       {/* Status */}
@@ -142,12 +147,18 @@ export default function BrokerageSettings() {
           <span className={`px-2 py-0.5 rounded-md text-xs font-bold border ${toneClass}`}>{label.text}</span>
           {state === 'READY' && (
             <span className="px-2 py-0.5 rounded-md text-xs font-bold border bg-sky-500/15 text-sky-600 border-sky-500/30">
-              {isPaper ? 'TWS PAPER · READ-ONLY' : 'TWS · READ-ONLY'}
+              {paperOn ? 'TWS PAPER' : isPaper ? 'TWS PAPER · READ-ONLY' : 'TWS · READ-ONLY'}
             </span>
           )}
-          <span className="px-2 py-0.5 rounded-md text-xs font-bold border bg-slate-500/10 theme-text-secondary theme-border">
-            ORDERS: SIMULATION ONLY
-          </span>
+          {paperOn ? (
+            <span className="px-2 py-0.5 rounded-md text-xs font-bold border bg-emerald-500/15 text-emerald-600 border-emerald-500/30">
+              ORDERS: TWS PAPER · LIVE OFF
+            </span>
+          ) : (
+            <span className="px-2 py-0.5 rounded-md text-xs font-bold border bg-slate-500/10 theme-text-secondary theme-border">
+              ORDERS: SIMULATION ONLY
+            </span>
+          )}
         </div>
         <p className="text-sm theme-text-secondary mt-2">{status?.detail ?? 'Checking…'}</p>
         {status && !status.worker_running && (
@@ -244,6 +255,11 @@ export default function BrokerageSettings() {
           </div>
         )}
       </div>
+
+      {paper && (
+        <PaperTradingCard key={paper.binding.authorised_at ?? 'new'} status={paper} account={status?.account ?? null}
+          paperConfirmed={!!settings?.paper_confirmed} onChange={loadPaper} />
+      )}
 
       {/* Read-only account */}
       {account && (state === 'READY' || state === 'IBKR_DISCONNECTED') && (

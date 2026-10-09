@@ -383,6 +383,97 @@ INSERT INTO scheduler_status(id) VALUES (1);
 CREATE INDEX ai_signals_open ON ai_signals(expires_at) WHERE status IN ('pending','snoozed');
 """
 
+PAPER_V1 = f"""
+CREATE TABLE paper_binding (
+ id INTEGER PRIMARY KEY CHECK (id = 1),
+ account_id TEXT,
+ enabled FLAG NOT NULL DEFAULT FALSE,
+ authorised_at UTCTIME,
+ authorised_text TEXT,
+ halted FLAG NOT NULL DEFAULT FALSE,
+ halted_at UTCTIME,
+ max_order_value DECNUM(15, 2) NOT NULL DEFAULT 2000 CHECK (max_order_value > 0),
+ max_orders_per_day INTEGER NOT NULL DEFAULT 10 CHECK (max_orders_per_day >= 0),
+ max_value_per_day DECNUM(15, 2) NOT NULL DEFAULT 10000 CHECK (max_value_per_day >= 0),
+ max_price_gap_pct DECNUM(5, 2) NOT NULL DEFAULT 3 CHECK (max_price_gap_pct > 0 AND max_price_gap_pct <= 10),
+ autonomous_allowed FLAG NOT NULL DEFAULT FALSE,
+ updated_at UTCTIME NOT NULL DEFAULT {_NOW}
+);
+INSERT INTO paper_binding(id) VALUES (1);
+CREATE TABLE paper_orders (
+ id TEXT PRIMARY KEY,
+ idempotency_key TEXT NOT NULL UNIQUE,
+ request_hash TEXT NOT NULL,
+ origin TEXT NOT NULL CHECK (origin IN ('manual','ai_approval','ai_autonomous','entry')),
+ account_id TEXT NOT NULL,
+ portfolio_id INTEGER REFERENCES portfolios(id) ON DELETE SET NULL,
+ signal_id INTEGER UNIQUE REFERENCES ai_signals(id) ON DELETE SET NULL,
+ symbol TEXT NOT NULL,
+ side TEXT NOT NULL CHECK (side IN ('BUY','SELL')),
+ quantity DECTEXT NOT NULL,
+ reference_price DECTEXT NOT NULL,
+ limit_price DECTEXT,
+ quote JSONTEXT,
+ state TEXT NOT NULL DEFAULT 'QUEUED' CHECK (state IN ('QUEUED','SUBMITTING','SUBMITTED',
+   'PARTIALLY_FILLED','FILLED','CANCEL_REQUESTED','CANCELLED','REJECTED','EXPIRED','BLOCKED','UNKNOWN')),
+ detail TEXT,
+ api_order_id INTEGER UNIQUE,
+ perm_id INTEGER,
+ order_ref TEXT UNIQUE,
+ con_id INTEGER,
+ exchange TEXT,
+ currency TEXT,
+ filled_quantity DECTEXT NOT NULL DEFAULT '0',
+ avg_fill_price DECTEXT,
+ broker_status TEXT,
+ cancel_sent_at UTCTIME,
+ created_at UTCTIME NOT NULL DEFAULT {_NOW},
+ expires_at UTCTIME NOT NULL,
+ submitted_at UTCTIME,
+ updated_at UTCTIME NOT NULL DEFAULT {_NOW}
+);
+CREATE INDEX paper_orders_state ON paper_orders(state);
+CREATE TABLE paper_executions (
+ exec_id TEXT PRIMARY KEY,
+ paper_order_id TEXT REFERENCES paper_orders(id),
+ api_order_id INTEGER,
+ perm_id INTEGER,
+ order_ref TEXT,
+ account_id TEXT,
+ symbol TEXT,
+ side TEXT,
+ shares DECTEXT,
+ price DECTEXT,
+ exec_time TEXT,
+ commission DECTEXT,
+ commission_currency TEXT,
+ received_at UTCTIME NOT NULL DEFAULT {_NOW}
+);
+-- Fills applied to a portfolio's positions, once per execution family (corrections
+-- apply only their difference).
+CREATE TABLE paper_portfolio_fills (
+ exec_family TEXT PRIMARY KEY,
+ paper_order_id TEXT NOT NULL REFERENCES paper_orders(id),
+ portfolio_id INTEGER REFERENCES portfolios(id) ON DELETE CASCADE,
+ shares DECTEXT NOT NULL,
+ price DECTEXT NOT NULL,
+ applied_at UTCTIME NOT NULL DEFAULT {_NOW}
+);
+ALTER TABLE portfolios ADD COLUMN paper_started_at UTCTIME;
+CREATE TABLE paper_order_ids (
+ id INTEGER PRIMARY KEY CHECK (id = 1),
+ high_water INTEGER NOT NULL DEFAULT 0
+);
+INSERT INTO paper_order_ids(id) VALUES (1);
+CREATE TABLE paper_audit (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ kind TEXT NOT NULL,
+ paper_order_id TEXT,
+ payload JSONTEXT,
+ created_at UTCTIME NOT NULL DEFAULT {_NOW}
+);
+"""
+
 # (version, name, sql). Append only.
 MIGRATIONS = (
     (1, "core", CORE_V1),
@@ -390,6 +481,7 @@ MIGRATIONS = (
     (3, "tws", TWS_V1),
     (4, "profile", PROFILE_V1),
     (5, "strategy", STRATEGY_V1),
+    (6, "paper", PAPER_V1),
 )
 SAFETY_SCHEMA_VERSION = 2
 

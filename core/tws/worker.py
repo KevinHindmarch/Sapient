@@ -1,8 +1,13 @@
-"""The TWS connector: a separate process that owns the (read-only) TWS socket.
+"""The TWS connector: a separate process that owns the TWS socket.
 
 Run as ``sapient-api --worker --data-dir DIR`` (Electron starts it). It keeps
-one read-only connection to TWS, reconnects with backoff, refreshes account
-snapshots, publishes its state for the UI and runs "Test connection" requests.
+one connection to TWS, reconnects with backoff, refreshes account snapshots,
+publishes its state for the UI and runs "Test connection" requests.
+
+The connection is read-only unless the user has authorised paper trading for
+exactly the account TWS is logged in to (core.tws.paper); only then does it
+create an order-capable transport and run the paper executor
+(core.tws.execution) while READY.
 
 States shown in the app:
   NOT_CONFIGURED    no settings saved yet
@@ -24,6 +29,8 @@ from typing import Callable
 
 from core.tws import store
 from core.tws.diagnostics import port_open, run_test
+from core.tws.execution import PaperExecutor
+from core.tws.paper import get_binding
 from core.tws.sdk import SdkInfo, SdkUnavailable, find_sdk
 from core.tws.session import TwsSession, TwsTimeout
 from core.tws.transport import IbapiTransport, Transport
@@ -58,6 +65,7 @@ class TwsWorker:
         self.failures = 0
         self.next_snapshot = 0.0
         self.state = None
+        self.executor: PaperExecutor | None = None
 
     # ---- helpers ---------------------------------------------------------
     def _publish(self, state: str, detail: str | None = None, **fields) -> None:
@@ -67,6 +75,7 @@ class TwsWorker:
         store.set_status(state=state, detail=detail, **fields)
 
     def _disconnect(self) -> None:
+        self.executor = None
         if self.session is not None:
             try:
                 self.session.disconnect()
@@ -87,7 +96,10 @@ class TwsWorker:
             self._run_command(command)
             return
         settings = store.get_settings()
-        key = tuple(settings[k] for k in ("enabled", "port", "client_id", "expected_account", "sdk_folder"))
+        binding = get_binding()
+        key = (tuple(settings[k] for k in ("enabled", "port", "client_id", "expected_account", "sdk_folder",
+                                            "paper_confirmed")),
+               binding["account_id"], binding["authorised_at"])
         if key != self.settings_key:  # settings changed: start over
             self.settings_key = key
             self._disconnect()
@@ -114,8 +126,10 @@ class TwsWorker:
             self._retry_later()
             return
         self._publish("SYNCHRONIZING", "Connecting to TWS…", sdk_version=sdk.version)
+        orders_allowed = self._paper_authorised(settings)
         try:
-            session = TwsSession(self.transport_factory(sdk))
+            transport = self.transport_factory(sdk, allow_orders=True) if orders_allowed else self.transport_factory(sdk)
+            session = TwsSession(transport)
             session.connect(settings["port"], settings["client_id"])
         except SdkUnavailable as exc:
             self._publish("SDK_MISSING", str(exc))
@@ -143,13 +157,26 @@ class TwsWorker:
             return
         self.failures = 0
         self.next_snapshot = 0.0
+        if orders_allowed and accounts[0] == get_binding()["account_id"]:
+            self.executor = PaperExecutor(session, settings["client_id"], accounts[0])
         store.set_status(account=accounts[0], server_version=session.transport.server_version(),
                          connected_since=_now())
         self._watch(settings)
 
+    @staticmethod
+    def _paper_authorised(settings: dict) -> bool:
+        """Orders only for the account the user authorised and confirmed as paper."""
+        binding = get_binding()
+        return bool(binding["account_id"] and binding["authorised_at"] and settings.get("paper_confirmed")
+                    and settings.get("expected_account") == binding["account_id"])
+
     def _watch(self, settings: dict) -> None:
         session = self.session
         session.drain()
+        if self.executor:  # fills and order updates count even while resynchronising
+            self.executor.apply_events(session.take_order_events())
+        else:
+            session.take_order_events()
         health = session.health
         if health.connection_closed or not session.transport.is_connected():
             self._disconnect()
@@ -176,7 +203,11 @@ class TwsWorker:
                 return
             self.next_snapshot = self.clock.monotonic() + SNAPSHOT_INTERVAL
             store.set_status(last_sync_at=_now())
-        self._publish("READY", "Connected to TWS (read-only).", ib_connected=True)
+        if self.executor:
+            self._publish("READY", "Connected to your TWS paper account (paper orders on).", ib_connected=True)
+            self.executor.step()
+        else:
+            self._publish("READY", "Connected to TWS (read-only).", ib_connected=True)
 
     def _run_command(self, command: dict) -> None:
         try:
@@ -196,6 +227,8 @@ class TwsWorker:
 
     def run(self, should_stop: Callable[[], bool] = lambda: False) -> None:
         store.fail_stale_running_commands()
+        if PaperExecutor.recover_on_start():
+            log.warning("paper orders were mid-send at startup; marked unknown until TWS confirms")
         while not should_stop():
             try:
                 self.tick()

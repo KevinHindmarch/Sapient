@@ -115,7 +115,10 @@ export default function AITradingInbox() {
     setActioningId(signal.id)
     try {
       const res = await aiApi.approveSignal(signal.id)
-      if (res.data.intent?.state === 'QUEUED') {
+      if (res.data.paper_order) {
+        toast.success(`${signal.action} ${Number(res.data.paper_order.quantity)} ${signal.symbol}: paper order queued for your `
+          + 'TWS paper account. Follow it on the Paper orders page.')
+      } else if (res.data.intent?.state === 'QUEUED') {
         toast.success(`${signal.action} ${signal.symbol} simulation intent queued. No order was placed or filled.`)
       } else {
         toast.error(`Intent is ${res.data.intent?.state || 'not queued'}; no broker order was placed.`)
