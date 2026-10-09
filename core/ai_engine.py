@@ -363,6 +363,54 @@ def _build_signal(
     }
 
 
+def _dip_entry(portfolio_id: int, portfolio: dict, position: dict, analysis: dict | None, pending_buy: float,
+               now: datetime, expires_at: datetime | None) -> tuple[dict | None, str | None]:
+    """RSI-dip entry for one waiting holding: (BUY proposal, None) or (None, why it is still waiting / skipped).
+
+    Buys the planned shares still missing once the stock's RSI is below the
+    portfolio's level; past the deadline the holding is skipped (user decision
+    2026-10-10). Entry buys are the plan itself, so the per-trade guardrails
+    don't shrink them; the account's own limits still apply at admission.
+    """
+    from core.tws import paper
+    symbol = position["symbol"]
+    planned = int(float(position.get("planned_quantity") or 0))
+    missing = int(planned - float(position.get("quantity") or 0) - max(pending_buy, 0.0))
+    if missing < 1:
+        if pending_buy <= 0:
+            paper.set_entry_state(portfolio_id, symbol, None)  # fully bought
+        return None, "entry order already working at IBKR" if pending_buy > 0 else None
+    threshold = float(portfolio.get("entry_rsi_below") or paper.DEFAULT_ENTRY_RSI)
+    deadline = portfolio.get("entry_deadline")
+    if isinstance(deadline, str):
+        deadline = datetime.fromisoformat(deadline)
+    if deadline is not None and deadline.tzinfo is None:
+        deadline = deadline.replace(tzinfo=timezone.utc)
+    if deadline is not None and now >= deadline:
+        paper.set_entry_state(portfolio_id, symbol, "skipped")
+        return None, f"skipped: its RSI didn't drop below {threshold:g} by {deadline:%d %b %Y}"
+    rsi = ((analysis or {}).get("indicators") or {}).get("rsi", {}).get("value") if analysis else None
+    price = float((analysis or {}).get("current_price") or 0)
+    if rsi is None or price <= 0:
+        return None, "waiting to buy: no RSI or price right now"
+    if rsi >= threshold:
+        return None, f"waiting to buy: RSI {rsi:.1f}, buys below {threshold:g}"
+    return {
+        "portfolio_id": portfolio_id,
+        "symbol": symbol,
+        "company_name": _company_name(symbol),
+        "market": (portfolio.get("market") or "ASX").upper(),
+        "action": "BUY",
+        "quantity": float(missing),
+        "price_at_signal": price,
+        "confidence": 0.8,
+        "rationale": {"rule": "rsi_dip_entry", "rsi": rsi, "rsi_buy_threshold": threshold,
+                      "current_price": price, "planned_quantity": planned},
+        "rule_summary": f"RSI {rsi:.1f} is below {threshold:g}: buying the planned {missing} shares",
+        "expires_at": expires_at or now + timedelta(hours=SIGNAL_TTL_HOURS),
+    }, None
+
+
 def _maybe_autonomous_execute(
     user_id: int,
     portfolio_id: int,
@@ -454,6 +502,11 @@ def scan_portfolio(user_id: int, portfolio_id: int, expires_at: datetime | None 
     skipped: list[dict] = []
     scanned = 0
 
+    # RSI-dip entry: holdings still waiting to be bought are handled by _dip_entry, never by the normal rules.
+    waiting = {p["symbol"]: p for p in positions if p.get("entry_state") == "waiting"}
+    not_bought = {p["symbol"] for p in positions if p.get("entry_state") in ("waiting", "skipped")
+                  and float(p.get("quantity") or 0) <= 0}
+
     analysed: list[tuple[dict, dict]] = []
     for position in positions + list(sold_with_target.values()):
         symbol = position["symbol"]
@@ -484,6 +537,8 @@ def scan_portfolio(user_id: int, portfolio_id: int, expires_at: datetime | None 
     sectors: dict[str, str | None] = {}
     for position, analysis in analysed:
         symbol = position["symbol"]
+        if symbol in not_bought:
+            continue
         candidate = _build_signal(
             portfolio_id=portfolio_id,
             portfolio=portfolio,
@@ -493,7 +548,7 @@ def scan_portfolio(user_id: int, portfolio_id: int, expires_at: datetime | None 
             portfolio_value=portfolio_value,
             expires_at=expires_at,
         )
-        if candidate is None:
+        if candidate is None or (candidate["action"] == "BUY" and symbol in waiting):
             continue
 
         duplicate = _already_proposed(portfolio_id, symbol, candidate["action"])
@@ -535,6 +590,24 @@ def scan_portfolio(user_id: int, portfolio_id: int, expires_at: datetime | None 
             continue
 
         new_signals_payload.append(candidate)
+
+    if waiting and env:
+        pending = paper.open_order_quantities(portfolio_id, env)
+        by_symbol = {p["symbol"]: a for p, a in analysed}
+        now = datetime.now(timezone.utc)
+        for symbol, position in waiting.items():
+            candidate, note = _dip_entry(portfolio_id, portfolio, position, by_symbol.get(symbol),
+                                         float(pending.get(symbol, 0)), now, expires_at)
+            if candidate is None:
+                if note:
+                    skipped.append({"symbol": symbol, "reason": note})
+                continue
+            duplicate = _already_proposed(portfolio_id, symbol, "BUY")
+            blocked = duplicate or loss_breaker
+            if blocked:
+                skipped.append({"symbol": symbol, "reason": blocked})
+                continue
+            new_signals_payload.append(candidate)
 
     created: list[dict] = []
     if new_signals_payload:

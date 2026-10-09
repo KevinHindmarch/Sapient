@@ -630,8 +630,13 @@ def open_order_quantities(portfolio_id: int, env: str) -> dict[str, Decimal]:
     return {symbol: q for symbol, q in pending.items() if q}
 
 
+ENTRY_MODES = ("now", "rsi_dip")
+DEFAULT_ENTRY_RSI, DEFAULT_ENTRY_DAYS = 30.0, 20  # user decision 2026-10-10: RSI below 30, else skip
+
+
 def start_portfolio(portfolio_id: int, user_id: int, prices: dict[str, float], env: str = "paper",
-                    mode: str | None = None) -> dict:
+                    mode: str | None = None, entry: str = "now", rsi_below: float = DEFAULT_ENTRY_RSI,
+                    deadline_days: int = DEFAULT_ENTRY_DAYS) -> dict:
     """Buy a portfolio's planned holdings in this environment, then let AI Trading manage it.
 
     The first time, each holding's whole-share quantity becomes its plan and the
@@ -640,10 +645,18 @@ def start_portfolio(portfolio_id: int, user_id: int, prices: dict[str, float], e
     expired or unfilled legs), never more. Orders a limit refuses are reported,
     not forced. ``mode`` ("suggestions" = you approve each trade, "autonomous" =
     fully automatic) sets the portfolio's AI mode.
+
+    ``entry="rsi_dip"`` buys nothing now: each missing holding waits until its
+    RSI is below ``rsi_below`` at one of the scheduled checks (core.ai_engine),
+    and is skipped if that hasn't happened within ``deadline_days`` trading days.
     """
     e = get_env(env)
     if mode not in (None, "suggestions", "autonomous"):
         raise PaperError("invalid_mode", "Choose approve-each-trade or fully automatic.")
+    if entry not in ENTRY_MODES:
+        raise PaperError("invalid_entry", "Choose to buy now or when each stock's RSI dips.")
+    if entry == "rsi_dip":
+        return _start_on_dip(portfolio_id, user_id, e, mode, float(rsi_below), int(deadline_days))
     working = "','".join(WORKING)
     with db.transaction() as (cur, _):
         cur.execute("SELECT * FROM portfolios WHERE id=%s AND user_id=%s", (portfolio_id, user_id))
@@ -697,6 +710,12 @@ def start_portfolio(portfolio_id: int, user_id: int, prices: dict[str, float], e
             results.append({"symbol": symbol, "ok": True, "order_id": order["id"], "quantity": quantity})
         except PaperError as exc:
             results.append({"symbol": symbol, "ok": False, "code": exc.code, "message": str(exc)})
+    bought_now = [r["symbol"] for r in results if r["ok"]]
+    if bought_now:  # "Buy now" ends any RSI-dip wait for these stocks
+        with db.transaction() as (cur, _):
+            for symbol in bought_now:
+                cur.execute("""UPDATE portfolio_positions SET entry_state=NULL
+                               WHERE portfolio_id=%s AND symbol=%s AND status='active'""", (portfolio_id, symbol))
     queued = sum(r["ok"] for r in results)
     started = bool(queued) or not first_time
     with db.transaction() as (cur, _):
@@ -714,6 +733,75 @@ def start_portfolio(portfolio_id: int, user_id: int, prices: dict[str, float], e
             _audit(cur, f"{e.name}_portfolio_{'started' if first_time else 'topped_up'}",
                    payload={"portfolio_id": portfolio_id, "mode": mode, "queued": queued})
     return {"portfolio_id": portfolio_id, "environment": e.name, "started": started, "results": results}
+
+
+def _start_on_dip(portfolio_id: int, user_id: int, e: Env, mode: str | None, rsi_below: float,
+                  deadline_days: int) -> dict:
+    """Plan the portfolio and mark each missing holding as waiting for an RSI dip (no orders now)."""
+    if not 5 <= rsi_below <= 50:
+        raise PaperError("invalid_entry", "The RSI level must be between 5 and 50.")
+    if not 1 <= deadline_days <= 120:
+        raise PaperError("invalid_entry", "The deadline must be between 1 and 120 trading days.")
+    working = "','".join(WORKING)
+    now = _now()
+    with db.transaction() as (cur, _):
+        cur.execute("SELECT * FROM portfolios WHERE id=%s AND user_id=%s", (portfolio_id, user_id))
+        portfolio = cur.fetchone()
+        if not portfolio:
+            raise PaperError("portfolio_not_found", "Portfolio not found.")
+        current = portfolio.get("trading_environment")
+        if current and current != e.name:
+            raise PaperError("wrong_environment", f"This portfolio already trades in {get_env(current).label}. "
+                                                  "Save a copy of it to trade it the other way.")
+        if not (mode or (portfolio.get("ai_mode") or "off") != "off"):
+            raise PaperError("needs_mode", "Choose how Sapient should manage it: the RSI checks are what buy it.")
+        market = calendar.market_for(portfolio.get("market"))
+        deadline = calendar.close_after_trading_days(market, now, deadline_days)
+        if deadline is None:
+            raise PaperError("invalid_entry", "Sapient's market calendar doesn't reach that far yet; "
+                                              "choose a shorter deadline.")
+        first_time = not portfolio.get(e.started_column)
+        if first_time:
+            cur.execute("""UPDATE portfolio_positions SET planned_quantity = CAST(CAST(quantity AS REAL) AS INTEGER),
+                           quantity = 0 WHERE portfolio_id=%s AND status='active'""", (portfolio_id,))
+        cur.execute("""SELECT id, symbol, quantity, planned_quantity FROM portfolio_positions
+                       WHERE portfolio_id=%s AND status='active' ORDER BY id""", (portfolio_id,))
+        holdings = [dict(r) for r in cur.fetchall()]
+        cur.execute(f"""SELECT symbol, coalesce(decimal_sum(quantity - coalesce(filled_quantity, 0)), '0') AS q
+                        FROM paper_orders WHERE portfolio_id=%s AND environment=%s AND side='BUY'
+                        AND state IN ('{working}') GROUP BY symbol""", (portfolio_id, e.name))
+        buying = {r["symbol"]: Decimal(str(r["q"])) for r in cur.fetchall()}
+        results = []
+        for holding in holdings:
+            planned = int(Decimal(str(holding["planned_quantity"] or 0)))
+            missing = int(planned - Decimal(str(holding["quantity"] or 0)) - buying.get(holding["symbol"], 0))
+            if planned < 1:
+                results.append({"symbol": holding["symbol"], "ok": False, "message": "Less than one whole share."})
+            elif missing >= 1:
+                cur.execute("UPDATE portfolio_positions SET entry_state='waiting' WHERE id=%s", (holding["id"],))
+                results.append({"symbol": holding["symbol"], "ok": True, "waiting": True, "quantity": missing,
+                                "message": f"waiting to buy {missing} when RSI is below {rsi_below:g}"})
+        if not any(r["ok"] for r in results):
+            raise PaperError("already_started", f"This portfolio has nothing left to buy in {e.label}.")
+        if first_time:
+            cur.execute(f"UPDATE portfolios SET {e.started_column}=%s, trading_environment=%s WHERE id=%s",
+                        (now, e.name, portfolio_id))
+        cur.execute("""UPDATE portfolios SET entry_mode='rsi_dip', entry_rsi_below=%s, entry_deadline=%s
+                       WHERE id=%s""", (rsi_below, deadline, portfolio_id))
+        if mode:
+            cur.execute("UPDATE portfolios SET ai_mode=%s WHERE id=%s", (mode, portfolio_id))
+        _audit(cur, f"{e.name}_portfolio_waiting_for_dip",
+               payload={"portfolio_id": portfolio_id, "mode": mode, "rsi_below": rsi_below,
+                        "deadline": deadline.isoformat(), "waiting": sum(r["ok"] for r in results)})
+    return {"portfolio_id": portfolio_id, "environment": e.name, "started": True, "entry": "rsi_dip",
+            "deadline": deadline.isoformat(), "results": results}
+
+
+def set_entry_state(portfolio_id: int, symbol: str, state: str | None) -> None:
+    """RSI-dip entry bookkeeping: 'waiting', 'skipped' or None (bought / not waiting)."""
+    with db.transaction() as (cur, _):
+        cur.execute("""UPDATE portfolio_positions SET entry_state=%s
+                       WHERE portfolio_id=%s AND symbol=%s AND status='active'""", (state, portfolio_id, symbol))
 
 
 def autonomy_checklist(user_id: int) -> dict:

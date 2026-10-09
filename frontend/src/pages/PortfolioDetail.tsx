@@ -831,7 +831,8 @@ export default function PortfolioDetail() {
                       <td className={`py-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
                         {atBroker ? Number(position.quantity).toFixed(0) : Number(position.quantity).toFixed(2)}
                         {atBroker && position.planned_quantity != null && Number(position.quantity) < Number(position.planned_quantity) && (
-                          <span className="block text-xs text-amber-600">of {Number(position.planned_quantity)} planned</span>
+                          <span className="block text-xs text-amber-600">of {Number(position.planned_quantity)} planned
+                            {position.entry_state === 'waiting' ? ' · waiting for RSI dip' : position.entry_state === 'skipped' ? ' · skipped (no dip)' : ''}</span>
                         )}
                       </td>
                       <td className={`py-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>${Number(position.avg_cost).toFixed(2)}</td>

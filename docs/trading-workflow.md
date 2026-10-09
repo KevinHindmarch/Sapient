@@ -188,3 +188,23 @@ Code changes this implies (scheduled in migration Phases E–F):
 7. Kill switch during entry batch → unsent legs blocked, working orders cancel
    requested, outcome reported honestly.
 8. Market closed / holiday → no proposals.
+
+## Buying on an RSI dip (H1, user decisions 2026-10-10)
+
+"Buy … & manage" offers two ways to buy:
+
+- **Now:** buys all holdings straight away.
+- **When each stock is cheap:** buys nothing straight away.
+
+With **When each stock is cheap**:
+- Each holding's planned whole shares are recorded (`planned_quantity`), and the holding is marked `entry_state='waiting'`.
+- At each scheduled check, twice per trading day, `core.ai_engine._dip_entry` checks each waiting stock's RSI(14).
+- If the RSI is below the portfolio's level (`entry_rsi_below`, default **30**), it proposes buying all the missing planned shares in one go.
+  - **Fully automatic:** the purchase is placed straight away.
+  - **Semi-automatic:** it waits in the AI Inbox for approval.
+- A buy for the plan is not reduced by the per-trade AI guardrails; the account's own limits still apply when the order is admitted.
+- A stock that hasn't dipped by the deadline (`entry_deadline`, default 20 trading days) becomes `entry_state='skipped'` and is never bought.
+- The normal RSI/MACD rules never buy a waiting or skipped stock.
+- Pressing **Buy now** later ends the wait for the stocks it buys.
+
+The checks stay twice a day (user decision).

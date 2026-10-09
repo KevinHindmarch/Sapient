@@ -99,3 +99,15 @@ def next_open(market: Market, now: datetime, horizon_days: int = 14) -> datetime
         if hours and hours[0] > now:
             return hours[0]
     return None
+
+
+def close_after_trading_days(market: Market, now: datetime, days: int, horizon_days: int = 400) -> datetime | None:
+    """The close of the ``days``-th trading session that ends after ``now`` (today counts if still open)."""
+    day, counted = local_date(market, now), 0
+    for offset in range(horizon_days):
+        hours = session(market, day + timedelta(days=offset))
+        if hours and hours[1] > now:
+            counted += 1
+            if counted >= days:
+                return hours[1]
+    return None

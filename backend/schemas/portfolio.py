@@ -77,6 +77,7 @@ class PositionResponse(BaseModel):
     allocation_amount: Optional[float]
     status: str
     planned_quantity: Optional[float] = None   # whole shares planned when bought at IBKR
+    entry_state: Optional[str] = None          # RSI-dip entry: 'waiting' / 'skipped' (None = bought or not waiting)
 
 
 class PortfolioResponse(BaseModel):

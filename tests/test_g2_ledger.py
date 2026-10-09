@@ -241,7 +241,7 @@ class LedgerMigrationTests(unittest.TestCase):
                             (ACCOUNT, pid, datetime.now(timezone.utc)))
                 cur.execute("""INSERT INTO paper_portfolio_fills(exec_family, paper_order_id, portfolio_id, shares, price)
                                VALUES ('e1','o1',%s,'6','41')""", (pid,))
-            self.assertEqual(migrations.migrate(path), [8])
+            self.assertEqual(migrations.migrate(path)[0], 8)
             with db.transaction() as (cur, _):
                 cur.execute("SELECT quantity, avg_cost, planned_quantity FROM portfolio_positions")
                 row = cur.fetchone()

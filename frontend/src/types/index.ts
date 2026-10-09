@@ -73,6 +73,7 @@ export interface Position {
   allocation_amount: number | null
   status: string
   planned_quantity?: number | null
+  entry_state?: 'waiting' | 'skipped' | null   // RSI-dip entry
 }
 
 export interface Transaction {
