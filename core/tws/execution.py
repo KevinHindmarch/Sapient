@@ -70,7 +70,11 @@ def choose_limit(side: str, prices: dict, reference: Decimal, max_gap_pct: Decim
     """Cautious limit price from a TWS snapshot, or (None, reason)."""
     last = _first_price(prices, LAST)
     if last is None:
-        return None, "TWS sent no last price for this stock, so Sapient did not guess one."
+        # No trade printed in the delayed feed yet: the middle of TWS's delayed bid and ask.
+        bid, ask = _first_price(prices, BID), _first_price(prices, ASK)
+        if not (bid and ask and bid <= ask):
+            return None, "TWS sent no price for this stock (no last trade, bid or ask), so Sapient did not guess one."
+        last = (bid + ask) / 2
     if side == "BUY":
         ask = _first_price(prices, ASK)
         raw = min(last, ask) if ask else last

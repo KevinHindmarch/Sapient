@@ -34,3 +34,12 @@ the guide before guessing how TWS behaves.
   - Delayed data needs `reqMarketDataType(3)`.
   - Live data needs a paid subscription; without one, error 10089/10168 is reported.
   - *doc/market-data-delayed/*
+- **Snapshots:** `reqMktData(snapshot=True)` returns only what ticks during
+  the 11 seconds before `tickSnapshotEnd`, so a quiet delayed feed may send no
+  last price, bid or ask at all. If a snapshot has none, Sapient listens to a
+  normal stream for up to 6 seconds and then always calls `cancelMktData`.
+  - If there is no delayed last trade but there is a delayed bid and ask, the
+    paper limit is the middle of the two, rounded down for a buy and up for a
+    sell, and the 3% gap check against Yahoo's price still applies.
+  - *doc/market-data-live/top-of-book-l-1/streaming-data-snapshots*,
+    *available-tick-types* (delayed 66 bid, 67 ask, 68 last, 75 close).

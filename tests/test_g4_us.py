@@ -192,6 +192,35 @@ class LedgerPrefixTests(unittest.TestCase):
         self.assertEqual(values["_cash_source"]["value"], "account_updates")
 
 
+class DelayedSnapshotTests(unittest.TestCase):
+    def test_empty_delayed_snapshot_falls_back_to_a_short_stream(self):
+        from core.tws.session import TwsSession
+
+        class QuietSnapshot(PaperFakeTws):
+            def request(self, name, *args):
+                if name == "reqMktData":
+                    self.requests.append(("reqMktData", args[3]))
+                    req = args[0]
+                    self.emit("marketDataType", reqId=req, marketDataType=3)
+                    if args[3]:                                   # snapshot: nothing ticks in 11 s
+                        self.emit("tickPrice", reqId=req, tickType=75, price=186.0, attrib=None)
+                        self.emit("tickSnapshotEnd", reqId=req)
+                    else:                                         # streaming: the delayed last arrives
+                        self.emit("tickPrice", reqId=req, tickType=68, price=188.5, attrib=None)
+                    return
+                if name == "cancelMktData":
+                    self.requests.append(name)
+                    return
+                super().request(name, *args)
+        fake = QuietSnapshot()
+        session = TwsSession(fake)
+        session.connect(7497, 71)
+        snap = session.market_snapshot("MS", "SMART", "USD")
+        self.assertEqual(snap["prices"]["68"], 188.5)
+        self.assertIn(("reqMktData", False), fake.requests)
+        self.assertIn("cancelMktData", fake.requests)                 # the stream is always stopped
+
+
 class UsExecutorTests(PaperTestCase):
     def setUp(self):
         super().setUp()
