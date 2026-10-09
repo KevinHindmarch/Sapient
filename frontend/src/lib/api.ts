@@ -355,6 +355,7 @@ export interface PaperOrder {
   portfolio_id: number | null
   portfolio_name?: string | null
   symbol: string
+  currency?: string | null   // AUD (ASX) or USD (US)
   side: 'BUY' | 'SELL'
   quantity: string
   reference_price: string

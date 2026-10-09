@@ -286,7 +286,7 @@ function EmptyState({
         No {status === 'all' ? '' : status} signals
       </p>
       <p className="text-sm theme-text-muted mt-1">
-        Run an AI scan from one of your portfolios to generate proposals.
+        Press “Check now” on a portfolio (with AI Trading on) to look for trades, or wait for the automatic checks during market hours.
       </p>
       <Link to="/portfolios" className="btn-secondary inline-flex items-center gap-2 mt-4 text-sm">
         Open Portfolios

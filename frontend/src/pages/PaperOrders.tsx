@@ -19,14 +19,15 @@ const STATE: Record<PaperOrderState, { text: string; tone: string }> = {
 }
 const ORIGIN = { manual: 'You', ai_approval: 'AI (you approved)', ai_autonomous: 'AI (automatic)', entry: 'Portfolio purchase' }
 
-const aud = (value: string | number | null | undefined) =>
-  value === null || value === undefined ? '—' : `A$${Number(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 3 })}`
+const aud = (value: string | number | null | undefined, currency?: string | null) =>
+  value === null || value === undefined ? '—'
+    : `${currency === 'USD' ? 'US$' : 'A$'}${Number(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`
 
 export default function PaperOrders() {
   const [orders, setOrders] = useState<PaperOrder[]>([])
   const [statuses, setStatuses] = useState<Record<TradingEnv, PaperStatus | null>>({ paper: null, live: null })
   const [env, setEnv] = useState<TradingEnv>('paper')
-  const [ticket, setTicket] = useState({ symbol: '', side: 'BUY' as 'BUY' | 'SELL', quantity: '' })
+  const [ticket, setTicket] = useState({ symbol: '', side: 'BUY' as 'BUY' | 'SELL', quantity: '', market: 'ASX' as 'ASX' | 'US' })
   const [sending, setSending] = useState(false)
   const [checking, setChecking] = useState<PaperOrder | null>(null)
 
@@ -46,14 +47,15 @@ export default function PaperOrders() {
 
   const place = async () => {
     let symbol = ticket.symbol.trim().toUpperCase()
-    if (symbol && !symbol.endsWith('.AX')) symbol += '.AX'
+    if (symbol && ticket.market === 'ASX' && !symbol.endsWith('.AX')) symbol += '.AX'
+    if (ticket.market === 'US') symbol = symbol.replace(/\.AX$/, '')
     const quantity = Number(ticket.quantity)
-    if (!symbol || !Number.isInteger(quantity) || quantity < 1) return toast.error('Enter an ASX code and a whole number of shares')
+    if (!symbol || !Number.isInteger(quantity) || quantity < 1) return toast.error('Enter a stock code and a whole number of shares')
     setSending(true)
     try {
       await tradingApiFor(env).place({ symbol, side: ticket.side, quantity, idempotency_key: `manual:${crypto.randomUUID()}` })
       toast.success(`${ticket.side} ${quantity} ${symbol} queued for your ${env === 'live' ? 'LIVE (real-money)' : 'paper'} account`)
-      setTicket({ symbol: '', side: ticket.side, quantity: '' })
+      setTicket({ ...ticket, symbol: '', quantity: '' })
       await load()
     } catch (err) {
       toast.error(apiErrorMessage(err, 'Paper order refused'))
@@ -113,9 +115,17 @@ export default function PaperOrders() {
           )}
           <div className="flex flex-wrap gap-2 items-end">
             <label className="text-sm">
-              <span className="theme-text-secondary text-xs block">ASX code</span>
-              <input className="input w-32" placeholder="BHP" value={ticket.symbol} aria-label="ASX code"
-                onChange={(e) => setTicket({ ...ticket, symbol: e.target.value })} />
+              <span className="theme-text-secondary text-xs block">Market</span>
+              <select className="input" value={ticket.market} aria-label="Market"
+                onChange={(e) => setTicket({ ...ticket, market: e.target.value as 'ASX' | 'US' })}>
+                <option value="ASX">ASX (A$)</option>
+                <option value="US">US (US$)</option>
+              </select>
+            </label>
+            <label className="text-sm">
+              <span className="theme-text-secondary text-xs block">Stock code</span>
+              <input className="input w-32" placeholder={ticket.market === 'US' ? 'AAPL' : 'BHP'} value={ticket.symbol}
+                aria-label="Stock code" onChange={(e) => setTicket({ ...ticket, symbol: e.target.value })} />
             </label>
             <label className="text-sm">
               <span className="theme-text-secondary text-xs block">Buy or sell</span>
@@ -164,10 +174,10 @@ export default function PaperOrders() {
                     </span>
                     <span className={`font-bold ${o.side === 'BUY' ? 'text-emerald-500' : 'text-red-500'}`}>{o.side}</span>
                     <span className="font-semibold theme-text">{Number(o.quantity)} {o.symbol}</span>
-                    <span className="theme-text-secondary">limit {aud(o.limit_price)}{o.quote?.delayed ? ' (delayed price)' : ''}</span>
+                    <span className="theme-text-secondary">limit {aud(o.limit_price, o.currency)}{o.quote?.delayed ? ' (delayed price)' : ''}</span>
                     <span className={`font-medium ${st.tone}`}>{st.text}</span>
                     {Number(o.filled_quantity) > 0 && (
-                      <span className="theme-text">{Number(o.filled_quantity)} filled at {aud(o.avg_fill_price)}</span>
+                      <span className="theme-text">{Number(o.filled_quantity)} filled at {aud(o.avg_fill_price, o.currency)}</span>
                     )}
                     <span className="ml-auto text-xs theme-text-muted">
                       {ORIGIN[o.origin]}{o.portfolio_name ? ` · ${o.portfolio_name}` : ''} · {new Date(o.created_at).toLocaleString()}
@@ -176,7 +186,7 @@ export default function PaperOrders() {
                   {o.detail && <p className="text-xs theme-text-secondary mt-1">{o.detail}</p>}
                   {o.fills.length > 0 && (
                     <p className="text-xs theme-text-secondary mt-1">
-                      Fills: {o.fills.map((f) => `${Number(f.shares)} @ ${aud(f.price)}${f.commission ? ` (fee ${f.commission} ${f.commission_currency ?? ''})` : ''}`).join(', ')}
+                      Fills: {o.fills.map((f) => `${Number(f.shares)} @ ${aud(f.price, o.currency)}${f.commission ? ` (fee ${f.commission} ${f.commission_currency ?? ''})` : ''}`).join(', ')}
                     </p>
                   )}
                   <div className="flex gap-2 mt-2">

@@ -30,6 +30,7 @@ from typing import Any
 
 from core import yahoo as yf
 
+from core import db
 from core.database import (
     AIAuditService,
     AISignalService,
@@ -59,6 +60,7 @@ def _company_name(symbol: str) -> str:
 
 
 def _portfolio_total_value(positions: list[dict]) -> float:
+    """Cost of the active holdings (fallback when no market prices are known)."""
     total = 0.0
     for p in positions:
         if p.get("status") != "active":
@@ -69,47 +71,85 @@ def _portfolio_total_value(positions: list[dict]) -> float:
     return total
 
 
-def _signals_today_count(user_id: int) -> int:
-    """Count BUY/SELL signals already created for this user today (UTC)."""
+def _day_start(market: str | None) -> datetime:
+    """Start of today on the portfolio's own exchange (ASX or US), in UTC."""
+    from core.strategy import calendar
+    m = calendar.market_for(market)
+    local = calendar.local_date(m, datetime.now(timezone.utc))
+    return datetime.combine(local, datetime.min.time(), m.tz).astimezone(timezone.utc)
+
+
+LIVE_SIGNAL_STATES = "('pending','snoozed','claimed','approved','executed')"  # rejected/expired don't count
+
+
+def _signals_today_count(user_id: int, market: str | None = "ASX") -> int:
+    """Proposals still in play today (rejected or expired ones don't use up the daily limit)."""
     with get_db_cursor() as (cur, _conn):
-        cur.execute(
-            """
-            SELECT COUNT(*) AS c
-            FROM ai_signals
-            WHERE user_id = %s
-              AND generated_at >= date('now')
-            """,
-            (user_id,),
-        )
-        row = cur.fetchone()
-        return int((row or {}).get("c", 0))
+        cur.execute(f"""SELECT COUNT(*) AS c FROM ai_signals WHERE user_id = %s AND generated_at >= %s
+                        AND status IN {LIVE_SIGNAL_STATES}""", (user_id, _day_start(market)))
+        return int((cur.fetchone() or {}).get("c", 0))
 
 
-def _turnover_today(user_id: int) -> float:
-    """Sum of estimated order value for today's signals + executed broker orders."""
+def _turnover_today(user_id: int, portfolio_id: int | None = None, market: str | None = "ASX") -> float:
+    """Value of this portfolio's proposals still in play today."""
     with get_db_cursor() as (cur, _conn):
-        cur.execute(
-            """
-            SELECT COALESCE(SUM(quantity * price_at_signal), 0) AS v
-            FROM ai_signals
-            WHERE user_id = %s
-              AND generated_at >= date('now')
-            """,
-            (user_id,),
-        )
-        signal_v = float((cur.fetchone() or {}).get("v") or 0)
+        cur.execute(f"""SELECT COALESCE(SUM(quantity * price_at_signal), 0) AS v FROM ai_signals
+                        WHERE user_id = %s AND generated_at >= %s AND status IN {LIVE_SIGNAL_STATES}
+                        AND (%s IS NULL OR portfolio_id = %s)""",
+                    (user_id, _day_start(market), portfolio_id, portfolio_id))
+        return float((cur.fetchone() or {}).get("v") or 0)
 
-        cur.execute(
-            """
-            SELECT COALESCE(SUM(filled_qty * COALESCE(avg_fill_price, limit_price, 0)), 0) AS v
-            FROM broker_orders
-            WHERE user_id = %s
-              AND submitted_at >= date('now')
-            """,
-            (user_id,),
-        )
-        order_v = float((cur.fetchone() or {}).get("v") or 0)
-        return signal_v + order_v
+
+def _already_proposed(portfolio_id: int, symbol: str, action: str) -> str | None:
+    """A waiting proposal or a working order for the same stock and side means: don't propose it again."""
+    with get_db_cursor() as (cur, _conn):
+        cur.execute("""SELECT COUNT(*) AS c FROM ai_signals WHERE portfolio_id=%s AND symbol=%s AND action=%s
+                       AND status IN ('pending','snoozed','claimed')""", (portfolio_id, symbol, action))
+        if cur.fetchone()["c"]:
+            return "a proposal for this is already waiting"
+        if db.table_exists(cur, "paper_orders"):
+            from core.tws.paper import WORKING
+            working = "','".join(WORKING)
+            cur.execute(f"""SELECT COUNT(*) AS c FROM paper_orders WHERE portfolio_id=%s AND symbol=%s AND side=%s
+                            AND state IN ('{working}')""", (portfolio_id, symbol, action))
+            if cur.fetchone()["c"]:
+                return "an order for this is already working at IBKR"
+    return None
+
+
+RISK_CAPS = {"conservative": 25.0, "moderate": 40.0, "aggressive": 60.0}
+
+
+def _fit_order(candidate: dict, *, held_value: float, total_value: float, cash: float | None,
+               risk_tolerance: str | None, binding: dict | None) -> tuple[float, str | None]:
+    """Whole shares that fit the account's limits, the cash and the stock-weight cap.
+
+    Returns (quantity, note). quantity 0 means nothing fits. Only used for
+    portfolios bought at IBKR (orders there are whole shares).
+    """
+    price = float(candidate["price_at_signal"])
+    qty = math.floor(float(candidate["quantity"]) + 1e-9)
+    notes = []
+    if binding:
+        gap = 1 + float(binding["max_price_gap_pct"]) / 100.0
+        fits = math.floor(float(binding["max_order_value"]) / (price * gap) + 1e-9)
+        if fits < qty:
+            qty = fits
+            notes.append(f"limited to your A${float(binding['max_order_value']):,.0f} per-order limit"
+                         + ("; the rest at the next check" if candidate["action"] == "SELL" else ""))
+    if candidate["action"] == "BUY":
+        if cash is not None:
+            affordable = math.floor(max(cash, 0.0) / (price * 1.01) + 1e-9)
+            if affordable < qty:
+                qty = affordable
+                notes.append("limited to the portfolio's cash")
+        cap = RISK_CAPS.get((risk_tolerance or "moderate").lower(), 40.0)
+        if total_value > 0:
+            room = math.floor(max(cap / 100.0 * total_value - held_value, 0.0) / price + 1e-9)
+            if room < qty:
+                qty = room
+                notes.append(f"kept under the {cap:g}% per-stock cap")
+    return float(max(qty, 0)), ("; ".join(notes) or None)
 
 
 def _kill_switch_active(settings: dict) -> bool:
@@ -372,6 +412,12 @@ def scan_portfolio(user_id: int, portfolio_id: int, expires_at: datetime | None 
 
     portfolio = details["portfolio"]
     positions = [p for p in (details.get("positions") or []) if p.get("status") == "active"]
+    # Stocks sold earlier that still have a target weight can be bought back on an oversold signal.
+    held = {p["symbol"] for p in positions}
+    sold_with_target = {}
+    for p in details.get("positions") or []:
+        if p.get("status") == "sold" and p["symbol"] not in held and float(p.get("weight_at_creation") or 0) > 0:
+            sold_with_target[p["symbol"]] = {**p, "quantity": 0, "status": "active", "id": None}
 
     settings = AITradingSettingsService.get(user_id) or {}
     global_mode = (settings.get("mode") or "off").lower()
@@ -398,16 +444,19 @@ def scan_portfolio(user_id: int, portfolio_id: int, expires_at: datetime | None 
             "scanned_symbols": 0,
         }
 
-    portfolio_value = _portfolio_total_value(positions)
-    signals_today_baseline = _signals_today_count(user_id)
-    turnover_today_baseline = _turnover_today(user_id)
+    from core.tws import paper
+    env = paper.environment_for(portfolio_id)
+    binding = paper.get_binding(env=env) if env else None
+    market = portfolio.get("market") or "ASX"
+    signals_today_baseline = _signals_today_count(user_id, market)
+    turnover_today_baseline = _turnover_today(user_id, portfolio_id, market)
 
     new_signals_payload: list[dict] = []
     skipped: list[dict] = []
     scanned = 0
 
     analysed: list[tuple[dict, dict]] = []
-    for position in positions:
+    for position in positions + list(sold_with_target.values()):
         symbol = position["symbol"]
         scanned += 1
         try:
@@ -422,6 +471,15 @@ def scan_portfolio(user_id: int, portfolio_id: int, expires_at: datetime | None 
             skipped.append({"symbol": symbol, "reason": analysis["error"]})
             continue
         analysed.append((position, analysis))
+
+    # Portfolio value at today's prices plus its cash (cost where no price is known).
+    with get_db_cursor() as (cur, _conn):
+        from core import ledger
+        cash = float(ledger.cash_balance(cur, portfolio_id))
+    prices = {p["symbol"]: float(a.get("current_price") or 0) for p, a in analysed}
+    market_value = sum(float(p.get("quantity") or 0) * (prices.get(p["symbol"]) or float(p.get("avg_cost") or 0))
+                       for p in positions)
+    portfolio_value = market_value + max(cash, 0.0) if env else (market_value or _portfolio_total_value(positions))
 
     loss_breaker = _loss_breaker(analysed, settings)
     sectors: dict[str, str | None] = {}
@@ -438,6 +496,23 @@ def scan_portfolio(user_id: int, portfolio_id: int, expires_at: datetime | None 
         )
         if candidate is None:
             continue
+
+        duplicate = _already_proposed(portfolio_id, symbol, candidate["action"])
+        if duplicate:
+            skipped.append({"symbol": symbol, "reason": duplicate})
+            continue
+        if env:  # orders at IBKR: whole shares within the account's limits, cash and weight cap
+            held_value = float(position.get("quantity") or 0) * float(candidate["price_at_signal"])
+            reserved = sum(s["quantity"] * s["price_at_signal"] for s in new_signals_payload if s["action"] == "BUY")
+            quantity, note = _fit_order(candidate, held_value=held_value, total_value=portfolio_value,
+                                        cash=cash - reserved, risk_tolerance=portfolio.get("risk_tolerance"),
+                                        binding=binding)
+            if quantity < 1:
+                skipped.append({"symbol": symbol, "reason": note or "less than one whole share"})
+                continue
+            candidate["quantity"] = quantity
+            if note:
+                candidate["rule_summary"] += f" ({note})"
 
         if candidate["action"] == "BUY":
             blocked = loss_breaker or _buy_blocker(candidate, analysis, positions, portfolio_value,

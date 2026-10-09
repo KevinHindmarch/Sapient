@@ -192,8 +192,9 @@ class AdmissionTests(PaperTestCase):
         self.assertEqual(self.order()["id"], first["id"], "same key and order: same result")
         self.refused("idempotency_conflict", self.order, quantity=11)
 
-    def test_scope_is_whole_asx_shares(self):
-        self.refused("asx_only", self.order, symbol="AAPL")
+    def test_scope_is_whole_shares(self):
+        self.refused("unsupported_symbol", self.order, symbol="NOT A STOCK")
+        self.refused("no_exchange_rate", self.order, symbol="AAPL")   # US needs TWS's US$ rate (test_g4_us.py)
         self.refused("whole_shares_required", self.order, quantity="1.5")
         self.refused("whole_shares_required", self.order, quantity=0)
 
@@ -599,7 +600,7 @@ class ApiTests(PaperTestCase):
                 self.assertEqual((manual.status_code, manual.json()["origin"]), (202, "manual"))
                 refused = client.post("/api/paper/orders", headers=auth,
                                       json={"symbol": "AAPL", "side": "BUY", "quantity": 1})
-                self.assertEqual(refused.json()["detail"]["code"], "asx_only")
+                self.assertEqual(refused.json()["detail"]["code"], "no_exchange_rate")
             off = client.post("/api/paper/disable", headers=auth).json()
             self.assertFalse(off["enabled"])
 
