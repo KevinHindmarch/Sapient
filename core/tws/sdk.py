@@ -8,6 +8,7 @@ folder to ``sys.path`` at runtime. Never install ``ibapi`` from PyPI.
 from dataclasses import dataclass
 import os
 from pathlib import Path
+import re
 import sys
 
 # Standard-library modules the official SDK imports. Importing them here makes
@@ -22,7 +23,17 @@ class SdkInfo:
     version: str | None
 
 
-def candidate_folders(configured: str | None = None) -> list[Path]:
+def _versioned_installs(drive: Path) -> list[Path]:
+    """IBKR's installer may use versioned folders such as ``C:\\TWS API 1051.01``; newest first."""
+    try:
+        found = [p for p in drive.iterdir() if p.is_dir() and re.match(r"(?i)tws[ _]api", p.name)]
+    except OSError:
+        return []
+    key = lambda p: [int(n) for n in re.findall(r"\d+", p.name)] or [-1]
+    return sorted(found, key=key, reverse=True)
+
+
+def candidate_folders(configured: str | None = None, drive: Path | None = None) -> list[Path]:
     folders = []
     if configured:
         folders.append(Path(configured))
@@ -30,6 +41,10 @@ def candidate_folders(configured: str | None = None) -> list[Path]:
                  os.path.join(os.environ.get("USERPROFILE", ""), "TWS API")):
         if root:
             folders.append(Path(root))
+    if drive is None and os.name == "nt":
+        drive = Path("C:\\")
+    if drive is not None:
+        folders += [p for p in _versioned_installs(drive) if p not in folders]
     expanded = []
     for folder in folders:
         expanded += [folder, folder / "source" / "pythonclient", folder / "pythonclient"]
@@ -37,18 +52,20 @@ def candidate_folders(configured: str | None = None) -> list[Path]:
 
 
 def _read_version(package: Path) -> str | None:
-    init = package / "__init__.py"
+    """Read the version without importing: official SDKs define VERSION = {'major': 10, ...}."""
     try:
-        for line in init.read_text(encoding="utf-8", errors="replace").splitlines():
-            if line.strip().startswith("__version__"):
-                return line.split("=", 1)[1].strip().strip("'\"")
+        text = (package / "__init__.py").read_text(encoding="utf-8", errors="replace")
     except OSError:
         return None
-    return None
+    parts = [re.search(rf"['\"]{key}['\"]\s*:\s*(\d+)", text) for key in ("major", "minor", "micro")]
+    if parts[0] and parts[1]:
+        return ".".join(m.group(1) for m in parts if m)
+    literal = re.search(r"^__version__\s*=\s*['\"]([^'\"]+)['\"]", text, re.M)
+    return literal.group(1) if literal else None
 
 
-def find_sdk(configured: str | None = None) -> SdkInfo | None:
-    for folder in candidate_folders(configured):
+def find_sdk(configured: str | None = None, drive: Path | None = None) -> SdkInfo | None:
+    for folder in candidate_folders(configured, drive):
         package = folder / "ibapi"
         if (package / "client.py").is_file() and (package / "wrapper.py").is_file():
             return SdkInfo(folder=str(folder), version=_read_version(package))

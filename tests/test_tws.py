@@ -219,6 +219,23 @@ class SdkAndTransportTests(unittest.TestCase):
         self.assertTrue(info.folder.endswith("pythonclient"))
         self.assertIsNone(find_sdk(str(Path(self.temp.name) / "nowhere")) if not os.path.exists(r"C:\TWS API") else None)
 
+    def test_reads_version_from_the_official_version_dict(self):
+        init = self.root / "source" / "pythonclient" / "ibapi" / "__init__.py"
+        init.write_text("VERSION = {\n    'major': 10,\n    'minor': 51,\n    'micro': 1}\n\n"
+                        "def get_version_string():\n    return '{major}.{minor}.{micro}'.format(**VERSION)\n\n"
+                        "__version__ = get_version_string()\n")
+        self.assertEqual(find_sdk(str(self.root)).version, "10.51.1")
+
+    def test_finds_versioned_install_folders_newest_first(self):
+        drive = Path(self.temp.name)
+        self.root.rename(drive / "TWS API 1051.01")
+        older = drive / "TWS API 1037.02" / "source" / "pythonclient" / "ibapi"
+        older.mkdir(parents=True)
+        for name, body in FAKE_IBAPI.items():
+            (older / name).write_text(body)
+        info = find_sdk(None, drive=drive)
+        self.assertIn("TWS API 1051.01", info.folder)
+
     def test_transport_blocks_orders_and_binds_callbacks_by_name(self):
         transport = IbapiTransport(find_sdk(str(self.root)))
         transport.connect("127.0.0.1", 7497, 71)
