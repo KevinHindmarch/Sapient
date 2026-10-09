@@ -439,11 +439,14 @@ class PortfolioOnPaperTests(PaperTestCase):
         self.assertTrue(by["BHP.AX"]["ok"])
         self.assertEqual(by["CBA.AX"]["code"], "order_too_large")      # 3 x 900 > A$2,000 limit
         self.assertIn("whole share", by["TINY.AX"]["message"])
-        self.refused("already_started", paper.start_portfolio, self.pid, self.user["id"], {})
+        self.assertEqual(self.positions()["BHP.AX"][0], 0.0)  # real shares arrive with the fills
+        again = {r["symbol"]: r for r in paper.start_portfolio(self.pid, self.user["id"], {})["results"]}
+        self.assertNotIn("BHP.AX", again)                           # already being bought
+        self.assertIn("No price", again["CBA.AX"]["message"])      # the missing leg is retried
         order = self.get(by["BHP.AX"]["order_id"])
         self.assertEqual((order["origin"], order["side"], order["quantity"]), ("entry", "BUY", Decimal("10")))
 
-    def test_entry_fills_set_real_cost_without_adding_shares(self):
+    def test_entry_fills_become_the_holding(self):
         result = paper.start_portfolio(self.pid, self.user["id"], {"BHP.AX": 40.0})
         order_id = result["results"][0]["order_id"]
         self.sql("UPDATE paper_orders SET state='SUBMITTED', api_order_id=600, order_ref='sapient:e' WHERE id=%s", (order_id,))
@@ -490,9 +493,10 @@ class PortfolioOnPaperTests(PaperTestCase):
                                                           "max_trade_pct": 25, "max_daily_trades": 20,
                                                           "max_daily_turnover_pct": 100})
         paper.update_limits({"autonomous_allowed": True})
-        self.sql("UPDATE portfolios SET ai_mode='autonomous', paper_started_at=%s WHERE id=%s",
+        self.sql("UPDATE portfolios SET ai_mode='autonomous', paper_started_at=%s, trading_environment='paper' WHERE id=%s",
                  (datetime.now(timezone.utc), self.pid))
         self.sql("DELETE FROM portfolio_positions WHERE portfolio_id=%s AND symbol <> 'BHP.AX'", (self.pid,))
+        self.sql("UPDATE portfolio_positions SET planned_quantity=10, quantity=0 WHERE portfolio_id=%s", (self.pid,))
         # The portfolio's 10 BHP were bought through Sapient (its entry order filled).
         entry = paper.admit({"origin": "entry", "idempotency_key": "entry", "symbol": "BHP.AX", "side": "BUY",
                              "quantity": 10, "reference_price": "40", "portfolio_id": self.pid}, self.user["id"])
@@ -576,7 +580,8 @@ class ApiTests(PaperTestCase):
 
             from core.database import AISignalService, AITradingSettingsService
             AITradingSettingsService.update(self.user["id"], {"mode": "suggestions"})
-            self.sql("INSERT INTO portfolios(user_id, name, initial_investment, ai_mode) VALUES (%s,'P',10000,'suggestions')",
+            self.sql("INSERT INTO portfolios(user_id, name, initial_investment, ai_mode, trading_environment) "
+                     "VALUES (%s,'P',10000,'suggestions','paper')",
                      (self.user["id"],))
             pid = self.sql("SELECT id FROM portfolios", fetch=True)[0]["id"]
             signal = AISignalService.create_many(self.user["id"], [{

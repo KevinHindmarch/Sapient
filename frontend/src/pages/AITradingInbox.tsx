@@ -119,14 +119,12 @@ export default function AITradingInbox() {
         const live = res.data.environment === 'tws_live'
         toast.success(`${signal.action} ${Number(res.data.paper_order.quantity)} ${signal.symbol}: ${live ? 'REAL-MONEY' : 'paper'} order `
           + `queued for your TWS ${live ? 'live' : 'paper'} account. Follow it on the Orders page.`)
-      } else if (res.data.intent?.state === 'QUEUED') {
-        toast.success(`${signal.action} ${signal.symbol} simulation intent queued. No order was placed or filled.`)
       } else {
-        toast.error(`Intent is ${res.data.intent?.state || 'not queued'}; no broker order was placed.`)
+        toast.error(res.data.message || 'No order was placed.')
       }
       await loadAll()
     } catch (err) {
-      toast.error(apiErrorMessage(err, 'Intent admission refused'))
+      toast.error(apiErrorMessage(err, 'The order was refused'))
     } finally {
       setActioningId(null)
     }

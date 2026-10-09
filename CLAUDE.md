@@ -56,9 +56,16 @@ the user ticks the live authorisation in the app; never bypass that.
 - Broker orders (paper and live) exist only through `core/tws/paper.py`
   (admission, per environment) → `core/tws/execution.py` (that environment's
   connector sends). Live needs its own in-app authorisation and real-time
-  prices. Without authorisation every order path still goes through the
-  simulation "safety admission" in `core/execution_safety.py` (simulation
-  intents only). `core/ibkr_client.py` refuses all direct place/cancel.
+  prices. A portfolio trades only in the account it was bought in
+  (`trading_environment`); the old simulation mode was retired in G2 (user
+  decision 2026-10-09) — `core/execution_safety.py` remains only for the
+  Emergency stop (`IntentService.halt`) and its tests. `core/ibkr_client.py`
+  refuses all direct place/cancel.
+- Money (G2, `core/ledger.py`): cash = money put in − cost of holdings +
+  realised profit; buys use cash first, a shortfall counts as new money put in;
+  commissions are part of buy cost / reduce sale profit. Portfolios at IBKR hold
+  exactly what filled (entry orders start from zero; `planned_quantity` keeps
+  the plan, "Buy … & manage" again buys what is missing) and can't be edited by hand.
 - Research features (optimisers, scanners, indicators, portfolio bookkeeping)
   work end-to-end.
 
@@ -77,8 +84,9 @@ the user ticks the live authorisation in the app; never bypass that.
 4. **Analyse** single stocks: RSI, MACD, Bollinger, SMA/EMA, RSI screener.
 5. **AI Trading** (rule-based, not ML): RSI(+MACD) signals per portfolio with
    modes off / suggestions / autonomous, guardrails (max trade %, daily trades,
-   turnover, sector cap, breakers) and a kill switch. Approvals create
-   simulation intents only.
+   turnover, sector cap, breakers) and a kill switch. Approvals place orders in
+   the portfolio's own IBKR account (paper or live); portfolios not bought at
+   IBKR only get proposals (approving them is refused).
 
 ## Repository layout
 
@@ -108,8 +116,8 @@ backend/             FastAPI app (thin HTTP layer), 127.0.0.1 only
                      {"event":"ready","port":N}, exits when stdin closes;
                      --worker runs the TWS connector instead; --halt = Emergency
                      stop straight in the DB (tray fallback when the API is down)
-  routers/           stocks, portfolio, indicators, broker (status + simulation
-                     orders), ai_trading, execution (intents/halt/resume),
+  routers/           stocks, portfolio (incl. /summary, /summaries, broker
+                     rebalance), indicators, broker (status), ai_trading,
                      tws (/api/tws paper login, /api/tws-live live login), paper
                      (/api/paper and /api/live: authorise, limits, orders, cancel,
                      resolve unknown, buy portfolio & manage, autonomy checklist)
@@ -118,7 +126,7 @@ core/                Service layer (all business logic)
   db.py              SQLite connection layer (WAL, FULL sync, BEGIN IMMEDIATE,
                      %s→? placeholders, Sapient-specific column-type converters)
   migrations.py      versioned checksummed schema (1 core, 2 safety, 3 tws,
-                     4 profile, 5 strategy, 6 paper, 7 live); migrate()
+                     4 profile, 5 strategy, 6 paper, 7 live, 8 ledger); migrate()
                      runs at API startup after backing up the DB
   database.py        User (local profile)/Portfolio/AITradingSettings/AISignal/
                      BrokerOrder/AIAudit services (SQL via core.db)
@@ -169,9 +177,8 @@ run_dev.py           dev launcher: generates a token, runs uvicorn :8000 + Vite 
 React UI --axios + Bearer <per-launch token>--> FastAPI on 127.0.0.1 (one local user)
    routers --> core services --> core.yahoo (TTL cache) --> yfinance --> Yahoo HTTPS
                              --> SQLite file via core.db (new connection per call)
-   order-like routes (broker/orders, ai approve, rebalance, autonomous engine)
-        --> core/execution_safety.IntentService.admit[_batch]
-        --> safety_* tables (intents, reservations, outbox, audit) — never a broker
+   order routes (ai approve, rebalance, Orders tickets, "Buy & manage", autonomous engine)
+        --> core/tws/paper.admit (portfolio's own paper/live account) --> paper_orders
    TWS connector (separate process, sapient-api --worker) <--tws_* tables--> API
         reads TWS on 127.0.0.1 with an allowlist of read-only requests; when paper
         trading is authorised for that exact account it also sends queued paper
@@ -222,6 +229,7 @@ python -m unittest discover -s tests -p 'test_strategy.py' -v    # calendar, rul
 python -m unittest discover -s tests -p 'test_paper.py' -v       # paper admission, submit protocol, fills, cancel, halt
 python -m unittest discover -s tests -p 'test_live.py' -v        # live: separate auth, real-time only, separation from paper
 python -m unittest discover -s tests -p 'test_g1_safety.py' -v   # audit fixes: account kinds, portfolio-owned sells, DAY-order expiry
+python -m unittest discover -s tests -p 'test_g2_ledger.py' -v   # cash, realised profit, commissions, holdings = fills, rebalance
 python -m compileall -q core backend
 cd frontend && npm run build && npm run lint
 ```

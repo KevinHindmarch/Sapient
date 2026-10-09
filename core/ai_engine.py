@@ -11,9 +11,9 @@ Mode semantics (most-restrictive wins):
     `off`, the scan returns no signals.
   - In `suggestions` mode, signals are persisted as `pending` for the user to
     approve in /ai-inbox.
-  - In `autonomous` mode (both scopes set to autonomous), signals are
-    submitted to the safety admission (IntentService) as simulation intents;
-    nothing is sent to a broker.
+  - In `autonomous` mode (both scopes set to autonomous), signals for a
+    portfolio bought at IBKR become orders in that account (core.tws.paper.admit)
+    when the user allowed automatic orders there.
 
 Guardrails enforced on every candidate signal:
   - max_trade_pct       — single-trade size cap as % of portfolio
@@ -331,8 +331,8 @@ def _maybe_autonomous_execute(
 ) -> list[dict]:
     """Admit durable proposals only; central policy applies to every signal.
 
-    With paper trading on, autonomous proposals become paper orders only if the
-    user also allowed automatic paper orders; otherwise they wait for approval.
+    Autonomous proposals become orders in the portfolio's own account (paper or
+    live) only if the user allowed automatic orders there; otherwise they wait.
     """
     from core.tws import paper
     env = paper.environment_for(portfolio_id)  # the portfolio's paper/live account, else paper if on
@@ -354,24 +354,9 @@ def _maybe_autonomous_execute(
                                                                  "error": str(e), "code": e.code})
                 results.append({"signal_id": sig["id"], "status": "failed", "error": str(e)})
         return results
-    from core.execution_safety import IntentService, signal_request
-    service = IntentService()
-    results = []
-    for sig in persisted_signals:
-        try:
-            intent = service.admit(user_id, signal_request(user_id, sig, origin="ai_autonomous"))
-            results.append({"signal_id": sig["id"], "intent_id": intent["id"],
-                            "status": intent["state"], "execution_enabled": False})
-        except Exception as e:
-            AIAuditService.log(
-                user_id=user_id,
-                event_type="autonomous_failed",
-                portfolio_id=portfolio_id,
-                signal_id=sig["id"],
-                payload={"symbol": sig["symbol"], "action": sig["action"], "error": str(e)},
-            )
-            results.append({"signal_id": sig["id"], "status": "failed", "error": str(e)})
-    return results
+    return [{"signal_id": sig["id"], "status": "awaiting_approval",
+             "detail": "This portfolio isn't bought at Interactive Brokers, so nothing is traded automatically."}
+            for sig in persisted_signals]
 
 
 def scan_portfolio(user_id: int, portfolio_id: int, expires_at: datetime | None = None) -> dict:

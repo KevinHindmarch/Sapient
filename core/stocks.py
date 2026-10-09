@@ -534,12 +534,12 @@ class StockDataService:
         Returns:
             Formatted symbol (with .AX for ASX, raw for US)
         """
+        symbol = symbol.strip().upper()
         if market.upper() == "US":
             return symbol.replace('.AX', '')
-        else:
-            if not symbol.endswith('.AX'):
-                return symbol + '.AX'
-            return symbol
+        if not symbol.endswith('.AX'):
+            return symbol + '.AX'
+        return symbol
     
     @staticmethod
     def get_stock_data(stock_symbols: List[str], period: str = "2y", market: str = "ASX") -> Optional[pd.DataFrame]:

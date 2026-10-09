@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { portfolioApi, stocksApi } from '../lib/api'
+import { money, portfolioApi, PortfolioSummary } from '../lib/api'
 import { Portfolio, Position } from '../types'
 import { useTheme } from '../lib/theme'
 import { useProfile } from '../lib/profile'
@@ -27,6 +27,7 @@ export default function Dashboard() {
   const [totalCurrentValue, setTotalCurrentValue] = useState<number>(0)
   const [loadingReturns, setLoadingReturns] = useState(false)
   const [loadingProgress, setLoadingProgress] = useState({ done: 0, total: 0 })
+  const [summaries, setSummaries] = useState<PortfolioSummary[]>([])
 
   useEffect(() => {
     loadPortfolios()
@@ -46,54 +47,18 @@ export default function Dashboard() {
     }
   }
 
+  // The engine values every portfolio in one call (cash and realised profit included).
+  // Australian and US portfolios are totalled separately: there is no currency conversion.
   const loadRealReturns = async (portfolioList: Portfolio[]) => {
     setLoadingReturns(true)
-
-    // Count total symbols for progress tracking
-    let totalSymbols = 0
-    for (const p of portfolioList) {
-      try {
-        const detail = await portfolioApi.detail(p.id)
-        const positions = detail.data.positions as Position[]
-        totalSymbols += positions.filter(pos => pos.status === 'active').length
-      } catch { /* ignore */ }
-    }
-    setLoadingProgress({ done: 0, total: totalSymbols })
-
+    setLoadingProgress({ done: 0, total: portfolioList.length })
     try {
-      let allInvestment = 0
-      let allCurrentValue = 0
-      let symbolsDone = 0
-
-      for (const p of portfolioList) {
-        const detail = await portfolioApi.detail(p.id)
-        const positions = detail.data.positions as Position[]
-        allInvestment += Number(p.initial_investment)
-
-        const activePositions = positions.filter(pos => pos.status === 'active')
-        const prices: Record<string, number> = {}
-
-        for (const pos of activePositions) {
-          try {
-            const info = await stocksApi.info(pos.symbol)
-            prices[pos.symbol] = info.data.current_price
-          } catch {
-            prices[pos.symbol] = 0
-          }
-          symbolsDone++
-          setLoadingProgress({ done: symbolsDone, total: totalSymbols })
-        }
-
-        const portfolioValue = activePositions.reduce((sum, pos) => {
-          const price = prices[pos.symbol] || Number(pos.avg_cost)
-          return sum + (price * Number(pos.quantity))
-        }, 0)
-
-        allCurrentValue += portfolioValue
-      }
-
-      setTotalCurrentValue(allCurrentValue)
-      setTotalReturn(allCurrentValue - allInvestment)
+      const response = await portfolioApi.summaries()
+      setSummaries(response.data)
+      const aud = response.data.filter((x) => x.currency === 'AUD')
+      setTotalCurrentValue(aud.reduce((sum, x) => sum + x.total_value, 0))
+      setTotalReturn(aud.reduce((sum, x) => sum + x.total_return, 0))
+      setLoadingProgress({ done: portfolioList.length, total: portfolioList.length })
     } catch (error) {
       console.error('Failed to load returns:', error)
     } finally {
@@ -101,8 +66,17 @@ export default function Dashboard() {
     }
   }
 
-  const totalInvestment = portfolios.reduce((sum, p) => sum + Number(p.initial_investment), 0)
+  const audSummaries = summaries.filter((x) => x.currency === 'AUD')
+  const usdSummaries = summaries.filter((x) => x.currency === 'USD')
+  const totalInvestment = summaries.length
+    ? audSummaries.reduce((sum, x) => sum + x.money_put_in, 0)
+    : portfolios.filter((p) => (p.market || 'ASX') !== 'US').reduce((sum, p) => sum + Number(p.initial_investment), 0)
   const returnPct = totalInvestment > 0 && totalReturn !== null ? (totalReturn / totalInvestment) * 100 : 0
+  const usd = usdSummaries.length ? {
+    putIn: usdSummaries.reduce((sum, x) => sum + x.money_put_in, 0),
+    value: usdSummaries.reduce((sum, x) => sum + x.total_value, 0),
+    ret: usdSummaries.reduce((sum, x) => sum + x.total_return, 0),
+  } : null
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -114,8 +88,14 @@ export default function Dashboard() {
           </h1>
         </div>
         <p className="page-subtitle">
-          Manage your ASX portfolio with intelligent optimization
+          Your portfolios at a glance. Totals are in A$; US portfolios are shown separately in US$.
         </p>
+        {usd && (
+          <p className="text-sm theme-text-muted mt-1" data-testid="usd-totals">
+            US portfolios: put in {money(usd.putIn, 'USD', 0)}, worth {money(usd.value, 'USD', 0)}
+            {' '}({usd.ret >= 0 ? '+' : '-'}{money(Math.abs(usd.ret), 'USD', 0)})
+          </p>
+        )}
       </div>
 
       {/* Live price loading banner */}
@@ -155,7 +135,7 @@ export default function Dashboard() {
             <div className="min-w-0">
               <p className={`text-sm font-medium ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Total Invested</p>
               <p className={`text-3xl font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
-                ${totalInvestment.toLocaleString()}
+                {money(totalInvestment, 'AUD', 0)}
               </p>
             </div>
           </div>
@@ -184,7 +164,7 @@ export default function Dashboard() {
               ) : totalReturn !== null ? (
                 <p className={`text-3xl font-bold ${totalReturn >= 0 ? 'text-emerald-400' : 'text-red-400'}`}
                   style={{ textShadow: totalReturn >= 0 ? '0 0 10px rgba(52, 211, 153, 0.3)' : '0 0 10px rgba(248, 113, 113, 0.3)' }}>
-                  {totalReturn >= 0 ? '+' : ''}${Math.abs(Math.round(totalReturn)).toLocaleString()}
+                  {totalReturn >= 0 ? '+' : '-'}{money(Math.abs(totalReturn), 'AUD', 0)}
                 </p>
               ) : (
                 <p className={`text-3xl font-bold ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>$0</p>

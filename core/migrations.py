@@ -534,6 +534,26 @@ ALTER TABLE portfolios ADD COLUMN trading_environment TEXT CHECK (trading_enviro
 UPDATE portfolios SET trading_environment='paper' WHERE paper_started_at IS NOT NULL
 """
 
+# G2: holdings that match IBKR, cash and realised profit.
+_FILLED_SHARES = """(SELECT sum(CASE o.side WHEN 'BUY' THEN CAST(f.shares AS REAL) ELSE -CAST(f.shares AS REAL) END)
+   FROM paper_portfolio_fills f JOIN paper_orders o ON o.id = f.paper_order_id
+   WHERE f.portfolio_id = portfolio_positions.portfolio_id AND o.symbol = portfolio_positions.symbol)"""
+_BUY_PRICE = """(SELECT sum(CAST(f.shares AS REAL) * CAST(f.price AS REAL)) / sum(CAST(f.shares AS REAL))
+   FROM paper_portfolio_fills f JOIN paper_orders o ON o.id = f.paper_order_id
+   WHERE f.portfolio_id = portfolio_positions.portfolio_id AND o.symbol = portfolio_positions.symbol
+   AND o.side = 'BUY')"""
+LEDGER_V1 = f"""
+ALTER TABLE transactions ADD COLUMN realised_pnl DECNUM(15, 2);
+ALTER TABLE transactions ADD COLUMN exec_family TEXT;
+CREATE INDEX idx_transactions_exec_family ON transactions(exec_family);
+ALTER TABLE portfolio_positions ADD COLUMN planned_quantity DECNUM(15, 6);
+UPDATE portfolio_positions SET planned_quantity = quantity
+ WHERE portfolio_id IN (SELECT id FROM portfolios WHERE trading_environment IS NOT NULL);
+UPDATE portfolio_positions SET quantity = max(coalesce({_FILLED_SHARES}, 0), 0),
+       avg_cost = coalesce({_BUY_PRICE}, avg_cost)
+ WHERE status = 'active' AND portfolio_id IN (SELECT id FROM portfolios WHERE trading_environment IS NOT NULL)
+"""
+
 # (version, name, sql). Append only.
 MIGRATIONS = (
     (1, "core", CORE_V1),
@@ -543,6 +563,7 @@ MIGRATIONS = (
     (5, "strategy", STRATEGY_V1),
     (6, "paper", PAPER_V1),
     (7, "live", LIVE_V1),
+    (8, "ledger", LEDGER_V1),
 )
 SAFETY_SCHEMA_VERSION = 2
 

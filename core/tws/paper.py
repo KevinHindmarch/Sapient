@@ -484,7 +484,8 @@ def list_orders(limit: int = 100, env: str | None = None) -> list[dict]:
                         LEFT JOIN portfolios p ON p.id = o.portfolio_id {where}
                         ORDER BY o.created_at DESC LIMIT %s""", (*params, limit))
         orders = [dict(r) for r in cur.fetchall()]
-        cur.execute("SELECT * FROM paper_executions ORDER BY received_at DESC LIMIT 500")
+        cur.execute("""SELECT * FROM paper_executions WHERE paper_order_id IS NOT NULL
+                       ORDER BY received_at DESC LIMIT 500""")
         fills = [dict(r) for r in cur.fetchall()]
     by_order: dict[str, list] = {}
     for fill in fills:
@@ -518,15 +519,15 @@ def _has_tables(table: str = "paper_binding") -> bool:
 
 
 def environment_for(portfolio_id: int | None) -> str | None:
-    """Where a portfolio's AI orders go: its own environment, else paper when paper is on, else None (simulation)."""
-    if portfolio_id:
-        with db.transaction() as (cur, _):
-            if db.table_exists(cur, "live_binding"):
-                cur.execute("SELECT trading_environment FROM portfolios WHERE id=%s", (portfolio_id,))
-                row = cur.fetchone()
-                if row and row.get("trading_environment"):
-                    return row["trading_environment"]
-    return "paper" if active("paper") else None
+    """Where a portfolio's orders go: the account it was bought in (paper/live), else nowhere."""
+    if not portfolio_id:
+        return None
+    with db.transaction() as (cur, _):
+        if not db.table_exists(cur, "live_binding"):
+            return None
+        cur.execute("SELECT trading_environment FROM portfolios WHERE id=%s", (portfolio_id,))
+        row = cur.fetchone()
+    return (row or {}).get("trading_environment") or None
 
 
 def signal_order(signal: dict, origin: str, env: str = "paper") -> dict:
@@ -543,15 +544,19 @@ def signal_order(signal: dict, origin: str, env: str = "paper") -> dict:
 # ---- portfolios trading at the broker -------------------------------------------
 def start_portfolio(portfolio_id: int, user_id: int, prices: dict[str, float], env: str = "paper",
                     mode: str | None = None) -> dict:
-    """Buy a portfolio's listed holdings once in this environment, then let AI Trading manage it.
+    """Buy a portfolio's planned holdings in this environment, then let AI Trading manage it.
 
-    Each holding becomes one BUY order (whole shares, rounded down). Orders that a
-    limit refuses are reported, not forced. ``mode`` ("suggestions" = you approve
-    each trade, "autonomous" = fully automatic) sets the portfolio's AI mode.
+    The first time, each holding's whole-share quantity becomes its plan and the
+    portfolio's shares start at zero: from then on it holds exactly what fills.
+    Pressing it again buys whatever is still missing from the plan (refused,
+    expired or unfilled legs), never more. Orders a limit refuses are reported,
+    not forced. ``mode`` ("suggestions" = you approve each trade, "autonomous" =
+    fully automatic) sets the portfolio's AI mode.
     """
     e = get_env(env)
     if mode not in (None, "suggestions", "autonomous"):
         raise PaperError("invalid_mode", "Choose approve-each-trade or fully automatic.")
+    working = "','".join(WORKING)
     with db.transaction() as (cur, _):
         cur.execute("SELECT * FROM portfolios WHERE id=%s AND user_id=%s", (portfolio_id, user_id))
         portfolio = cur.fetchone()
@@ -563,36 +568,65 @@ def start_portfolio(portfolio_id: int, user_id: int, prices: dict[str, float], e
         if current and current != e.name:
             raise PaperError("wrong_environment", f"This portfolio already trades in {get_env(current).label}. "
                                                   "Save a copy of it to trade it the other way.")
-        if portfolio.get(e.started_column):
-            raise PaperError("already_started", f"This portfolio already trades in {e.label}.")
-        cur.execute("""SELECT symbol, quantity FROM portfolio_positions
+        first_time = not portfolio.get(e.started_column)
+        cur.execute("SELECT id, quantity FROM portfolio_positions WHERE portfolio_id=%s AND status='active'",
+                    (portfolio_id,))
+        original = {r["id"]: r["quantity"] for r in cur.fetchall()}
+        if first_time:
+            # The model's shares become the plan; real shares arrive with the fills.
+            cur.execute("""UPDATE portfolio_positions SET planned_quantity = CAST(CAST(quantity AS REAL) AS INTEGER),
+                           quantity = 0 WHERE portfolio_id=%s AND status='active'""", (portfolio_id,))
+        cur.execute("""SELECT symbol, quantity, planned_quantity FROM portfolio_positions
                        WHERE portfolio_id=%s AND status='active' ORDER BY id""", (portfolio_id,))
         holdings = [dict(r) for r in cur.fetchall()]
+        cur.execute(f"""SELECT symbol, coalesce(decimal_sum(quantity - coalesce(filled_quantity, 0)), '0') AS q,
+                          count(*) AS n FROM paper_orders WHERE portfolio_id=%s AND environment=%s AND side='BUY'
+                          AND state IN ('{working}') GROUP BY symbol""", (portfolio_id, e.name))
+        buying = {r["symbol"]: Decimal(str(r["q"])) for r in cur.fetchall()}
+        cur.execute("""SELECT symbol, count(*) AS n FROM paper_orders WHERE portfolio_id=%s AND environment=%s
+                       AND origin='entry' GROUP BY symbol""", (portfolio_id, e.name))
+        attempts = {r["symbol"]: r["n"] for r in cur.fetchall()}
+    if not first_time and not any(int(Decimal(str(h["planned_quantity"] or 0))) > Decimal(str(h["quantity"] or 0))
+                                  + buying.get(h["symbol"], 0) for h in holdings):
+        raise PaperError("already_started", f"This portfolio already holds everything it planned in {e.label}.")
     results = []
     for holding in holdings:
-        symbol, quantity = holding["symbol"], int(Decimal(str(holding["quantity"])))
-        if quantity < 1:
+        symbol = holding["symbol"]
+        planned = int(Decimal(str(holding["planned_quantity"] or 0)))
+        quantity = int(planned - Decimal(str(holding["quantity"] or 0)) - buying.get(symbol, 0))
+        if planned < 1:
             results.append({"symbol": symbol, "ok": False, "message": "Less than one whole share."})
             continue
+        if quantity < 1:
+            continue  # already held or being bought
         if not prices.get(symbol):
             results.append({"symbol": symbol, "ok": False, "message": "No price available right now."})
             continue
+        attempt = attempts.get(symbol, 0)
+        key = f"entry:{e.name}:{portfolio_id}:{symbol}" + (f":{attempt + 1}" if attempt else "")
         try:
-            order = admit({"origin": "entry", "idempotency_key": f"entry:{e.name}:{portfolio_id}:{symbol}",
-                           "symbol": symbol, "side": "BUY", "quantity": quantity,
-                           "reference_price": str(prices[symbol]), "portfolio_id": portfolio_id}, user_id, e.name)
+            order = admit({"origin": "entry", "idempotency_key": key, "symbol": symbol, "side": "BUY",
+                           "quantity": quantity, "reference_price": str(prices[symbol]),
+                           "portfolio_id": portfolio_id}, user_id, e.name)
             results.append({"symbol": symbol, "ok": True, "order_id": order["id"], "quantity": quantity})
         except PaperError as exc:
             results.append({"symbol": symbol, "ok": False, "code": exc.code, "message": str(exc)})
-    started = any(r["ok"] for r in results)
-    if started:
-        with db.transaction() as (cur, _):
+    queued = sum(r["ok"] for r in results)
+    started = bool(queued) or not first_time
+    with db.transaction() as (cur, _):
+        if first_time and not queued:
+            # Nothing could be bought: undo the plan so the portfolio is exactly as before.
+            for position_id, quantity in original.items():
+                cur.execute("UPDATE portfolio_positions SET quantity=%s, planned_quantity=NULL WHERE id=%s",
+                            (quantity, position_id))
+        elif first_time:
             cur.execute(f"UPDATE portfolios SET {e.started_column}=%s, trading_environment=%s WHERE id=%s",
                         (_now(), e.name, portfolio_id))
-            if mode:
-                cur.execute("UPDATE portfolios SET ai_mode=%s WHERE id=%s", (mode, portfolio_id))
-            _audit(cur, f"{e.name}_portfolio_started", payload={"portfolio_id": portfolio_id, "mode": mode,
-                                                                 "queued": sum(r["ok"] for r in results)})
+        if started and mode:
+            cur.execute("UPDATE portfolios SET ai_mode=%s WHERE id=%s", (mode, portfolio_id))
+        if queued:
+            _audit(cur, f"{e.name}_portfolio_{'started' if first_time else 'topped_up'}",
+                   payload={"portfolio_id": portfolio_id, "mode": mode, "queued": queued})
     return {"portfolio_id": portfolio_id, "environment": e.name, "started": started, "results": results}
 
 
