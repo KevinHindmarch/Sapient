@@ -127,7 +127,8 @@ for (let i = 0; i < 60 && !tws?.worker_running; i++) {
   if (!tws.worker_running) await new Promise((r) => setTimeout(r, 1000))
 }
 check(tws?.worker_running, `TWS connector is running (state ${tws?.state})`)
-await page.waitForSelector('[data-testid="tws-pill"]', { timeout: 30_000 })
+// Attached, not visible: a narrow window hides the sidebar (the pill is then in the menu).
+await page.waitForSelector('[data-testid="tws-pill"]', { state: 'attached', timeout: 30_000 })
 
 await page.evaluate(() => { location.hash = '#/brokerage' })
 await page.waitForSelector('[data-testid="tws-status"]', { timeout: 30_000 })

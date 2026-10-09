@@ -247,6 +247,7 @@ export default function Layout() {
               Help & Glossary
             </button>
 
+            <TwsStatusPill />
             {tradingNavItems.map((item) => (
               <NavLink
                 key={item.path}
