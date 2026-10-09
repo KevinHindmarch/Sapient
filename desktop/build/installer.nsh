@@ -1,6 +1,10 @@
 ; Sapient installer customisations (included by electron-builder's NSIS script).
 
-Var SapientPreviousVersion
+; Only the installer uses this (the uninstaller is compiled from the same
+; script, and an unused variable is a build error there).
+!ifndef BUILD_UNINSTALLER
+  Var SapientPreviousVersion
+!endif
 
 ; Show the installer's step-by-step detail list instead of hiding it.
 !macro customHeader
