@@ -14,9 +14,9 @@ const REPO = 'Sapient'
 // GitHub personal access tokens: classic (ghp_) or fine-grained (github_pat_).
 const TOKEN_PATTERN = /^(ghp_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{40,})$/
 
-// The repository is private, so downloads need a read-only GitHub token. It is
-// stored only on this PC, encrypted with Windows DPAPI (Electron safeStorage),
-// and never sent to the Sapient UI or engine.
+// The repository is public today, so no token is needed. If it is made private,
+// downloads need a read-only GitHub token: stored only on this PC, encrypted
+// with Windows DPAPI (Electron safeStorage), never sent to the UI or engine.
 function tokenFile(): string {
   return path.join(app.getPath('userData'), 'github-update-token.bin')
 }
@@ -111,7 +111,7 @@ export function registerUpdater(getWindow: () => BrowserWindow | null, logDir: s
           status: 'unavailable', currentVersion,
           message: loadToken()
             ? 'GitHub refused the access token. It may have expired: create a new one and save it below.'
-            : 'The Sapient repository is private. Add a GitHub access token below to check for updates.',
+            : 'GitHub did not allow the update check. If the Sapient repository is private, add a GitHub access token below.',
         }
       }
       return { status: 'unavailable', currentVersion, message: 'Could not reach GitHub to check for updates. Check your internet connection.' }

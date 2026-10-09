@@ -138,20 +138,20 @@ export default function UpdatesCard() {
       {updates && (
         <div className="mt-6 pt-5 border-t theme-border text-sm theme-text-secondary">
           <h4 className="font-semibold theme-text flex items-center gap-2 mb-1">
-            <KeyRound className="w-4 h-4" /> GitHub access {tokenConfigured ? '(saved)' : '(needed for a private repository)'}
+            <KeyRound className="w-4 h-4" /> GitHub access {tokenConfigured ? '(saved)' : '(optional)'}
           </h4>
           <p className="mb-2">
-            Sapient's downloads are in a private GitHub repository, so checking for updates needs a read-only access
-            token. It is stored only on this PC, encrypted by Windows.
+            Not needed today. If the Sapient repository is ever made private, checking for updates needs a read-only
+            GitHub access token. It is stored only on this PC, encrypted by Windows.
           </p>
           {!tokenConfigured && (
-            <ol className="list-decimal ml-5 space-y-1 mb-3 text-xs">
+            <details className="mb-3 text-xs"><summary className="cursor-pointer">How to create a token</summary><ol className="list-decimal ml-5 space-y-1 mt-2">
               <li>On github.com open <strong>Settings → Developer settings → Personal access tokens → Fine-grained tokens</strong>.</li>
               <li>Click <strong>Generate new token</strong>; choose an expiry (e.g. 1 year).</li>
               <li>Repository access: <strong>Only select repositories → KevinHindmarch/Sapient</strong>.</li>
               <li>Permissions: <strong>Contents → Read-only</strong> (nothing else).</li>
               <li>Generate, copy the token (starts with <span className="font-mono">github_pat_</span>) and paste it here.</li>
-            </ol>
+            </ol></details>
           )}
           <div className="flex flex-wrap gap-2">
             <input

@@ -6,8 +6,7 @@ by step behind safety checks. Personal app for Kevin and family.
 
 ## Install
 
-1. Open the [Releases page](https://github.com/KevinHindmarch/Sapient/releases)
-   (sign in to GitHub — the repository is private).
+1. Open the [Releases page](https://github.com/KevinHindmarch/Sapient/releases).
 2. Under the newest release, download **`Sapient-Setup-x.y.z.exe`**.
 3. Run it. Windows may show **"Windows protected your PC"** because the app is
    not code-signed: click **More info → Run anyway**.
@@ -25,8 +24,6 @@ Either:
 
 - **In Sapient:** Settings → Updates → **Check for updates** → **Download update**
   → **Restart & install**. Only the changed parts are downloaded when possible.
-  Because the repository is private, paste a read-only GitHub token once
-  (instructions are on that screen).
 - **Or by hand:** download the newer `Sapient-Setup-x.y.z.exe` from Releases and
   run it. It detects the installed version and upgrades it in place, keeping
   your data. Sapient backs up its database before upgrading it.
