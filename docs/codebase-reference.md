@@ -11,8 +11,8 @@ Snapshot of the code as of 2026-10-09 (commit 88d984d). Summary and rules live i
   `/api/broker`, `/api/ai`, `/api/execution`; plus `GET /api/health`.
 - If `frontend/dist` exists: `/` → index.html (no-cache), `/assets` static mount,
   catch-all serves files or falls back to index.html (paths starting `api` → 404 JSON).
-- Launchers: `server.py` (uvicorn `0.0.0.0:$PORT`, reload=True), `run_dev.py` /
-  `start.sh` (backend 8000 + Vite 5000), `app.py` (execs server.py).
+- Launchers: `server.py` (uvicorn `127.0.0.1:$PORT`), `run_dev.py` /
+  backend 8000 + Vite 5000; both bind 127.0.0.1.
 
 ## 2. Auth (`backend/auth_utils.py`)
 
@@ -153,7 +153,7 @@ off and reports `broker_confirmed: False`.
 - Absolute paths: `/logo.png` (Layout, Login, Register), `/vite.svg` favicon,
   `window.location.href = '/login'` in api.ts 401 handler.
 - `target="_blank"` links: BrokerageSettings (IBKR site), StockAnalysis (company site).
-- Unused deps: jspdf, jspdf-autotable, @tanstack/react-table. Unused API
+- Unused API
   functions include `/api/execution/*`, backtest, compareStrategies, trade.
 - Dashboard does an N+1 fetch (list → detail per portfolio → info per position).
 

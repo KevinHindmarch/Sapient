@@ -19,7 +19,7 @@ def run_servers():
         print("Starting FastAPI backend on port 8000...")
         backend = subprocess.Popen(
             [sys.executable, "-m", "uvicorn", "backend.main:app", 
-             "--host", "0.0.0.0", "--port", "8000", "--reload"],
+             "--host", "127.0.0.1", "--port", "8000", "--reload"],
             cwd=os.path.dirname(os.path.abspath(__file__))
         )
         processes.append(backend)

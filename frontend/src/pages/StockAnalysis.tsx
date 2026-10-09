@@ -523,7 +523,7 @@ export default function StockAnalysis() {
                         <YAxis domain={['auto', 'auto']} tick={{ fontSize: 12, fill: isDark ? '#94a3b8' : '#64748b' }} stroke={isDark ? '#64748b' : '#94a3b8'} />
                         <Tooltip
                           contentStyle={tooltipStyle}
-                          labelFormatter={(value) => new Date(value).toLocaleDateString()}
+                          labelFormatter={(value) => new Date(String(value)).toLocaleDateString()}
                           formatter={(value: number) => [`${currencySymbol}${value?.toFixed(2) || 'N/A'}`, '']}
                         />
                         <Line type="monotone" dataKey="price" stroke="#38bdf8" strokeWidth={2} dot={false} />
@@ -557,7 +557,7 @@ export default function StockAnalysis() {
                         <YAxis domain={[0, 100]} tick={{ fontSize: 12, fill: isDark ? '#94a3b8' : '#64748b' }} stroke={isDark ? '#64748b' : '#94a3b8'} />
                         <Tooltip
                           contentStyle={tooltipStyle}
-                          labelFormatter={(value) => new Date(value).toLocaleDateString()}
+                          labelFormatter={(value) => new Date(String(value)).toLocaleDateString()}
                           formatter={(value: number) => [value?.toFixed(2) || 'N/A', 'RSI']}
                         />
                         <ReferenceLine y={70} stroke="#f87171" strokeDasharray="3 3" />

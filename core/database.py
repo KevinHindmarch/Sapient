@@ -1,5 +1,5 @@
 """
-Core database module - shared between Streamlit and FastAPI
+Core database module
 """
 
 import os

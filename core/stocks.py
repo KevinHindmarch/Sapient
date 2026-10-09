@@ -1,5 +1,5 @@
 """
-Core stock data service - shared between Streamlit and FastAPI
+Core stock data service
 """
 
 import yfinance as yf

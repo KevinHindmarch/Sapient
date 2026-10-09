@@ -64,7 +64,7 @@ export const portfolioApi = {
     api.post('/portfolio/backtest', { symbols, weights, initial_investment, period }),
   compareStrategies: (symbols: string[], investment_amount: number, period: string = '2y') =>
     api.post('/portfolio/compare-strategies', { symbols, investment_amount, period }),
-  save: (name: string, optimization_results: Record<string, unknown>, investment_amount: number, mode: string, risk_tolerance: string, market: string = 'ASX') =>
+  save: (name: string, optimization_results: object, investment_amount: number, mode: string, risk_tolerance: string, market: string = 'ASX') =>
     api.post('/portfolio/save', { name, optimization_results, investment_amount, mode, risk_tolerance, market }),
   list: () => api.get('/portfolio/list'),
   detail: (id: number) => api.get(`/portfolio/${id}`),
