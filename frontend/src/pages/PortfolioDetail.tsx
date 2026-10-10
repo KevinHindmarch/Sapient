@@ -416,62 +416,34 @@ export default function PortfolioDetail() {
   const totalReturnPct = summary ? summary.total_return_pct : costBasis > 0 ? ((totalValue - costBasis) / costBasis) * 100 : 0
 
   const generateGrowthData = () => {
-    const initial = Number(portfolio.initial_investment)
+    // Starts at the money put in and ends at today's value including cash (the same figures as the cards above).
+    const initial = summary ? summary.money_put_in : Number(portfolio.initial_investment)
+    const valueNow = summary ? summary.total_value : totalValue
     const expectedReturn = Number(portfolio.expected_return || 0.10)
     const createdAt = new Date(portfolio.created_at)
-    const today = new Date()
-    const daysSinceCreation = Math.max(differenceInDays(today, createdAt), 1)
-    
-    const minProjectionDays = 365
-    const projectionDays = Math.max(daysSinceCreation, minProjectionDays)
-    
-    const dataPoints: { date: string; expected: number; actual: number | null }[] = []
-    
-    const snapshotMap = new Map<string, number>()
-    if (data?.snapshots) {
-      data.snapshots.forEach((s: Record<string, unknown>) => {
-        const dateStr = format(new Date(s.snapshot_date as string), 'MMM d, yyyy')
-        snapshotMap.set(dateStr, Number(s.total_value))
-      })
-    }
-    
+    const daysSinceCreation = Math.max(differenceInDays(new Date(), createdAt), 0)
+    const projectionDays = Math.max(daysSinceCreation, 365)
     const dailyRate = expectedReturn / 365
-    const numPoints = 12
-    const interval = Math.max(1, Math.floor(projectionDays / numPoints))
-    
-    for (let i = 0; i <= projectionDays; i += interval) {
-      const date = new Date(createdAt)
-      date.setDate(date.getDate() + i)
-      const dateStr = format(date, 'MMM d, yyyy')
-      const shortDate = format(date, 'MMM yyyy')
-      
-      const expectedValue = initial * (1 + dailyRate * i)
-      
-      let actualValue: number | null = null
-      if (i <= daysSinceCreation) {
-        actualValue = snapshotMap.get(dateStr) || null
-        if (i === 0) actualValue = initial
-      }
-      
-      dataPoints.push({
-        date: shortDate,
-        expected: Math.round(expectedValue),
-        actual: actualValue
-      })
-    }
-    
-    const todayIdx = dataPoints.findIndex((_, idx) => {
-      const dayOffset = idx * interval
-      return dayOffset >= daysSinceCreation
+    const expectedAt = (day: number) => Math.round(initial * (1 + dailyRate * day))
+
+    const snapshotMap = new Map<string, number>()
+    data?.snapshots?.forEach((s: Record<string, unknown>) => {
+      snapshotMap.set(format(new Date(s.snapshot_date as string), 'MMM d, yyyy'), Number(s.total_value))
     })
-    
-    if (todayIdx > 0 && todayIdx < dataPoints.length) {
-      dataPoints[todayIdx].actual = Math.round(totalValue)
-    } else if (dataPoints.length > 1) {
-      dataPoints[1].actual = Math.round(totalValue)
+
+    const interval = Math.max(1, Math.floor(projectionDays / 12))
+    const points: { day: number; date: string; expected: number; actual: number | null }[] = []
+    for (let day = 0; day <= projectionDays; day += interval) {
+      const date = new Date(createdAt)
+      date.setDate(date.getDate() + day)
+      const recorded = day > 0 && day < daysSinceCreation ? snapshotMap.get(format(date, 'MMM d, yyyy')) ?? null : null
+      points.push({ day, date: format(date, 'MMM yyyy'), expected: expectedAt(day), actual: day === 0 ? Math.round(initial) : recorded })
     }
-    
-    return dataPoints
+    // Today gets its own point, labelled as such, instead of borrowing the next month's slot.
+    const today = { day: daysSinceCreation, date: 'Today', expected: expectedAt(daysSinceCreation), actual: Math.round(valueNow) }
+    const after = points.findIndex((p) => p.day > daysSinceCreation)
+    points.splice(after === -1 ? points.length : Math.max(after, 1), 0, today)
+    return points.filter((p) => p.date === 'Today' || p.day === 0 || p.day !== daysSinceCreation)
   }
 
   const growthChartData = generateGrowthData()

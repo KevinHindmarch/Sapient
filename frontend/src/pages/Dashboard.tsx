@@ -19,7 +19,6 @@ export default function Dashboard() {
   const isDark = theme === 'dark'
   const [portfolios, setPortfolios] = useState<Portfolio[]>([])
   const [loading, setLoading] = useState(true)
-  const [totalReturn, setTotalReturn] = useState<number | null>(null)
   const [loadingReturns, setLoadingReturns] = useState(false)
   const [loadingProgress, setLoadingProgress] = useState({ done: 0, total: 0 })
   const [summaries, setSummaries] = useState<PortfolioSummary[]>([])
@@ -50,8 +49,6 @@ export default function Dashboard() {
     try {
       const response = await portfolioApi.summaries()
       setSummaries(response.data)
-      const aud = response.data.filter((x) => x.currency === 'AUD')
-      setTotalReturn(aud.reduce((sum, x) => sum + x.total_return, 0))
       setLoadingProgress({ done: portfolioList.length, total: portfolioList.length })
     } catch (error) {
       console.error('Failed to load returns:', error)
@@ -60,17 +57,17 @@ export default function Dashboard() {
     }
   }
 
-  const audSummaries = summaries.filter((x) => x.currency === 'AUD')
-  const usdSummaries = summaries.filter((x) => x.currency === 'USD')
-  const totalInvestment = summaries.length
-    ? audSummaries.reduce((sum, x) => sum + x.money_put_in, 0)
-    : portfolios.filter((p) => (p.market || 'ASX') !== 'US').reduce((sum, p) => sum + Number(p.initial_investment), 0)
-  const returnPct = totalInvestment > 0 && totalReturn !== null ? (totalReturn / totalInvestment) * 100 : 0
-  const usd = usdSummaries.length ? {
-    putIn: usdSummaries.reduce((sum, x) => sum + x.money_put_in, 0),
-    value: usdSummaries.reduce((sum, x) => sum + x.total_value, 0),
-    ret: usdSummaries.reduce((sum, x) => sum + x.total_return, 0),
-  } : null
+  // One row of totals per currency that has portfolios (A$ shown when there are none at all).
+  const totalsByCurrency = (['AUD', 'USD'] as const).flatMap((currency) => {
+    const mine = summaries.filter((x) => x.currency === currency)
+    const listed = portfolios.filter((p) => ((p.market || 'ASX') === 'US' ? 'USD' : 'AUD') === currency)
+    if (!listed.length && !(currency === 'AUD' && !portfolios.length)) return []
+    const putIn = mine.length ? mine.reduce((sum, x) => sum + x.money_put_in, 0)
+      : listed.reduce((sum, p) => sum + Number(p.initial_investment), 0)
+    const gain = mine.length ? mine.reduce((sum, x) => sum + x.total_return, 0) : null
+    return [{ currency, putIn, gain, pct: gain !== null && putIn > 0 ? (gain / putIn) * 100 : null }]
+  })
+  const summaryFor = (id: number) => summaries.find((x) => x.portfolio_id === id)
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -82,14 +79,8 @@ export default function Dashboard() {
           </h1>
         </div>
         <p className="page-subtitle">
-          Your portfolios at a glance. Totals are in A$; US portfolios are shown separately in US$.
+          Your portfolios at a glance. Australian and US portfolios are totalled separately (A$ and US$), never converted.
         </p>
-        {usd && (
-          <p className="text-sm theme-text-muted mt-1" data-testid="usd-totals">
-            US portfolios: put in {money(usd.putIn, 'USD', 0)}, worth {money(usd.value, 'USD', 0)}
-            {' '}({usd.ret >= 0 ? '+' : '-'}{money(Math.abs(usd.ret), 'USD', 0)})
-          </p>
-        )}
       </div>
 
       {/* Live price loading banner */}
@@ -119,86 +110,10 @@ export default function Dashboard() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Total Invested */}
-        <div className="stat-card group hover:border-sky-500/30 transition-all duration-300" style={{ boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)' }}>
-          <div className="flex items-center gap-4">
-            <div className="p-4 bg-gradient-to-br from-sky-500 to-indigo-600 rounded-2xl shadow-lg shrink-0" style={{ boxShadow: '0 0 20px rgba(56, 189, 248, 0.3)' }}>
-              <Briefcase className="w-7 h-7 text-white" />
-            </div>
-            <div className="min-w-0">
-              <p className={`text-sm font-medium ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Total Invested</p>
-              <p className={`text-3xl font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
-                {money(totalInvestment, 'AUD', 0)}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Total Gain */}
-        <div className="stat-card group hover:border-emerald-500/30 transition-all duration-300" style={{ boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)' }}>
-          <div className="flex items-center gap-4">
-            <div className={`p-4 rounded-2xl shadow-lg shrink-0 ${
-              !loadingReturns && totalReturn !== null && totalReturn < 0
-                ? 'bg-gradient-to-br from-red-500 to-rose-600'
-                : 'bg-gradient-to-br from-emerald-500 to-teal-600'
-            }`} style={{ boxShadow: !loadingReturns && totalReturn !== null && totalReturn < 0 ? '0 0 20px rgba(248, 113, 113, 0.3)' : '0 0 20px rgba(52, 211, 153, 0.3)' }}>
-              {!loadingReturns && totalReturn !== null && totalReturn < 0
-                ? <TrendingDown className="w-7 h-7 text-white" />
-                : <TrendingUp className="w-7 h-7 text-white" />
-              }
-            </div>
-            <div className="min-w-0">
-              <p className={`text-sm font-medium ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Total Gain</p>
-              {loadingReturns ? (
-                <div className="space-y-2 mt-1">
-                  <SkeletonPulse className="h-8 w-28" />
-                  <p className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Loading live data…</p>
-                </div>
-              ) : totalReturn !== null ? (
-                <p className={`text-3xl font-bold ${totalReturn >= 0 ? 'text-emerald-400' : 'text-red-400'}`}
-                  style={{ textShadow: totalReturn >= 0 ? '0 0 10px rgba(52, 211, 153, 0.3)' : '0 0 10px rgba(248, 113, 113, 0.3)' }}>
-                  {totalReturn >= 0 ? '+' : '-'}{money(Math.abs(totalReturn), 'AUD', 0)}
-                </p>
-              ) : (
-                <p className={`text-3xl font-bold ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>$0</p>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Current Return % */}
-        <div className="stat-card group hover:border-emerald-500/30 transition-all duration-300" style={{ boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)' }}>
-          <div className="flex items-center gap-4">
-            <div className={`p-4 rounded-2xl shadow-lg shrink-0 ${
-              !loadingReturns && totalReturn !== null && totalReturn < 0
-                ? 'bg-gradient-to-br from-red-500 to-rose-600'
-                : 'bg-gradient-to-br from-emerald-500 to-teal-600'
-            }`} style={{ boxShadow: !loadingReturns && totalReturn !== null && totalReturn < 0 ? '0 0 20px rgba(248, 113, 113, 0.3)' : '0 0 20px rgba(52, 211, 153, 0.3)' }}>
-              {!loadingReturns && totalReturn !== null && totalReturn < 0
-                ? <TrendingDown className="w-7 h-7 text-white" />
-                : <TrendingUp className="w-7 h-7 text-white" />
-              }
-            </div>
-            <div className="min-w-0">
-              <p className={`text-sm font-medium ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Current Return</p>
-              {loadingReturns ? (
-                <div className="space-y-2 mt-1">
-                  <SkeletonPulse className="h-8 w-20" />
-                  <p className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Loading live data…</p>
-                </div>
-              ) : totalReturn !== null ? (
-                <p className={`text-3xl font-bold ${totalReturn >= 0 ? 'text-emerald-400' : 'text-red-400'}`}
-                  style={{ textShadow: totalReturn >= 0 ? '0 0 10px rgba(52, 211, 153, 0.3)' : '0 0 10px rgba(248, 113, 113, 0.3)' }}>
-                  {totalReturn >= 0 ? '+' : ''}{returnPct.toFixed(2)}%
-                </p>
-              ) : (
-                <p className={`text-3xl font-bold ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>--</p>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
+      {totalsByCurrency.map((t) => (
+        <TotalsRow key={t.currency} {...t} loading={loadingReturns} isDark={isDark}
+          label={totalsByCurrency.length > 1 ? (t.currency === 'USD' ? 'US portfolios (US$)' : 'Australian portfolios (A$)') : null} />
+      ))}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <Link to="/auto-builder" className="card card-hover group">
@@ -300,22 +215,90 @@ export default function Dashboard() {
                     </p>
                   </div>
                   <div className="text-right shrink-0">
-                    <p className={`font-medium ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
-                      ${Number(portfolio.initial_investment).toLocaleString()}
-                    </p>
-                    {loadingReturns ? (
-                      <SkeletonPulse className="h-3 w-20 mt-1 ml-auto" />
-                    ) : portfolio.expected_return ? (
-                      <p className="text-sm text-emerald-400">
-                        +{(Number(portfolio.expected_return) * 100).toFixed(1)}% expected
-                      </p>
-                    ) : null}
+                    {(() => {
+                      const sum = summaryFor(portfolio.id)
+                      const currency = (portfolio.market || 'ASX') === 'US' ? 'USD' : 'AUD'
+                      return (
+                        <>
+                          <p className={`font-medium ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+                            {money(sum ? sum.total_value : Number(portfolio.initial_investment), currency, 0)}
+                          </p>
+                          {loadingReturns ? (
+                            <SkeletonPulse className="h-3 w-20 mt-1 ml-auto" />
+                          ) : sum ? (
+                            <p className={`text-sm ${sum.total_return >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                              {sum.total_return >= 0 ? '+' : ''}{sum.total_return_pct.toFixed(2)}%
+                              {' '}({sum.total_return >= 0 ? '+' : '-'}{money(Math.abs(sum.total_return), currency, 0)})
+                            </p>
+                          ) : null}
+                        </>
+                      )
+                    })()}
                   </div>
                 </div>
               </Link>
             ))}
           </div>
         )}
+      </div>
+    </div>
+  )
+}
+
+/** Money put in, gain and return for one currency (A$ and US$ are never added together). */
+function TotalsRow({ currency, putIn, gain, pct, loading, isDark, label }: {
+  currency: 'AUD' | 'USD'; putIn: number; gain: number | null; pct: number | null; loading: boolean
+  isDark: boolean; label: string | null
+}) {
+  const down = !loading && gain !== null && gain < 0
+  const tone = down ? 'text-red-400' : 'text-emerald-400'
+  const badge = down ? 'bg-gradient-to-br from-red-500 to-rose-600' : 'bg-gradient-to-br from-emerald-500 to-teal-600'
+  const Trend = down ? TrendingDown : TrendingUp
+  const muted = isDark ? 'text-slate-400' : 'text-slate-600'
+  const skeleton = (
+    <div className="space-y-2 mt-1">
+      <SkeletonPulse className="h-8 w-28" />
+      <p className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Loading live data…</p>
+    </div>
+  )
+  const card = { boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)' }
+  return (
+    <div className="space-y-2" data-testid={`totals-${currency.toLowerCase()}`}>
+      {label && <h2 className={`text-sm font-semibold ${muted}`}>{label}</h2>}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="stat-card" style={card}>
+          <div className="flex items-center gap-4">
+            <div className="p-4 bg-gradient-to-br from-sky-500 to-indigo-600 rounded-2xl shadow-lg shrink-0">
+              <Briefcase className="w-7 h-7 text-white" />
+            </div>
+            <div className="min-w-0">
+              <p className={`text-sm font-medium ${muted}`}>Money put in</p>
+              <p className={`text-3xl font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{money(putIn, currency, 0)}</p>
+            </div>
+          </div>
+        </div>
+        <div className="stat-card" style={card}>
+          <div className="flex items-center gap-4">
+            <div className={`p-4 rounded-2xl shadow-lg shrink-0 ${badge}`}><Trend className="w-7 h-7 text-white" /></div>
+            <div className="min-w-0">
+              <p className={`text-sm font-medium ${muted}`}>Total gain</p>
+              {loading ? skeleton : gain !== null ? (
+                <p className={`text-3xl font-bold ${tone}`}>{gain >= 0 ? '+' : '-'}{money(Math.abs(gain), currency, 0)}</p>
+              ) : <p className={`text-3xl font-bold ${muted}`}>--</p>}
+            </div>
+          </div>
+        </div>
+        <div className="stat-card" style={card}>
+          <div className="flex items-center gap-4">
+            <div className={`p-4 rounded-2xl shadow-lg shrink-0 ${badge}`}><Trend className="w-7 h-7 text-white" /></div>
+            <div className="min-w-0">
+              <p className={`text-sm font-medium ${muted}`}>Return</p>
+              {loading ? skeleton : pct !== null ? (
+                <p className={`text-3xl font-bold ${tone}`}>{pct >= 0 ? '+' : ''}{pct.toFixed(2)}%</p>
+              ) : <p className={`text-3xl font-bold ${muted}`}>--</p>}
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   )
