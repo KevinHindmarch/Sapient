@@ -147,19 +147,6 @@ def rank_universe(symbols: list[str], model: str = "B",
     return score(stocks, model)
 
 
-OVERVALUED_Z = -0.25   # a holding is sold as overvalued only below this (a buffer, so stocks near average don't churn)
-
-
-def undervalued(stock: StockFactors) -> bool:
-    """Cheaper than the market average on book-to-market (value z-score above 0), user decision 2026-10-10."""
-    return stock.z.get("HML", float("-inf")) > 0
-
-
-def overvalued(stock: StockFactors) -> bool:
-    """Clearly more expensive than average on book-to-market (no value data: not proven cheap)."""
-    return stock.z.get("HML", float("-inf")) < OVERVALUED_Z
-
-
 def universe(market: str) -> list[str]:
     """The stocks Sapient knows for a market (ETFs excluded)."""
     from core.stocks import ASX200_STOCKS, SP500_STOCKS

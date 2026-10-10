@@ -31,7 +31,6 @@ class BuildRequest(BaseModel):
     investment_amount: float = Field(gt=0, le=100_000_000)
     risk_tolerance: str = Field(default="moderate", pattern=r"^(conservative|moderate|aggressive)$")
     top_n: int = Field(default=factor_strategy.HOLD, ge=5, le=40)
-    undervalued_only: bool = True   # book-to-market above the market average (user decision 2026-10-10)
 
 
 @router.post("/build")
@@ -40,17 +39,14 @@ def build(body: BuildRequest, user=Depends(get_current_user)):
     from backend.routers.portfolio import optimize_portfolio
     from backend.schemas.portfolio import OptimizeRequest
     ranked = factors.rank_universe(factors.universe(body.market), "B")
-    eligible = [s for s in ranked if s.rank is not None and (not body.undervalued_only or factors.undervalued(s))]
-    picks = eligible[:body.top_n]
+    picks = [s for s in ranked if s.rank is not None][:body.top_n]
     if len(picks) < 5:
-        raise HTTPException(400, "Not enough undervalued stocks with company data right now; try again later."
-                            if body.undervalued_only else "Not enough company data to rank this market right now.")
+        raise HTTPException(400, "Not enough company data to rank this market right now; try again later.")
     optimised = optimize_portfolio(OptimizeRequest(symbols=[s.symbol for s in picks], investment_amount=body.investment_amount,
                                                    risk_tolerance=body.risk_tolerance, period=factor_strategy.HISTORY,
                                                    market=body.market))
     return {"market": body.market, "model": "B", "weights": factors.MODELS["B"], "labels": factors.FACTOR_LABELS,
-            "ranked": sum(1 for s in ranked if s.rank is not None), "undervalued": len(eligible),
-            "undervalued_only": body.undervalued_only, "ranking": _rows(picks, body.top_n), "optimization": optimised}
+            "ranking": _rows(ranked, body.top_n), "optimization": optimised}
 
 
 class StrategyChoice(BaseModel):

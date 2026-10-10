@@ -80,18 +80,18 @@ the user ticks the live authorisation in the app; never bypass that.
   z-scores per market, score = 0.35 MOM + 0.25 RMW + 0.20 HML + 0.10 CMA +
   0.10 SMB. **Auto Builder** has two tabs (user decision 2026-10-10): Model A
   = the original fundamentals scan (unchanged), Model B = rank the whole
-  list, keep only undervalued stocks (value z > 0, i.e. book-to-market above
-  the market average), top 20 → existing max-Sharpe optimiser → save (mode
+  list, top 20 → existing max-Sharpe optimiser → save (mode
   'factor' sets strategy 'factor'; `/api/factors/build`).
   A 'factor' portfolio (`core/factor_strategy.py`, ai_engine) adopts its
   holdings the first month, then re-ranks monthly: keep holdings ranked in
-  the top 40 unless now clearly overvalued (value z < -0.25), sell the rest,
-  fill to 20 with undervalued new stocks, re-optimise, trade toward
+  the top 40, sell the rest, fill to 20 candidates, re-optimise, trade toward
   whole-share targets (20% band, sells first); stop-loss/take-profit still
   run and drop that stock for the month. Plan kept in `portfolios.factor_plan`.
   Long-run test on Kenneth French data (artifact "Factor Strategy Plan"):
   Model B beat the market by ~2.4%/yr in Asia-Pac ex Japan (incl. since 2010)
-  but has trailed the S&P 500 since 2010. Model A code path of the Auto
+  but has trailed the S&P 500 since 2010. Extra "buy only undervalued / sell
+  overvalued" rules were tested (artifact "Model B Value Rules"), showed no
+  benefit, and were dropped (user decision 2026-10-10). Model A code path of the Auto
   Builder is untouched (user request). No news
   sentiment (user dropped it). Never promise profits: the user asked for
   "make money every single day" — explained that no strategy can.
