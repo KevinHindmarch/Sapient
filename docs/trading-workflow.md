@@ -209,37 +209,39 @@ With **When each stock is cheap**:
 
 The checks stay twice a day (user decision).
 
-## Signal lab and lab-vote trading (H2/H3, user decisions 2026-10-10)
+## Model B: factor portfolios (I, user decisions 2026-10-10)
 
-**The lab** (`core/signals.py`; `GET /api/signals/portfolio/{id}`; the "Signal lab" card on each portfolio page) tests 7 long-only signals on each holding, using 5 years of daily Yahoo prices:
-- RSI dip;
-- MACD above its signal line;
-- price above its 200-day average;
-- golden cross;
-- Bollinger dip;
-- 12-1 month momentum;
-- 55-day high on heavy volume.
+The H2 signal lab was replaced by Model B.
 
-**How each signal is tested:**
-- Its position is decided at the close and applied from the next day, so it never sees the future.
-- Its edge is its daily return minus buy-and-hold's, after 0.15% per buy or sell.
+**How Model B ranks stocks** (`core/factors.py`):
+- Each stock in Sapient's market list (ASX 200 or the S&P list) is ranked on five factors plus momentum, all from Yahoo:
+  - momentum: return from 12 months ago to 1 month ago;
+  - profitability: operating income / equity, or ROE as a fallback;
+  - value: book-to-market;
+  - investment: minus asset growth;
+  - size: minus log market cap.
+- Each factor is turned into a winsorised z-score within the market. Score = 0.35 MOM + 0.25 RMW + 0.20 HML + 0.10 CMA + 0.10 SMB.
+- A missing factor counts as neutral. A stock needs at least 3 factors to be ranked.
 
-A signal **passes** for a stock only when all four hold:
-1. its edge is significantly positive: one-sided t-test with Newey-West standard errors;
-2. it survives the Benjamini–Hochberg correction at a 10% false discovery rate across every stock × signal tested together;
-3. it still beats holding over the last 2 years;
-4. it has enough trades and history to judge.
+**Factor Builder** (`/factor-builder`, `POST /api/factors/build`):
+- It takes the Model B top 20 and runs the same max-Sharpe optimiser the Manual Builder uses.
+- Saving with mode `factor` sets `portfolios.strategy='factor'`.
+- The Auto Builder is unchanged.
 
-Parameters are textbook values and never tuned.
+**Monthly management** (`core/factor_strategy.py` + `ai_engine`), when AI Trading is on:
+- **First check:** the portfolio as built becomes the plan (`adopted`). There is no re-ranking that month.
+- **Each new month:** Model B re-ranks the market, then:
+  - holdings still ranked in the top 40 are kept, and the rest are sold;
+  - the best-ranked new stocks fill the list back to 20 candidates;
+  - the optimiser re-weights them;
+  - the result becomes whole-share targets (`factor_plan`, `factor_month`).
+- **Every check:** Sapient proposes sells first, then buys, towards the target.
+  - Shares on open orders count as held.
+  - A stock is only traded when it enters or leaves the target, or is more than 20% of its target value away.
+  - The account limits, cash and the per-stock cap still apply.
+  - Planned trades skip the per-trade size and turnover guardrails; the daily trade count still applies.
+- **Protection:**
+  - Stop-loss and take-profit still run between rebalances. A stock they sell is dropped from that month's plan.
+  - The RSI/MACD rules don't trade factor portfolios.
 
-**Lab-vote trading:** on the same card, the user can choose how AI Trading decides for each portfolio:
-- **Simple rules** (default): RSI with MACD, as before.
-- **Signal lab:**
-  - At each scheduled check the lab is re-run, and each stock's passing signals vote, weighted by their t-statistic.
-  - A score of 0.6 or more means **hold**. If nothing is held, Sapient buys the planned shares back; this buy is not cut down by the per-trade size limit.
-  - A score of 0.4 or less means **out**: Sapient sells the whole holding. Risk-reducing sells are not size-limited.
-  - Anything in between, or a stock with no passing signal, changes nothing.
-  - Stop-loss and take-profit are always checked first.
-  - Account limits, cash, the per-stock cap, the daily trade count and turnover still apply.
-
-No strategy wins every day. The lab only reduces the chance of trading on luck. New portfolios should run on paper first.
+**Evidence:** see the "Factor Strategy Plan" artifact. Model B has worked best for Asia-Pacific ex Japan, which is mostly Australia. In the US it has trailed the S&P 500 since 2010. Paper-test before using real money.

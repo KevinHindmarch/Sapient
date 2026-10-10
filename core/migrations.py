@@ -567,6 +567,14 @@ STRATEGY_CHOICE_V1 = """
 ALTER TABLE portfolios ADD COLUMN strategy TEXT
 """
 
+# I2: Model B portfolios (user decision 2026-10-10). The signal lab was replaced, so 'signals' becomes 'rules';
+# 'factor' portfolios keep this month's target (JSON {symbol: shares, ...}) between checks.
+FACTOR_V1 = """
+UPDATE portfolios SET strategy='rules' WHERE strategy='signals';
+ALTER TABLE portfolios ADD COLUMN factor_plan TEXT;
+ALTER TABLE portfolios ADD COLUMN factor_month TEXT
+"""
+
 # (version, name, sql). Append only.
 MIGRATIONS = (
     (1, "core", CORE_V1),
@@ -579,6 +587,7 @@ MIGRATIONS = (
     (8, "ledger", LEDGER_V1),
     (9, "entry", ENTRY_V1),
     (10, "strategy_choice", STRATEGY_CHOICE_V1),
+    (11, "factor", FACTOR_V1),
 )
 SAFETY_SCHEMA_VERSION = 2
 

@@ -161,6 +161,10 @@ def save_portfolio(
     
     if not result['success']:
         raise HTTPException(status_code=500, detail=result['error'])
+    if portfolio_data.mode == "factor" and result.get("portfolio_id"):
+        # Built with Model B (Factor Builder): AI Trading manages it with the monthly Model B plan.
+        from backend.routers.factors import set_strategy_for
+        set_strategy_for(result["portfolio_id"], current_user["id"], "factor")
     
     return result
 
