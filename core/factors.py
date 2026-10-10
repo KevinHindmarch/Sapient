@@ -1,21 +1,20 @@
-"""Factor engine (I1): rank stocks on Fama-French factors plus momentum.
+"""Factor engine (Model B): rank a whole market on the Auto Builder's five factors.
 
-Factors, each computed per stock from Yahoo and then standardised across the
-stocks of one market (winsorised z-scores, so one extreme value can't dominate):
+User decisions 2026-10-10: Model B uses the same factor definitions as the
+Auto Builder (Model A), built from several measures each, but scores them by
+standardising every measure across the market (winsorised z-scores) instead of
+fixed 0-100 buckets, and weights them:
 
-* MOM  momentum: return from 12 months ago to 1 month ago (Jegadeesh-Titman / Carhart)
-* RMW  profitability: operating income / book equity (fallback: return on equity)
-* HML  value: book-to-market (1 / price-to-book)
-* CMA  investment: minus last year's growth in total assets (conservative firms score higher)
-* SMB  size: minus log market capitalisation (smaller firms score higher)
+* MOM   momentum 35%: 12-month price trend, skipping the last month
+* QUAL  quality 25%: ROE, profit margin, low debt (debt-to-equity, negated)
+* VAL   value 20%: earnings yield and book-to-market (1 / price-to-book)
+* GROW  growth 10%: sustainable growth (ROE x retention) and historical earnings CAGR
+* SIZE  size 10%: smaller companies score higher (minus log market cap)
 
-Model A is the five Fama-French characteristics without momentum; Model B adds
-momentum with the weights the user chose (2026-10-10). A missing factor counts
-as neutral (0); a stock needs at least three factors to be ranked. Weights are
-illustrative, not optimised: the long-run test in I3 compares A and B on
-Kenneth French's factor data. Yahoo data is research data and today's
-snapshot only (no point-in-time history), so rankings are for current
-decisions, not historical backtests.
+A factor's z-score is the average of its measures' z-scores (missing measures
+are skipped); a missing factor counts as neutral (0) and a stock needs at least
+three factors to be ranked. Data comes from FundamentalsService, the same Yahoo
+data the Auto Builder uses: research data and today's snapshot only.
 """
 from __future__ import annotations
 
@@ -26,17 +25,23 @@ from typing import Callable
 
 import numpy as np
 
-FACTORS = ("MOM", "RMW", "HML", "CMA", "SMB")
+FACTORS = ("MOM", "QUAL", "VAL", "GROW", "SIZE")
+MEASURES: dict[str, tuple[str, ...]] = {
+    "MOM": ("momentum",),
+    "QUAL": ("roe", "profit_margin", "low_debt"),
+    "VAL": ("earnings_yield", "book_to_market"),
+    "GROW": ("sustainable_growth", "earnings_growth"),
+    "SIZE": ("small_size",),
+}
 MODELS: dict[str, dict[str, float]] = {
-    "A": {"RMW": 0.30, "HML": 0.30, "CMA": 0.20, "SMB": 0.20},
-    "B": {"MOM": 0.35, "RMW": 0.25, "HML": 0.20, "CMA": 0.10, "SMB": 0.10},
+    "B": {"MOM": 0.35, "QUAL": 0.25, "VAL": 0.20, "GROW": 0.10, "SIZE": 0.10},
 }
 FACTOR_LABELS = {
-    "MOM": "Momentum (12-1 month return)",
-    "RMW": "Profitability (operating income / equity)",
-    "HML": "Value (book-to-market)",
-    "CMA": "Investment (low asset growth)",
-    "SMB": "Size (smaller company)",
+    "MOM": "Momentum (12-month trend, skipping the last month)",
+    "QUAL": "Quality (ROE, profit margin, low debt)",
+    "VAL": "Value (earnings yield, book-to-market)",
+    "GROW": "Growth (sustainable growth, earnings CAGR)",
+    "SIZE": "Size (smaller company)",
 }
 MIN_FACTORS = 3
 WINSOR_Z = 3.0
@@ -49,72 +54,62 @@ class StockFactors:
     name: str | None = None
     sector: str | None = None
     price: float | None = None
-    volatility: float | None = None          # annualised, last ~6 months of daily returns
-    raw: dict[str, float | None] = field(default_factory=dict)
-    z: dict[str, float] = field(default_factory=dict)
+    raw: dict[str, float | None] = field(default_factory=dict)    # measures
+    z: dict[str, float] = field(default_factory=dict)              # factors
     score: float | None = None
     rank: int | None = None
     error: str | None = None
 
 
-def _row(frame, *names):
-    """First matching row of a yfinance statement (newest column first), as floats."""
-    if frame is None or getattr(frame, "empty", True):
+def _num(value) -> float | None:
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
         return None
-    for name in names:
-        if name in frame.index:
-            values = [float(v) for v in frame.loc[name].tolist() if v is not None and not math.isnan(float(v))]
-            return values or None
-    return None
+    return v if math.isfinite(v) else None
 
 
 def raw_factors(symbol: str) -> StockFactors:
-    """Yahoo inputs for one stock (cached by core.yahoo)."""
-    from core import yahoo as yf
+    """The Auto Builder's measures for one stock (FundamentalsService, cached Yahoo data)."""
+    from core.fundamentals import FundamentalsService
     out = StockFactors(symbol=symbol)
-    ticker = yf.Ticker(symbol)
-    history = ticker.history(period="2y")
-    close = history["Close"].dropna() if history is not None and not history.empty else None
-    if close is None or len(close) < 260:
-        out.error = "less than a year of prices"
+    f = FundamentalsService.get_stock_fundamentals(symbol)
+    if not f:
+        out.error = "no company data"
         return out
-    out.price = float(close.iloc[-1])
-    out.raw["MOM"] = float(close.iloc[-22] / close.iloc[-253] - 1)
-    returns = close.pct_change().dropna().iloc[-126:]
-    out.volatility = float(returns.std() * math.sqrt(252)) if len(returns) > 20 else None
-    info = ticker.info or {}
-    out.name, out.sector = info.get("longName") or info.get("shortName"), info.get("sector")
-    pb = info.get("priceToBook")
-    out.raw["HML"] = 1.0 / float(pb) if isinstance(pb, (int, float)) and pb > 0 else None
-    cap = info.get("marketCap")
-    out.raw["SMB"] = -math.log(float(cap)) if isinstance(cap, (int, float)) and cap > 0 else None
-    try:
-        income, balance = ticker.income_stmt, ticker.balance_sheet
-    except Exception:
-        income = balance = None
-    operating = _row(income, "Operating Income", "EBIT")
-    equity = _row(balance, "Stockholders Equity", "Common Stock Equity", "Total Equity Gross Minority Interest")
-    if operating and equity and equity[0] > 0:
-        out.raw["RMW"] = operating[0] / equity[0]
-    else:
-        roe = info.get("returnOnEquity")
-        out.raw["RMW"] = float(roe) if isinstance(roe, (int, float)) else None
-    assets = _row(balance, "Total Assets")
-    out.raw["CMA"] = -(assets[0] / assets[1] - 1) if assets and len(assets) > 1 and assets[1] > 0 else None
+    out.name, out.sector, out.price = f.get("name"), f.get("sector"), _num(f.get("current_price"))
+    pb, cap, debt = _num(f.get("price_to_book")), _num(f.get("market_cap")), _num(f.get("debt_to_equity"))
+    out.raw = {
+        "momentum": _num(f.get("momentum_12m")),
+        "roe": _num(f.get("roe")),
+        "profit_margin": _num(f.get("profit_margin")),
+        "low_debt": -debt if debt is not None else None,
+        "earnings_yield": _num(f.get("earnings_yield")),
+        "book_to_market": 1.0 / pb if pb and pb > 0 else None,
+        "sustainable_growth": _num(f.get("sustainable_growth")),
+        "earnings_growth": _num(f.get("earnings_growth")),
+        "small_size": -math.log(cap) if cap and cap > 0 else None,
+    }
     return out
 
 
 def standardise(stocks: list[StockFactors]) -> None:
-    """Winsorised cross-sectional z-score per factor; missing values stay missing."""
-    for factor in FACTORS:
-        values = np.array([s.raw.get(factor) for s in stocks if s.raw.get(factor) is not None], dtype=float)
+    """Winsorised z-score per measure across the market, averaged into each factor's z-score."""
+    measure_z: dict[str, dict[str, float]] = {s.symbol: {} for s in stocks}
+    for measure in {m for ms in MEASURES.values() for m in ms}:
+        values = np.array([s.raw.get(measure) for s in stocks if s.raw.get(measure) is not None], dtype=float)
         if len(values) < 3 or values.std() == 0:
             continue
         mean, std = values.mean(), values.std()
         for s in stocks:
-            v = s.raw.get(factor)
+            v = s.raw.get(measure)
             if v is not None:
-                s.z[factor] = float(np.clip((v - mean) / std, -WINSOR_Z, WINSOR_Z))
+                measure_z[s.symbol][measure] = float(np.clip((v - mean) / std, -WINSOR_Z, WINSOR_Z))
+    for s in stocks:
+        for factor, measures in MEASURES.items():
+            zs = [measure_z[s.symbol][m] for m in measures if m in measure_z[s.symbol]]
+            if zs:
+                s.z[factor] = round(float(np.mean(zs)), 4)
 
 
 def score(stocks: list[StockFactors], model: str = "B") -> list[StockFactors]:
@@ -145,6 +140,19 @@ def rank_universe(symbols: list[str], model: str = "B",
         stocks = list(pool.map(load, symbols))
     standardise(stocks)
     return score(stocks, model)
+
+
+OVERVALUED_Z = -0.25   # a holding is sold as overvalued only below this (a buffer, so stocks near average don't churn)
+
+
+def undervalued(stock: StockFactors) -> bool:
+    """Cheaper than the market average on earnings yield and book-to-market (value z-score above 0)."""
+    return stock.z.get("VAL", float("-inf")) > 0
+
+
+def overvalued(stock: StockFactors) -> bool:
+    """Clearly more expensive than average on earnings yield and book-to-market (no value data: not proven cheap)."""
+    return stock.z.get("VAL", float("-inf")) < OVERVALUED_Z
 
 
 def universe(market: str) -> list[str]:

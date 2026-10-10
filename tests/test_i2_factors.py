@@ -53,11 +53,28 @@ class FactorScoreTests(unittest.TestCase):
 
 
 class PlanTests(unittest.TestCase):
-    def ranked(self, n):
+    def ranked(self, n, expensive=()):
         out = [stock(f"R{i}") for i in range(1, n + 1)]
         for i, s in enumerate(out, start=1):
             s.rank = i
+            s.z = {"HML": -0.5 if s.symbol in expensive else 0.5}
         return out
+
+    def test_new_stocks_must_be_undervalued_but_holdings_are_judged_on_rank(self):
+        chosen, reasons = factor_strategy.candidates(self.ranked(60, expensive={"R1", "R2", "R5"}), held=["R5"])
+        self.assertEqual(chosen[:3], ["R3", "R4", "R6"])            # dear R1/R2 not bought; held R5 (z -0.5) sold
+        self.assertIn("overvalued", reasons["R5"])
+        self.assertNotIn("R1", chosen)
+        self.assertIn("undervalued", reasons["R3"])
+        dear = self.ranked(60)
+        dear[5].z = {"HML": -1.0}                                   # R6: clearly overvalued now
+        dear[6].z = {"HML": -0.1}                                   # R7: a little below average: kept (buffer)
+        kept, why = factor_strategy.candidates(dear, held=["R6", "R7"])
+        self.assertNotIn("R6", kept)
+        self.assertIn("overvalued", why["R6"])
+        self.assertIn("R7", kept)
+        everything, _ = factor_strategy.candidates(self.ranked(60, expensive={"R1"}), held=[], undervalued_only=False)
+        self.assertEqual(everything[0], "R1")
 
     def test_keep_within_40_sell_the_rest_fill_to_20(self):
         chosen, reasons = factor_strategy.candidates(self.ranked(100), held=["R3", "R35", "R41", "GONE"])

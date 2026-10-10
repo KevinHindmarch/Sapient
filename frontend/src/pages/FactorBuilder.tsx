@@ -4,8 +4,8 @@ import { toast } from 'sonner'
 import { Layers } from 'lucide-react'
 import { apiErrorMessage, factorsApi, FactorBuild, FactorKey, money, portfolioApi } from '../lib/api'
 
-const FACTORS: FactorKey[] = ['MOM', 'RMW', 'HML', 'CMA', 'SMB']
-const SHORT: Record<FactorKey, string> = { MOM: 'Momentum', RMW: 'Profit', HML: 'Value', CMA: 'Investment', SMB: 'Size' }
+const FACTORS: FactorKey[] = ['MOM', 'QUAL', 'VAL', 'GROW', 'SIZE']
+const SHORT: Record<FactorKey, string> = { MOM: 'Momentum', QUAL: 'Quality', VAL: 'Value', GROW: 'Growth', SIZE: 'Size' }
 const pct = (v: number) => `${(v * 100).toFixed(1)}%`
 
 /**
@@ -18,6 +18,7 @@ export default function FactorBuilder() {
   const [amount, setAmount] = useState(20000)
   const [risk, setRisk] = useState('moderate')
   const [topN, setTopN] = useState(20)
+  const [undervaluedOnly, setUndervaluedOnly] = useState(true)
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<FactorBuild | null>(null)
   const [name, setName] = useState('')
@@ -28,7 +29,7 @@ export default function FactorBuilder() {
     setBusy(true)
     setResult(null)
     try {
-      setResult((await factorsApi.build(market, amount, risk, topN)).data)
+      setResult((await factorsApi.build(market, amount, risk, topN, undervaluedOnly)).data)
     } catch (err) {
       toast.error(apiErrorMessage(err, 'Could not build the Model B portfolio'))
     } finally {
@@ -57,12 +58,13 @@ export default function FactorBuilder() {
       <div className="page-header">
         <div className="flex items-center gap-2">
           <Layers className="w-8 h-8 text-sky-400" />
-          <h1 className="page-title">Factor Builder</h1>
+          <h1 className="page-title">Auto Builder · Model B</h1>
         </div>
         <p className="page-subtitle">
-          Model B ranks every stock in the market on five Fama-French factors plus momentum, takes the top stocks and
+          Ranks every stock in the {market === 'US' ? 'S&P 500' : 'ASX 200'} list on five Fama-French factors plus
+          momentum, keeps the undervalued ones (book-to-market above the market average), takes the best of those and
           weights them with the max-Sharpe optimiser. With AI Trading on, it re-ranks every month: holdings still in the
-          top 40 are kept, the rest are sold, and the best new stocks are bought.
+          top 40 are kept, the rest are sold, and the best new undervalued stocks are bought.
         </p>
       </div>
 
@@ -85,6 +87,12 @@ export default function FactorBuilder() {
             <input className="input-field" type="number" min={5} max={40} value={topN}
               onChange={(e) => setTopN(Math.min(40, Math.max(5, Number(e.target.value) || 20)))} /></label>
         </div>
+        <label className="flex items-start gap-2 text-sm theme-text">
+          <input type="checkbox" className="mt-1" checked={undervaluedOnly} onChange={(e) => setUndervaluedOnly(e.target.checked)}
+            data-testid="undervalued-only" />
+          <span><strong>Only undervalued stocks:</strong> book-to-market above the market average (cheaper than
+            average for the assets they own). Untick to take the best scores regardless of price.</span>
+        </label>
         <p className="text-xs theme-text-secondary">
           Score = 35% momentum + 25% profitability + 20% value + 10% investment + 10% size, each standardised across the
           market. The first ranking of a market takes a few minutes (it reads every company); later ones are cached.
@@ -114,7 +122,10 @@ export default function FactorBuilder() {
           </div>
 
           <div className="card">
-            <h2 className="text-lg font-semibold theme-text mb-2">Model B ranking (top {result.ranking.length})</h2>
+            <h2 className="text-lg font-semibold theme-text mb-1">Model B picks ({result.ranking.length})</h2>
+            <p className="text-xs theme-text-secondary mb-2">
+              {result.ranked} stocks ranked{result.undervalued_only ? `, ${result.undervalued} of them undervalued` : ''}.
+              The # column is each stock's rank in the whole market.</p>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead><tr className="text-left theme-text-secondary">

@@ -9,6 +9,7 @@ import { Wand2, Save, Loader2, CheckCircle, Info, AlertTriangle, Target, Globe, 
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts'
 import { useTheme } from '../lib/theme'
 import WeightEditor from '../components/WeightEditor'
+import FactorBuilder from './FactorBuilder'
 
 const COLORS = ['#0ea5e9', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#6366f1', '#14b8a6']
 
@@ -144,7 +145,7 @@ const formatMarketCap = (val: number) => {
   return `$${val.toLocaleString()}`
 }
 
-export default function AutoBuilder() {
+function ModelA() {
   const navigate = useNavigate()
   const { theme } = useTheme()
   const isDark = theme === 'dark'
@@ -639,6 +640,37 @@ export default function AutoBuilder() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+
+/**
+ * Auto Builder: Model A is the original fundamentals scan (unchanged); Model B ranks the whole market on
+ * Fama-French factors + momentum, keeps undervalued stocks (book-to-market above the market average)
+ * and optimises the best of them for the highest Sharpe ratio.
+ */
+export default function AutoBuilder() {
+  const [model, setModel] = useState<'A' | 'B'>(() => {
+    try { return localStorage.getItem('sapient-auto-model') === 'B' ? 'B' : 'A' } catch { return 'A' }
+  })
+  const choose = (m: 'A' | 'B') => {
+    setModel(m)
+    try { localStorage.setItem('sapient-auto-model', m) } catch { /* remembered only when storage works */ }
+  }
+  return (
+    <div className="space-y-4">
+      <div className="inline-flex p-1 rounded-xl border theme-border" role="tablist" aria-label="Auto Builder model">
+        {(['A', 'B'] as const).map((m) => (
+          <button key={m} role="tab" aria-selected={model === m} data-testid={`auto-model-${m}`}
+            onClick={() => choose(m)}
+            className={`px-4 py-1.5 text-sm font-medium rounded-lg ${model === m
+              ? 'bg-gradient-to-r from-sky-500 to-indigo-500 text-white' : 'theme-text-secondary'}`}>
+            {m === 'A' ? 'Model A · fundamentals scan' : 'Model B · factors + value'}
+          </button>
+        ))}
+      </div>
+      {model === 'A' ? <ModelA /> : <FactorBuilder />}
     </div>
   )
 }

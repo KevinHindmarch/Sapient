@@ -447,22 +447,23 @@ export const backupsApi = {
 }
 
 // ---- Model B (Fama-French five factors + momentum): Factor Builder and monthly management ----
-export type FactorKey = 'MOM' | 'RMW' | 'HML' | 'CMA' | 'SMB'
+export type FactorKey = 'MOM' | 'QUAL' | 'VAL' | 'GROW' | 'SIZE'
 export interface FactorRow {
   rank: number; symbol: string; name: string | null; sector: string | null; price: number | null
-  score: number; z: Partial<Record<FactorKey, number>>; volatility: number | null
+  score: number; z: Partial<Record<FactorKey, number>>
 }
 export interface FactorBuild {
   market: 'ASX' | 'US'; model: 'B'; weights: Partial<Record<FactorKey, number>>; labels: Record<FactorKey, string>
   ranking: FactorRow[]; optimization: OptimizationResult
+  ranked: number; undervalued: number; undervalued_only: boolean
 }
 export interface FactorPlan {
   month: string; model: 'B'; target: Record<string, number>; weights?: Record<string, number>
   ranks?: Record<string, number>; reasons?: Record<string, string>; adopted?: boolean; value?: number
 }
 export const factorsApi = {
-  build: (market: 'ASX' | 'US', investment_amount: number, risk_tolerance: string, top_n = 20) =>
-    api.post<FactorBuild>('/factors/build', { market, investment_amount, risk_tolerance, top_n }),
+  build: (market: 'ASX' | 'US', investment_amount: number, risk_tolerance: string, top_n = 20, undervalued_only = true) =>
+    api.post<FactorBuild>('/factors/build', { market, investment_amount, risk_tolerance, top_n, undervalued_only }),
   plan: (portfolioId: number) =>
     api.get<{ strategy: 'rules' | 'factor'; plan: FactorPlan | null; hold: number; keep_within: number }>(`/factors/portfolio/${portfolioId}`),
   setStrategy: (portfolioId: number, strategy: 'rules' | 'factor') =>

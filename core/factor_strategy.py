@@ -23,25 +23,39 @@ HISTORY = "2y"       # price history for the optimiser (same as the builders)
 
 
 def candidates(ranked: list[factors.StockFactors], held: list[str], hold: int = HOLD,
-               keep_within: int = KEEP_WITHIN) -> tuple[list[str], dict]:
+               keep_within: int = KEEP_WITHIN, undervalued_only: bool = True) -> tuple[list[str], dict]:
     """Holdings still ranked within `keep_within`, then the best new stocks up to `hold`.
+
+    New stocks must also be undervalued (value z-score above the market average:
+    earnings yield and book-to-market)
+    and a holding is sold once it becomes clearly overvalued (value z-score below
+    factors.OVERVALUED_Z), user decisions 2026-10-10. The gap between the two
+    thresholds stops stocks near the average being bought and sold every month.
 
     Returns (candidate symbols, reasons by symbol) for the inbox and the portfolio page.
     """
     rank_of = {s.symbol: s.rank for s in ranked if s.rank is not None}
-    keep = [s for s in held if rank_of.get(s) is not None and rank_of[s] <= keep_within]
+    by_symbol = {s.symbol: s for s in ranked}
+    too_dear = {s for s in held if undervalued_only and s in by_symbol and factors.overvalued(by_symbol[s])}
+    keep = [s for s in held if rank_of.get(s) is not None and rank_of[s] <= keep_within and s not in too_dear]
     reasons = {s: f"kept: ranked {rank_of[s]} (still in the top {keep_within})" for s in keep}
     for s in held:
-        if s not in keep:
-            reasons[s] = (f"sell: ranked {rank_of[s]}, out of the top {keep_within}" if s in rank_of
-                          else "sell: could not be ranked this month (not enough data)")
+        if s in keep:
+            continue
+        if s in too_dear and rank_of.get(s) is not None and rank_of[s] <= keep_within:
+            reasons[s] = f"sell: now overvalued (value z {by_symbol[s].z.get('VAL', float('nan')):+.1f}, ranked {rank_of[s]})"
+        elif s in rank_of:
+            reasons[s] = f"sell: ranked {rank_of[s]}, out of the top {keep_within}"
+        else:
+            reasons[s] = "sell: could not be ranked this month (not enough data)"
     chosen = list(keep)
     for s in ranked:
         if len(chosen) >= hold:
             break
-        if s.rank is not None and s.symbol not in chosen:
+        if s.rank is not None and s.symbol not in chosen and (not undervalued_only or factors.undervalued(s)):
             chosen.append(s.symbol)
-            reasons[s.symbol] = f"new: ranked {s.rank}"
+            reasons[s.symbol] = f"new: ranked {s.rank}, undervalued (value z {s.z['VAL']:+.1f})" \
+                if "VAL" in s.z else f"new: ranked {s.rank}"
     return chosen, reasons
 
 
