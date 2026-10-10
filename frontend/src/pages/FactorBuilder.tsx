@@ -29,6 +29,8 @@ export default function FactorBuilder() {
     setResult(null)
     try {
       setResult((await factorsApi.build(market, amount, risk, topN)).data)
+      // A ready-to-use name, so Save works straight away (it can be changed)
+      setName((n) => n.trim() ? n : `${market} Model B · ${new Date().toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}`)
     } catch (err) {
       toast.error(apiErrorMessage(err, 'Could not build the Model B portfolio'))
     } finally {
@@ -61,8 +63,9 @@ export default function FactorBuilder() {
         </div>
         <p className="page-subtitle">
           Ranks every stock in the {market === 'US' ? 'S&P 500' : 'ASX 200'} list on five Fama-French factors plus momentum, takes the top stocks and
-          weights them with the max-Sharpe optimiser. With AI Trading on, it re-ranks every month: holdings still in the
-          top 40 are kept, the rest are sold, and the best new stocks are bought.
+          weights them with the max-Sharpe optimiser. With AI Trading on, a third of the portfolio is reviewed each month
+          (every holding once a quarter): holdings still in the top 40 are kept, the rest are sold, and the best new stocks
+          are bought.
         </p>
       </div>
 
@@ -108,7 +111,8 @@ export default function FactorBuilder() {
             <p className="text-xs theme-text-muted">Expected return and Sharpe come from the last 2 years of prices: a description of the past, not a forecast.</p>
             <div className="flex flex-wrap gap-2 items-end">
               <label className="block grow"><span className="label">Portfolio name</span>
-                <input className="input-field" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. ASX Model B" /></label>
+                <input className="input-field" value={name} onChange={(e) => setName(e.target.value)} placeholder="Type a name to save"
+                  data-testid="factor-name" /></label>
               <button className="btn-primary" onClick={save} disabled={saving || !name.trim()}>{saving ? 'Saving…' : 'Save portfolio'}</button>
             </div>
           </div>
