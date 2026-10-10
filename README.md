@@ -2,7 +2,7 @@
 
 Portfolio research and optimisation for ASX and US shares, running entirely on
 your Windows PC, with an Interactive Brokers (TWS) connection being added step
-by step behind safety checks. Personal app for Kevin and family.
+by step behind safety checks.
 
 ## Install
 
