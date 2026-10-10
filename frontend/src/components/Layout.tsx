@@ -17,7 +17,8 @@ import {
   HelpCircle,
   Sparkles,
   ShieldCheck,
-  ClipboardList
+  ClipboardList,
+  Layers,
 } from 'lucide-react'
 import { useState } from 'react'
 import HelpModal from './HelpModal'
@@ -27,6 +28,7 @@ const navItems = [
   { path: '/', label: 'Dashboard', icon: LayoutDashboard },
   { path: '/manual-builder', label: 'Manual Builder', icon: Wrench },
   { path: '/auto-builder', label: 'Auto Builder', icon: Wand2 },
+  { path: '/factor-builder', label: 'Factor Builder', icon: Layers },
   { path: '/capm-builder', label: 'CAPM Builder', icon: Activity },
   { path: '/portfolios', label: 'My Portfolios', icon: Briefcase },
   { path: '/analysis', label: 'Stock Analysis', icon: LineChart },

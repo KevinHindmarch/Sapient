@@ -172,6 +172,11 @@ class Ticker:
         return _cached(_key("income_stmt", self.symbol), STATEMENT_TTL,
                        lambda: self._ticker.income_stmt, _non_empty)
 
+    @property
+    def balance_sheet(self):
+        return _cached(_key("balance_sheet", self.symbol), STATEMENT_TTL,
+                       lambda: self._ticker.balance_sheet, _non_empty)
+
     def __getattr__(self, name):  # anything else goes straight to yfinance, uncached
         return getattr(self._ticker, name)
 

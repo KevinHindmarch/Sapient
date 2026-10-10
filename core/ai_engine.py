@@ -195,13 +195,15 @@ def _within_guardrails(
 
     trade_pct = (estimated_value / portfolio_value) * 100.0
     max_trade_pct = float(settings.get("max_trade_pct") or 0)
-    if not plan_sized and trade_pct > max_trade_pct + 1e-6:  # signal-lab buy-backs restore the plan
+    if not plan_sized and trade_pct > max_trade_pct + 1e-6:  # Model B rebalances follow the monthly plan
         return False, f"trade_pct {trade_pct:.2f}% exceeds max_trade_pct {max_trade_pct}%"
 
     max_daily_trades = int(settings.get("max_daily_trades") or 0)
     if signals_today >= max_daily_trades:
         return False, f"max_daily_trades reached ({signals_today}/{max_daily_trades})"
 
+    if plan_sized:  # a planned rebalance is sized by its plan; only the daily trade count applies
+        return True, None
     max_turnover_pct = float(settings.get("max_daily_turnover_pct") or 0)
     new_turnover_pct = ((turnover_today + estimated_value) / portfolio_value) * 100.0
     if max_turnover_pct > 0 and new_turnover_pct > max_turnover_pct + 1e-6:
@@ -364,49 +366,79 @@ def _build_signal(
     }
 
 
-def _lab_signal(portfolio_id: int, portfolio: dict, position: dict, analysis: dict, lab_vote: dict | None,
-                portfolio_value: float, expires_at: datetime | None) -> tuple[dict | None, str | None]:
-    """Signal-lab decision for one stock: all-in or all-out on the evidence-weighted vote (H3).
+def _factor_plan(portfolio: dict, positions: list[dict], portfolio_value: float, pending: dict) -> dict | None:
+    """This month's Model B target for a 'factor' portfolio (I2), computed once a month and kept.
 
-    Only signals that passed the lab vote. "out" sells the whole holding;
-    "hold" with nothing held buys the planned shares back (user decision
-    2026-10-10: may fully sell and buy back). No passing signal = hold as is.
+    The first time, the portfolio as built is adopted as the plan (no trades in
+    the month it was built); in each new month Model B re-ranks the market and
+    the optimiser re-weights (core.factor_strategy.plan).
     """
-    symbol = position["symbol"]
-    price = float(analysis.get("current_price") or 0)
-    held = float(position.get("quantity") or 0)
-    if lab_vote is None:
-        return None, "signal lab: no signal passed for this stock, so it is held as is"
-    if price <= 0:
-        return None, "signal lab: no price right now"
-    names = ", ".join(s["label"] for s in lab_vote["signals"])
-    if lab_vote["says"] == "out" and held >= 1:
-        action, quantity = "SELL", float(math.floor(held + 1e-9))
-        summary = f"Signal lab says sell (score {lab_vote['score']:.2f}; {names})"
-    elif lab_vote["says"] == "hold" and held < 1:
-        planned = float(position.get("planned_quantity") or 0)
-        weight = float(position.get("weight_at_creation") or 0)
-        quantity = float(math.floor(planned if planned >= 1 else weight * portfolio_value / price))
-        if quantity < 1:
-            return None, "signal lab says buy, but its share of the portfolio is less than one share"
-        action = "BUY"
-        summary = f"Signal lab says buy back (score {lab_vote['score']:.2f}; {names})"
+    import json
+    from core import factor_strategy
+    plan = None
+    if portfolio.get("factor_plan"):
+        try:
+            plan = json.loads(portfolio["factor_plan"])
+        except ValueError:
+            plan = None
+    month = datetime.now(timezone.utc).strftime("%Y-%m")
+    if plan is None:
+        target = {p["symbol"]: int(float(p.get("planned_quantity") or p.get("quantity") or 0)) for p in positions}
+        plan = {"month": month, "model": "B", "target": {s: q for s, q in target.items() if q >= 1},
+                "prices": {}, "reasons": {s: "as built" for s in target}, "adopted": True}
+    elif plan.get("month") != month:
+        held = sorted({p["symbol"] for p in positions if float(p.get("quantity") or 0) > 0}
+                      | {s for s, q in pending.items() if q > 0})
+        plan = factor_strategy.plan(portfolio.get("market") or "ASX", held, portfolio_value,
+                                    portfolio.get("risk_tolerance") or "moderate")
     else:
-        return None, f"signal lab: {lab_vote['says']} (score {lab_vote['score']:.2f}), nothing to do"
-    return {
-        "portfolio_id": portfolio_id,
-        "symbol": symbol,
-        "company_name": _company_name(symbol),
-        "market": (portfolio.get("market") or "ASX").upper(),
-        "action": action,
-        "quantity": quantity,
-        "price_at_signal": price,
-        "confidence": float(round(max(lab_vote["score"], 1 - lab_vote["score"]), 3)),
-        "rationale": {"rule": "signal_vote", "score": lab_vote["score"], "signals": lab_vote["signals"],
-                      "current_price": price, "portfolio_value": portfolio_value},
-        "rule_summary": summary,
-        "expires_at": expires_at or datetime.now(timezone.utc) + timedelta(hours=SIGNAL_TTL_HOURS),
-    }, None
+        return plan
+    _save_factor_plan(portfolio["id"], plan)
+    return plan
+
+
+def _save_factor_plan(portfolio_id: int, plan: dict) -> None:
+    import json
+    with get_db_cursor() as (cur, _conn):
+        cur.execute("UPDATE portfolios SET factor_plan=%s, factor_month=%s WHERE id=%s",
+                    (json.dumps(plan), plan["month"], portfolio_id))
+
+
+def _factor_signals(portfolio_id: int, portfolio: dict, plan: dict, held: dict[str, float], pending: dict,
+                    prices: dict[str, float], expires_at: datetime | None) -> list[dict]:
+    """Proposals that move a 'factor' portfolio toward this month's Model B target (sells first)."""
+    from core import factor_strategy
+    known = {**{s: float(p) for s, p in (plan.get("prices") or {}).items() if p}, **{s: p for s, p in prices.items() if p}}
+    out = []
+    for symbol, side, shares, why in factor_strategy.orders(plan.get("target") or {}, held, pending, known):
+        price = known.get(symbol) or _latest_price(symbol)
+        if not price or shares < 1:
+            continue
+        reason = (plan.get("reasons") or {}).get(symbol)
+        out.append({
+            "portfolio_id": portfolio_id,
+            "symbol": symbol,
+            "company_name": _company_name(symbol),
+            "market": (portfolio.get("market") or "ASX").upper(),
+            "action": side,
+            "quantity": float(shares),
+            "price_at_signal": float(price),
+            "confidence": 0.8,
+            "rationale": {"rule": "factor_rebalance", "model": "B", "month": plan.get("month"),
+                          "rank": (plan.get("ranks") or {}).get(symbol), "target_shares": (plan.get("target") or {}).get(symbol, 0),
+                          "current_price": float(price)},
+            "rule_summary": f"Model B {plan.get('month')}: {why}" + (f" ({reason})" if reason else ""),
+            "expires_at": expires_at or datetime.now(timezone.utc) + timedelta(hours=SIGNAL_TTL_HOURS),
+        })
+    return out
+
+
+def _latest_price(symbol: str) -> float | None:
+    try:
+        history = yf.Ticker(symbol).history(period="5d")
+        return float(history["Close"].iloc[-1]) if history is not None and not history.empty else None
+    except Exception:
+        return None
 
 
 def _dip_entry(portfolio_id: int, portfolio: dict, position: dict, analysis: dict | None, pending_buy: float,
@@ -581,18 +613,16 @@ def scan_portfolio(user_id: int, portfolio_id: int, expires_at: datetime | None 
 
     loss_breaker = _loss_breaker(analysed, settings)
 
-    # Signal lab (H3): for portfolios that chose it, the evidence-weighted vote replaces the RSI/MACD rules;
-    # stop-loss and take-profit still come first.
-    use_lab = bool(env) and (portfolio.get("strategy") or "rules") == "signals"
-    lab_votes: dict[str, dict | None] = {}
-    if use_lab:
-        from core import signals
-        lab_symbols = [p["symbol"] for p, _ in analysed if p["symbol"] not in not_bought]
+    # Model B (I2): for 'factor' portfolios the monthly Model B plan decides what to buy and sell; the RSI/MACD
+    # rules don't trade them, but stop-loss and take-profit still do (and drop that stock from this month's plan).
+    use_factor = bool(env) and (portfolio.get("strategy") or "rules") == "factor"
+    factor_plan = None
+    if use_factor:
+        pending_now = {s: float(q) for s, q in paper.open_order_quantities(portfolio_id, env).items()}
         try:
-            lab = signals.run_lab(lab_symbols)
-            lab_votes = {symbol: signals.vote(lab["tests"], symbol) for symbol in lab_symbols}
-        except Exception as exc:  # no lab today: only the protective exits run
-            skipped.append({"symbol": "*", "reason": f"signal lab unavailable ({exc}); only stop-loss/take-profit ran"})
+            factor_plan = _factor_plan(portfolio, positions, portfolio_value, pending_now)
+        except Exception as exc:  # no ranking this check: only the protective exits run
+            skipped.append({"symbol": "*", "reason": f"Model B ranking unavailable ({exc}); only stop-loss/take-profit ran"})
     sectors: dict[str, str | None] = {}
     for position, analysis in analysed:
         symbol = position["symbol"]
@@ -607,11 +637,12 @@ def scan_portfolio(user_id: int, portfolio_id: int, expires_at: datetime | None 
             portfolio_value=portfolio_value,
             expires_at=expires_at,
         )
-        if use_lab and (candidate is None or candidate["rationale"].get("rule") not in RISK_EXITS):
-            candidate, note = _lab_signal(portfolio_id, portfolio, position, analysis, lab_votes.get(symbol),
-                                          portfolio_value, expires_at)
-            if note:
-                skipped.append({"symbol": symbol, "reason": note})
+        if use_factor and candidate is not None and candidate["rationale"].get("rule") not in RISK_EXITS:
+            candidate = None  # the Model B plan trades this portfolio
+        if use_factor and candidate is not None and factor_plan and symbol in (factor_plan.get("target") or {}):
+            factor_plan["target"].pop(symbol)  # sold for protection: not bought back this month
+            factor_plan.setdefault("reasons", {})[symbol] = f"dropped this month: {candidate['rationale']['rule']}"
+            _save_factor_plan(portfolio_id, factor_plan)
         if candidate is None or (candidate["action"] == "BUY" and symbol in waiting):
             continue
 
@@ -647,15 +678,48 @@ def scan_portfolio(user_id: int, portfolio_id: int, expires_at: datetime | None 
             turnover_today=turnover_today_baseline
                 + sum(s["quantity"] * s["price_at_signal"] for s in new_signals_payload),
             settings=settings,
-            risk_exit=candidate["rationale"].get("rule") in RISK_EXITS
-                or (candidate["rationale"].get("rule") == "signal_vote" and candidate["action"] == "SELL"),
-            plan_sized=candidate["rationale"].get("rule") == "signal_vote",
+            risk_exit=candidate["rationale"].get("rule") in RISK_EXITS,
         )
         if not ok:
             skipped.append({"symbol": symbol, "reason": reason})
             continue
 
         new_signals_payload.append(candidate)
+
+    if use_factor and factor_plan:
+        held_now = {p["symbol"]: float(p.get("quantity") or 0) for p in positions}
+        pending_now = {s: float(q) for s, q in paper.open_order_quantities(portfolio_id, env).items()}
+        for candidate in _factor_signals(portfolio_id, portfolio, factor_plan, held_now, pending_now, prices, expires_at):
+            symbol = candidate["symbol"]
+            if any(s["symbol"] == symbol for s in new_signals_payload):
+                continue  # a stop-loss/take-profit for it was just proposed
+            duplicate = _already_proposed(portfolio_id, symbol, candidate["action"])
+            if duplicate:
+                skipped.append({"symbol": symbol, "reason": duplicate})
+                continue
+            if candidate["action"] == "BUY":
+                reserved = sum(s["quantity"] * s["price_at_signal"] for s in new_signals_payload if s["action"] == "BUY")
+                quantity, note = _fit_order(candidate, held_value=held_now.get(symbol, 0.0) * candidate["price_at_signal"],
+                                            total_value=portfolio_value, cash=cash - reserved,
+                                            risk_tolerance=portfolio.get("risk_tolerance"), binding=binding)
+                if quantity < 1:
+                    skipped.append({"symbol": symbol, "reason": note or "less than one whole share"})
+                    continue
+                candidate["quantity"] = quantity
+                if note:
+                    candidate["rule_summary"] += f" ({note})"
+                if loss_breaker:
+                    skipped.append({"symbol": symbol, "reason": loss_breaker})
+                    continue
+            ok, reason = _within_guardrails(
+                estimated_value=candidate["quantity"] * candidate["price_at_signal"],
+                portfolio_value=portfolio_value,
+                signals_today=signals_today_baseline + len(new_signals_payload),
+                turnover_today=0.0, settings=settings, plan_sized=True)
+            if not ok:
+                skipped.append({"symbol": symbol, "reason": reason})
+                continue
+            new_signals_payload.append(candidate)
 
     if waiting and env:
         pending = paper.open_order_quantities(portfolio_id, env)

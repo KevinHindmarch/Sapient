@@ -1,4 +1,5 @@
 import axios from 'axios'
+import type { OptimizationResult } from '../types'
 import { toast } from 'sonner'
 import { apiBase, apiToken } from './runtime'
 
@@ -445,23 +446,25 @@ export const backupsApi = {
   cancelRestore: () => api.delete('/backups/restore'),
 }
 
-// ---- Signal lab (H2) and how AI Trading decides per portfolio (H3) ----
-export interface SignalTest {
-  symbol: string; signal: string; label: string; days: number; trades: number; time_in_market: number
-  edge_per_year: number; strategy_per_year: number; holding_per_year: number; t_stat: number; p_value: number
-  recent_edge_per_year: number; holding_now: boolean; passed: boolean; verdict: string
+// ---- Model B (Fama-French five factors + momentum): Factor Builder and monthly management ----
+export type FactorKey = 'MOM' | 'RMW' | 'HML' | 'CMA' | 'SMB'
+export interface FactorRow {
+  rank: number; symbol: string; name: string | null; sector: string | null; price: number | null
+  score: number; z: Partial<Record<FactorKey, number>>; volatility: number | null
 }
-export interface SignalVote {
-  symbol: string; score: number; says: 'hold' | 'out' | 'no change'
-  signals: { signal: string; label: string; holding_now: boolean; edge_per_year: number; p_value: number }[]
+export interface FactorBuild {
+  market: 'ASX' | 'US'; model: 'B'; weights: Partial<Record<FactorKey, number>>; labels: Record<FactorKey, string>
+  ranking: FactorRow[]; optimization: OptimizationResult
 }
-export interface SignalLabResult {
-  years: number; fdr: number; cost_per_trade: number; recent_years: number
-  tests: SignalTest[]; errors: Record<string, string>; votes: SignalVote[]
-  strategy?: 'rules' | 'signals'; buy_score?: number; sell_score?: number
+export interface FactorPlan {
+  month: string; model: 'B'; target: Record<string, number>; weights?: Record<string, number>
+  ranks?: Record<string, number>; reasons?: Record<string, string>; adopted?: boolean; value?: number
 }
-export const signalsApi = {
-  portfolio: (id: number) => api.get<SignalLabResult>(`/signals/portfolio/${id}`, { timeout: 180000 }),
-  setStrategy: (id: number, strategy: 'rules' | 'signals') =>
-    api.put<{ strategy: 'rules' | 'signals' }>(`/signals/portfolio/${id}/strategy`, { strategy }),
+export const factorsApi = {
+  build: (market: 'ASX' | 'US', investment_amount: number, risk_tolerance: string, top_n = 20) =>
+    api.post<FactorBuild>('/factors/build', { market, investment_amount, risk_tolerance, top_n }),
+  plan: (portfolioId: number) =>
+    api.get<{ strategy: 'rules' | 'factor'; plan: FactorPlan | null; hold: number; keep_within: number }>(`/factors/portfolio/${portfolioId}`),
+  setStrategy: (portfolioId: number, strategy: 'rules' | 'factor') =>
+    api.put<{ strategy: 'rules' | 'factor' }>(`/factors/portfolio/${portfolioId}/strategy`, { strategy }),
 }

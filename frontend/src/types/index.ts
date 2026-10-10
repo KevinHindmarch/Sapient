@@ -60,7 +60,7 @@ export interface Portfolio {
   status: string
   position_count?: number
   ai_mode?: 'off' | 'suggestions' | 'autonomous'
-  strategy?: 'rules' | 'signals' | null   // how AI Trading decides (H3)
+  strategy?: 'rules' | 'factor' | null    // how AI Trading decides: RSI rules or Model B
   market?: string
   trading_environment?: 'paper' | 'live' | null
 }
