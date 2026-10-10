@@ -57,10 +57,10 @@ export default function FactorBuilder() {
       <div className="page-header">
         <div className="flex items-center gap-2">
           <Layers className="w-8 h-8 text-sky-400" />
-          <h1 className="page-title">Factor Builder</h1>
+          <h1 className="page-title">Auto Builder · Model B</h1>
         </div>
         <p className="page-subtitle">
-          Model B ranks every stock in the market on five Fama-French factors plus momentum, takes the top stocks and
+          Ranks every stock in the {market === 'US' ? 'S&P 500' : 'ASX 200'} list on five Fama-French factors plus momentum, takes the top stocks and
           weights them with the max-Sharpe optimiser. With AI Trading on, it re-ranks every month: holdings still in the
           top 40 are kept, the rest are sold, and the best new stocks are bought.
         </p>

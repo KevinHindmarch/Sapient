@@ -223,16 +223,17 @@ The H2 signal lab was replaced by Model B.
 - Each factor is turned into a winsorised z-score within the market. Score = 0.35 MOM + 0.25 RMW + 0.20 HML + 0.10 CMA + 0.10 SMB.
 - A missing factor counts as neutral. A stock needs at least 3 factors to be ranked.
 
-**Factor Builder** (`/factor-builder`, `POST /api/factors/build`):
-- It takes the Model B top 20 and runs the same max-Sharpe optimiser the Manual Builder uses.
+**Auto Builder → Model B tab** (`POST /api/factors/build`). The Model A tab is the original scan, unchanged.
+- It ranks the whole ASX 200 or S&P list.
+- It takes the top 20 and runs the same max-Sharpe optimiser the Manual Builder uses.
 - Saving with mode `factor` sets `portfolios.strategy='factor'`.
-- The Auto Builder is unchanged.
 
 **Monthly management** (`core/factor_strategy.py` + `ai_engine`), when AI Trading is on:
 - **First check:** the portfolio as built becomes the plan (`adopted`). There is no re-ranking that month.
 - **Each new month:** Model B re-ranks the market, then:
   - holdings still ranked in the top 40 are kept, and the rest are sold;
   - the best-ranked new stocks fill the list back to 20 candidates;
+  - extra "buy only undervalued / sell overvalued" rules were tested and showed no benefit, so they are not used (user decision 2026-10-10);
   - the optimiser re-weights them;
   - the result becomes whole-share targets (`factor_plan`, `factor_month`).
 - **Every check:** Sapient proposes sells first, then buys, towards the target.
