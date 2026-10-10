@@ -15,7 +15,9 @@ export default function BuyAndManage({ portfolioId, data, onDone }: {
   const [available, setAvailable] = useState<Record<TradingEnv, boolean>>({ paper: false, live: false })
   const [env, setEnv] = useState<TradingEnv | null>(null)
   const [mode, setMode] = useState<Mode>('suggestions')
-  const [onDip, setOnDip] = useState(false)
+  const modelB = data.strategy === 'factor'
+  const [entry, setEntry] = useState<'now' | 'rsi_dip' | 'staged'>(modelB ? 'staged' : 'now')
+  const onDip = entry === 'rsi_dip'
   const [rsiBelow, setRsiBelow] = useState(30)
   const [deadlineDays, setDeadlineDays] = useState(20)
   const [understood, setUnderstood] = useState(false)
@@ -44,6 +46,12 @@ export default function BuyAndManage({ portfolioId, data, onDone }: {
             Checked twice each trading day{data.ai_mode === 'off' ? ' — switch AI Trading on, or nothing is bought' : ''}.
           </span>
         )}
+        {data.entry_mode === 'staged' && (
+          <span className="block mt-1 theme-text-secondary" data-testid="entry-staged">
+            Model B is buying this portfolio a third at a time: one slice at the next check, the others in the next two
+            months{data.ai_mode === 'off' ? ' — switch AI Trading on, or nothing is bought' : ''}.
+          </span>
+        )}
         {data.skipped.length > 0 && (
           <span className="block mt-1 theme-text-secondary">Skipped (no RSI dip by the deadline): {data.skipped.join(', ')}.</span>
         )}
@@ -64,12 +72,14 @@ export default function BuyAndManage({ portfolioId, data, onDone }: {
     setBusy(true)
     try {
       const res = await tradingApiFor(env).startPortfolio(portfolioId, mode,
-        onDip ? { entry: 'rsi_dip', rsi_below: rsiBelow, deadline_days: deadlineDays } : { entry: 'now' })
+        onDip ? { entry: 'rsi_dip', rsi_below: rsiBelow, deadline_days: deadlineDays } : { entry })
       setResults(res.data.results)
       toast[res.data.started ? 'success' : 'error'](!res.data.started
         ? 'No orders could be queued; see the reasons below.'
         : res.data.entry === 'rsi_dip'
           ? `Sapient will buy each stock when its RSI drops below ${rsiBelow} (checked twice each trading day).`
+          : res.data.entry === 'staged'
+            ? 'Model B will buy the first third at its next check and the rest over the next two months.'
           : `${env === 'live' ? 'REAL-MONEY' : 'Paper'} buy orders queued. Sapient manages this portfolio from now on.`)
       onDone()
     } catch (err) {
@@ -109,12 +119,21 @@ export default function BuyAndManage({ portfolioId, data, onDone }: {
           </fieldset>
           <fieldset className="space-y-1">
             <legend className="theme-text font-medium mb-1">When should Sapient buy?</legend>
+            {modelB && (
+              <label className="flex items-start gap-2 theme-text">
+                <input type="radio" name="entry" className="mt-1" checked={entry === 'staged'} onChange={() => setEntry('staged')}
+                  data-testid="entry-staged-choice" />
+                <span><strong>Over three months (recommended for Model B):</strong> buy a third of the holdings at the next
+                  check and the rest in the next two months. Each third is re-checked against Model B's ranking when its turn
+                  comes, so you don't put everything in on one day.</span>
+              </label>
+            )}
             <label className="flex items-start gap-2 theme-text">
-              <input type="radio" name="entry" className="mt-1" checked={!onDip} onChange={() => setOnDip(false)} />
+              <input type="radio" name="entry" className="mt-1" checked={entry === 'now'} onChange={() => setEntry('now')} />
               <span><strong>Now:</strong> buy all the holdings straight away.</span>
             </label>
             <label className="flex items-start gap-2 theme-text">
-              <input type="radio" name="entry" className="mt-1" checked={onDip} onChange={() => setOnDip(true)}
+              <input type="radio" name="entry" className="mt-1" checked={onDip} onChange={() => setEntry('rsi_dip')}
                 data-testid="entry-dip" />
               <span><strong>When each stock is cheap:</strong> buy a stock only when its RSI drops below{' '}
                 <input type="number" min={5} max={50} value={rsiBelow} onChange={(e) => setRsiBelow(Number(e.target.value))}
@@ -130,14 +149,15 @@ export default function BuyAndManage({ portfolioId, data, onDone }: {
               <input type="checkbox" className="mt-1" checked={understood} onChange={(e) => setUnderstood(e.target.checked)}
                 data-testid="live-understood" />
               <span>I understand Sapient will spend <strong>my real money</strong> buying these shares
-                {onDip ? ' when their RSI dips' : ' now'}, and will keep
+                {onDip ? ' when their RSI dips' : entry === 'staged' ? ' over the next three months' : ' now'}, and will keep
                 buying and selling them {mode === 'autonomous' ? 'without asking me' : 'when I approve'}.</span>
             </label>
           )}
           <button className={live ? 'btn-primary !bg-red-600 !from-red-600 !to-red-700' : 'btn-primary'}
             disabled={busy || (live && !understood)} onClick={go}>
             {onDip ? (live ? 'Buy with real money on RSI dips' : 'Buy on paper on RSI dips')
-              : (live ? 'Buy with real money now' : 'Buy on paper now')}
+              : entry === 'staged' ? (live ? 'Buy with real money over three months' : 'Buy on paper over three months')
+                : (live ? 'Buy with real money now' : 'Buy on paper now')}
           </button>
         </>
       )}

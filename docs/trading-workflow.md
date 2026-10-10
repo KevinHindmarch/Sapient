@@ -229,20 +229,21 @@ The H2 signal lab was replaced by Model B.
 - Saving with mode `factor` sets `portfolios.strategy='factor'`.
 
 **Monthly management** (`core/factor_strategy.py` + `ai_engine`), when AI Trading is on:
+- **Three slices (I5, user decision 2026-10-10 after the Yahoo backtest, artifact "Model B Backtest"):** the holdings are dealt into three slices, biggest first (`plan.slices`). Each month only the next slice (`plan.slice`) is reviewed, so every holding is reviewed quarterly; the other slices keep their last target. This roughly halves trading and averages out the luck of which month is traded.
 - **First check:** the portfolio as built becomes the plan (`adopted`). There is no re-ranking that month.
-- **Each new month:** Model B re-ranks the market, then:
+  - **"Buy over three months" (`entry='staged'`, Model B only):** Buy & manage buys nothing at once. The first check buys slice 1; slices 2 and 3 wait in `plan.building` and are re-checked against the ranking when their month comes (bought if still in the top 40, otherwise replaced). If a waiting stock is bought another way ("Buy now"), it joins the plan.
+- **Each new month:** Model B re-ranks the market, then, for that month's slice:
   - holdings still ranked in the top 40 are kept, and the rest are sold;
-  - the best-ranked new stocks fill the list back to 20 candidates;
+  - the best-ranked new stocks (not in another slice) fill the slice back to 7, 7 or 6;
   - extra "buy only undervalued / sell overvalued" rules were tested and showed no benefit, so they are not used (user decision 2026-10-10);
-  - the optimiser re-weights them;
+  - the optimiser weights the whole portfolio; only this slice's targets change;
   - the result becomes whole-share targets (`factor_plan`, `factor_month`).
 - **Every check:** Sapient proposes sells first, then buys, towards the target.
   - Shares on open orders count as held.
   - A stock is only traded when it enters or leaves the target, or is more than 20% of its target value away.
   - The account limits, cash and the per-stock cap still apply.
   - Planned trades skip the per-trade size and turnover guardrails; the daily trade count still applies.
-- **Protection:**
-  - Stop-loss and take-profit still run between rebalances. A stock they sell is dropped from that month's plan.
-  - The RSI/MACD rules don't trade factor portfolios.
+- **No stop-loss or take-profit for Model B (I5, user decision 2026-10-10):** in the backtest they cost about 3–4% a year each (take-profit sold the winners momentum holds; stop-loss sold near the bottom of dips and did not reduce the worst fall). The settings still apply to "Simple rules" portfolios.
+  - The RSI/MACD rules don't trade factor portfolios either. Holdings waiting for an RSI dip are bought by the dip entry, not the plan.
 
 **Evidence:** see the "Factor Strategy Plan" artifact. Model B has worked best for Asia-Pacific ex Japan, which is mostly Australia. In the US it has trailed the S&P 500 since 2010. Paper-test before using real money.

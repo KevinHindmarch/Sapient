@@ -325,7 +325,7 @@ export default function AITradingSettings() {
           />
           <NumberField
             label="Stop-loss (%)"
-            help="propose selling if price falls this far below your average cost; 0 = off"
+            help="propose selling if price falls this far below your average cost; 0 = off. Not used by Model B portfolios"
             value={settings.stop_loss_pct ?? 0}
             min={0}
             max={50}
@@ -334,7 +334,7 @@ export default function AITradingSettings() {
           />
           <NumberField
             label="Take-profit (%)"
-            help="propose selling if price rises this far above your average cost; 0 = off"
+            help="propose selling if price rises this far above your average cost; 0 = off. Not used by Model B portfolios"
             value={settings.take_profit_pct ?? 0}
             min={0}
             max={500}
