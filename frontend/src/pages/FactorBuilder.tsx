@@ -4,8 +4,8 @@ import { toast } from 'sonner'
 import { Layers } from 'lucide-react'
 import { apiErrorMessage, factorsApi, FactorBuild, FactorKey, money, portfolioApi } from '../lib/api'
 
-const FACTORS: FactorKey[] = ['MOM', 'QUAL', 'VAL', 'GROW', 'SIZE']
-const SHORT: Record<FactorKey, string> = { MOM: 'Momentum', QUAL: 'Quality', VAL: 'Value', GROW: 'Growth', SIZE: 'Size' }
+const FACTORS: FactorKey[] = ['MOM', 'RMW', 'HML', 'CMA', 'SMB']
+const SHORT: Record<FactorKey, string> = { MOM: 'Momentum', RMW: 'Profit', HML: 'Value', CMA: 'Investment', SMB: 'Size' }
 const pct = (v: number) => `${(v * 100).toFixed(1)}%`
 
 /**

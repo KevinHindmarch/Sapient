@@ -447,10 +447,10 @@ export const backupsApi = {
 }
 
 // ---- Model B (Fama-French five factors + momentum): Factor Builder and monthly management ----
-export type FactorKey = 'MOM' | 'QUAL' | 'VAL' | 'GROW' | 'SIZE'
+export type FactorKey = 'MOM' | 'RMW' | 'HML' | 'CMA' | 'SMB'
 export interface FactorRow {
   rank: number; symbol: string; name: string | null; sector: string | null; price: number | null
-  score: number; z: Partial<Record<FactorKey, number>>
+  score: number; z: Partial<Record<FactorKey, number>>; volatility: number | null
 }
 export interface FactorBuild {
   market: 'ASX' | 'US'; model: 'B'; weights: Partial<Record<FactorKey, number>>; labels: Record<FactorKey, string>

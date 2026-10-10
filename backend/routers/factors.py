@@ -13,7 +13,7 @@ router = APIRouter()
 
 def _rows(ranked: list, limit: int) -> list[dict]:
     return [{"rank": s.rank, "symbol": s.symbol, "name": s.name, "sector": s.sector, "price": s.price,
-             "score": s.score, "z": s.z}
+             "score": s.score, "z": s.z, "volatility": s.volatility}
             for s in ranked if s.rank is not None][:limit]
 
 

@@ -26,8 +26,7 @@ def candidates(ranked: list[factors.StockFactors], held: list[str], hold: int = 
                keep_within: int = KEEP_WITHIN, undervalued_only: bool = True) -> tuple[list[str], dict]:
     """Holdings still ranked within `keep_within`, then the best new stocks up to `hold`.
 
-    New stocks must also be undervalued (value z-score above the market average:
-    earnings yield and book-to-market)
+    New stocks must also be undervalued (book-to-market above the market average)
     and a holding is sold once it becomes clearly overvalued (value z-score below
     factors.OVERVALUED_Z), user decisions 2026-10-10. The gap between the two
     thresholds stops stocks near the average being bought and sold every month.
@@ -43,7 +42,7 @@ def candidates(ranked: list[factors.StockFactors], held: list[str], hold: int = 
         if s in keep:
             continue
         if s in too_dear and rank_of.get(s) is not None and rank_of[s] <= keep_within:
-            reasons[s] = f"sell: now overvalued (value z {by_symbol[s].z.get('VAL', float('nan')):+.1f}, ranked {rank_of[s]})"
+            reasons[s] = f"sell: now overvalued (value z {by_symbol[s].z.get('HML', float('nan')):+.1f}, ranked {rank_of[s]})"
         elif s in rank_of:
             reasons[s] = f"sell: ranked {rank_of[s]}, out of the top {keep_within}"
         else:
@@ -54,8 +53,8 @@ def candidates(ranked: list[factors.StockFactors], held: list[str], hold: int = 
             break
         if s.rank is not None and s.symbol not in chosen and (not undervalued_only or factors.undervalued(s)):
             chosen.append(s.symbol)
-            reasons[s.symbol] = f"new: ranked {s.rank}, undervalued (value z {s.z['VAL']:+.1f})" \
-                if "VAL" in s.z else f"new: ranked {s.rank}"
+            reasons[s.symbol] = f"new: ranked {s.rank}, undervalued (value z {s.z['HML']:+.1f})" \
+                if "HML" in s.z else f"new: ranked {s.rank}"
     return chosen, reasons
 
 
