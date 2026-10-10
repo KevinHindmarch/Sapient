@@ -51,7 +51,7 @@ class Resolve(BaseModel):
 class StartPortfolio(BaseModel):
     model_config = ConfigDict(extra="forbid")
     mode: str | None = Field(default=None, pattern=r"^(suggestions|autonomous)$")
-    entry: str = Field(default="now", pattern=r"^(now|rsi_dip)$")  # rsi_dip: buy each stock when its RSI dips
+    entry: str = Field(default="now", pattern=r"^(now|rsi_dip|staged)$")  # rsi_dip: on an RSI dip; staged: Model B, a slice a month
     rsi_below: float = Field(default=paper.DEFAULT_ENTRY_RSI, ge=5, le=50)
     deadline_days: int = Field(default=paper.DEFAULT_ENTRY_DAYS, ge=1, le=120)
 

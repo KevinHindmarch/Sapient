@@ -369,9 +369,11 @@ def _build_signal(
 def _factor_plan(portfolio: dict, positions: list[dict], portfolio_value: float, pending: dict) -> dict | None:
     """This month's Model B target for a 'factor' portfolio (I2), computed once a month and kept.
 
-    The first time, the portfolio as built is adopted as the plan (no trades in
-    the month it was built); in each new month Model B re-ranks the market and
-    the optimiser re-weights (core.factor_strategy.plan).
+    The first time, the portfolio as built is adopted as the plan and dealt into
+    three slices (I5); a portfolio started 'staged' buys only the first slice now
+    and the others in the next two months. In each new month the next slice is
+    reviewed: Model B re-ranks the market and the optimiser re-weights
+    (core.factor_strategy.plan).
     """
     import json
     from core import factor_strategy
@@ -382,17 +384,45 @@ def _factor_plan(portfolio: dict, positions: list[dict], portfolio_value: float,
         except ValueError:
             plan = None
     month = datetime.now(timezone.utc).strftime("%Y-%m")
+    held = {p["symbol"]: float(p.get("quantity") or 0) for p in positions if float(p.get("quantity") or 0) > 0}
+    for s, q in pending.items():
+        if q > 0:
+            held[s] = held.get(s, 0.0) + float(q)
+    cost = {p["symbol"]: float(p.get("avg_cost") or 0) for p in positions}
     if plan is None:
-        target = {p["symbol"]: int(float(p.get("planned_quantity") or p.get("quantity") or 0)) for p in positions}
-        plan = {"month": month, "model": "B", "target": {s: q for s, q in target.items() if q >= 1},
-                "prices": {}, "reasons": {s: "as built" for s in target}, "adopted": True}
+        planned = {p["symbol"]: int(float(p.get("planned_quantity") or p.get("quantity") or 0)) for p in positions}
+        planned = {s: q for s, q in planned.items() if q >= 1}
+        slices = factor_strategy.assign_slices(sorted(planned, key=lambda s: -planned[s] * (cost.get(s) or 1)))
+        staged = portfolio.get("entry_mode") == "staged"
+        target = {s: q for s, q in planned.items() if not staged or slices[s] == 0 or held.get(s, 0) > 0}
+        building = {s: q for s, q in planned.items() if s not in target}
+        reasons = {s: "as built" for s in target}
+        reasons.update({s: f"waiting: bought with slice {slices[s] + 1} in {slices[s]} month(s)" for s in building})
+        plan = {"month": month, "model": "B", "target": target, "prices": {}, "reasons": reasons, "adopted": True,
+                "slices": slices, "slice": 0, "building": building}
     elif plan.get("month") != month:
-        held = sorted({p["symbol"] for p in positions if float(p.get("quantity") or 0) > 0}
-                      | {s for s, q in pending.items() if q > 0})
-        plan = factor_strategy.plan(portfolio.get("market") or "ASX", held, portfolio_value,
-                                    portfolio.get("risk_tolerance") or "moderate")
+        previous = plan.get("target") or {}
+        building = dict(plan.get("building") or {})
+        if plan.get("slices"):
+            slices = {s: int(k) for s, k in plan["slices"].items()}
+            active = (int(plan.get("slice", -1)) + 1) % factor_strategy.SLICES
+        else:  # a plan from before slices: deal the holdings into slices now, review the first
+            slices = factor_strategy.assign_slices(sorted(held, key=lambda s: -held[s] * (cost.get(s) or 1)))
+            active = 0
+        for s in held:
+            slices.setdefault(s, active)  # anything outside the slices is reviewed now
+        slices = {s: k for s, k in slices.items() if held.get(s, 0) > 0 or s in building or previous.get(s)}
+        plan = factor_strategy.plan(portfolio.get("market") or "ASX", slices, held, active, portfolio_value,
+                                    portfolio.get("risk_tolerance") or "moderate", building=building,
+                                    previous_target=previous)
     else:
-        return plan
+        # A slice still waiting to be built that was bought another way ("Buy now") joins the plan.
+        promoted = [s for s in (plan.get("building") or {}) if held.get(s, 0) > 0]
+        if not promoted:
+            return plan
+        for s in promoted:
+            plan.setdefault("target", {})[s] = int(plan["building"].pop(s))
+            plan.setdefault("reasons", {})[s] = "as built"
     _save_factor_plan(portfolio["id"], plan)
     return plan
 
@@ -613,16 +643,17 @@ def scan_portfolio(user_id: int, portfolio_id: int, expires_at: datetime | None 
 
     loss_breaker = _loss_breaker(analysed, settings)
 
-    # Model B (I2): for 'factor' portfolios the monthly Model B plan decides what to buy and sell; the RSI/MACD
-    # rules don't trade them, but stop-loss and take-profit still do (and drop that stock from this month's plan).
+    # Model B (I2): for 'factor' portfolios the monthly Model B plan alone decides what to buy and sell. Neither
+    # the RSI/MACD rules nor stop-loss/take-profit trade them (I5, user decision 2026-10-10: in the backtest
+    # take-profit sold the winners momentum holds and stop-loss sold near the bottom of dips).
     use_factor = bool(env) and (portfolio.get("strategy") or "rules") == "factor"
     factor_plan = None
     if use_factor:
         pending_now = {s: float(q) for s, q in paper.open_order_quantities(portfolio_id, env).items()}
         try:
             factor_plan = _factor_plan(portfolio, positions, portfolio_value, pending_now)
-        except Exception as exc:  # no ranking this check: only the protective exits run
-            skipped.append({"symbol": "*", "reason": f"Model B ranking unavailable ({exc}); only stop-loss/take-profit ran"})
+        except Exception as exc:  # no ranking this check: nothing is traded
+            skipped.append({"symbol": "*", "reason": f"Model B ranking unavailable ({exc}); nothing traded this check"})
     sectors: dict[str, str | None] = {}
     for position, analysis in analysed:
         symbol = position["symbol"]
@@ -637,12 +668,8 @@ def scan_portfolio(user_id: int, portfolio_id: int, expires_at: datetime | None 
             portfolio_value=portfolio_value,
             expires_at=expires_at,
         )
-        if use_factor and candidate is not None and candidate["rationale"].get("rule") not in RISK_EXITS:
-            candidate = None  # the Model B plan trades this portfolio
-        if use_factor and candidate is not None and factor_plan and symbol in (factor_plan.get("target") or {}):
-            factor_plan["target"].pop(symbol)  # sold for protection: not bought back this month
-            factor_plan.setdefault("reasons", {})[symbol] = f"dropped this month: {candidate['rationale']['rule']}"
-            _save_factor_plan(portfolio_id, factor_plan)
+        if use_factor:
+            candidate = None  # the Model B plan alone trades this portfolio
         if candidate is None or (candidate["action"] == "BUY" and symbol in waiting):
             continue
 
@@ -691,8 +718,8 @@ def scan_portfolio(user_id: int, portfolio_id: int, expires_at: datetime | None 
         pending_now = {s: float(q) for s, q in paper.open_order_quantities(portfolio_id, env).items()}
         for candidate in _factor_signals(portfolio_id, portfolio, factor_plan, held_now, pending_now, prices, expires_at):
             symbol = candidate["symbol"]
-            if any(s["symbol"] == symbol for s in new_signals_payload):
-                continue  # a stop-loss/take-profit for it was just proposed
+            if candidate["action"] == "BUY" and symbol in waiting:
+                continue  # waiting for its RSI dip: the dip entry buys it
             duplicate = _already_proposed(portfolio_id, symbol, candidate["action"])
             if duplicate:
                 skipped.append({"symbol": symbol, "reason": duplicate})

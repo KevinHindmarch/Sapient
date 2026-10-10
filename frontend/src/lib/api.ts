@@ -255,8 +255,9 @@ export const twsApi = makeTwsApi('/tws')
 export const twsLiveApi = makeTwsApi('/tws-live')
 export const twsApiFor = (env: TradingEnv) => (env === 'live' ? twsLiveApi : twsApi)
 
-/** RSI-dip entry: buy each stock only when its RSI is below `rsi_below`; skip it after `deadline_days`. */
-export interface EntryChoice { entry: 'now' | 'rsi_dip'; rsi_below?: number; deadline_days?: number }
+/** RSI-dip entry: buy each stock only when its RSI is below `rsi_below`; skip it after `deadline_days`.
+ *  staged (Model B only): the monthly Model B check buys a third of the portfolio a month. */
+export interface EntryChoice { entry: 'now' | 'rsi_dip' | 'staged'; rsi_below?: number; deadline_days?: number }
 
 export interface BrokerCompare {
   state: string
@@ -267,7 +268,8 @@ export interface BrokerCompare {
   live_started_at: string | null
   trading_environment: TradingEnv | null
   ai_mode: 'off' | 'suggestions' | 'autonomous'
-  entry_mode: 'now' | 'rsi_dip' | null
+  entry_mode: 'now' | 'rsi_dip' | 'staged' | null
+  strategy: 'rules' | 'factor'
   entry_rsi_below: number | null
   entry_deadline: string | null
   waiting: string[]
@@ -459,6 +461,7 @@ export interface FactorBuild {
 export interface FactorPlan {
   month: string; model: 'B'; target: Record<string, number>; weights?: Record<string, number>
   ranks?: Record<string, number>; reasons?: Record<string, string>; adopted?: boolean; value?: number
+  slices?: Record<string, number>; slice?: number; building?: Record<string, number>
 }
 export const factorsApi = {
   build: (market: 'ASX' | 'US', investment_amount: number, risk_tolerance: string, top_n = 20) =>

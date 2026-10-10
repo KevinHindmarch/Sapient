@@ -80,12 +80,39 @@ class PlanTests(unittest.TestCase):
 
     def test_plan_turns_weights_into_whole_shares(self):
         ranked = self.ranked(30)
-        plan = factor_strategy.plan("ASX", held=[], value=10000, risk_tolerance="moderate",
+        plan = factor_strategy.plan("ASX", slices={}, held={}, active=0, value=10000, risk_tolerance="moderate",
                                     ranker=lambda syms: ranked,
                                     price_loader=lambda syms: None)  # optimiser can't run: equal weights
-        self.assertEqual(len(plan["target"]), 20)
-        self.assertEqual(plan["target"]["R1"], 50)                   # 10000 / 20 / 10.0
-        self.assertEqual(plan["model"], "B")
+        self.assertEqual(len(plan["target"]), 7)                     # one slice of 20: 7, 7, 6
+        self.assertEqual(plan["target"]["R1"], 50)                   # its share: 10000 * 7/20 / 7 / 10.0
+        self.assertEqual((plan["model"], plan["slice"]), ("B", 0))
+
+    def test_only_this_months_slice_is_reviewed(self):
+        slices = {"R50": 0, "R70": 0, "R5": 0, "R2": 1, "R90": 2}
+        held = {s: 10.0 for s in slices}
+        plan = factor_strategy.plan("ASX", slices=slices, held=held, active=0, value=10000, risk_tolerance="moderate",
+                                    ranker=lambda syms: self.ranked(100), price_loader=lambda syms: None,
+                                    previous_target={s: 10 for s in slices})
+        self.assertNotIn("R50", plan["target"])                      # its slice is reviewed: out of the top 40
+        self.assertNotIn("R70", plan["target"])
+        self.assertIn("R5", plan["target"])                          # kept: still in the top 40
+        self.assertEqual(plan["target"]["R90"], 10)                  # another slice: untouched, though ranked 90
+        self.assertEqual(plan["target"]["R2"], 10)
+        self.assertEqual(sum(1 for k in plan["slices"].values() if k == 0), 7)   # slice 0 refilled to 7
+        self.assertEqual(plan["slices"]["R1"], 0)
+        self.assertNotIn("R2", [s for s, k in plan["slices"].items() if k == 0])
+
+    def test_a_slice_still_to_be_built_is_rechecked_when_its_turn_comes(self):
+        slices = {"R1": 0, "R3": 1, "R60": 1, "R4": 2}
+        plan = factor_strategy.plan("ASX", slices=slices, held={"R1": 10.0}, active=1, value=10000,
+                                    risk_tolerance="moderate", ranker=lambda syms: self.ranked(100),
+                                    price_loader=lambda syms: None, building={"R3": 30, "R60": 30, "R4": 30},
+                                    previous_target={"R1": 10})
+        self.assertIn("R3", plan["target"])                          # still ranked well: bought now
+        self.assertNotIn("R60", plan["target"])                      # fell out of the top 40: not bought
+        self.assertIn("not bought", plan["reasons"]["R60"])
+        self.assertEqual(plan["building"], {"R4": 30})               # slice 3 waits for next month
+        self.assertNotIn("R4", plan["target"])
 
 
 class ModelBTradingTests(Helpers, test_paper.PaperTestCase):
@@ -141,14 +168,35 @@ class ModelBTradingTests(Helpers, test_paper.PaperTestCase):
         self.assertIn("out of the top 40", sell["rule_summary"])           # the reason reaches the inbox
         self.assertEqual(sell["rationale"]["rule"], "factor_rebalance")
 
-    def test_stop_loss_still_protects_and_drops_the_stock_for_the_month(self):
+    def test_model_b_ignores_stop_loss_and_take_profit(self):
+        AITradingSettingsService.update(self.user["id"], {"take_profit_pct": 10})
         self.scan()                                                         # adopt
         self.sql("DELETE FROM paper_orders WHERE origin <> 'entry'")
         self.sql("DELETE FROM ai_signals")
-        result = self.scan(price=30.0)                                     # -25% vs cost 40
-        rules = {(s["symbol"], s["action"]): s["rationale"]["rule"] for s in result["new_signals"]}
-        self.assertEqual(rules[("BHP.AX", "SELL")], "stop_loss")
-        self.assertNotIn("BHP.AX", self.plan()["target"])
+        for price in (30.0, 60.0):                                         # -25% and +50% vs cost 40
+            result = self.scan(price=price)
+            self.assertNotIn("BHP.AX", [s["symbol"] for s in result["new_signals"]])
+        self.assertEqual(self.plan()["target"]["BHP.AX"], 10)
+
+    def test_staged_start_buys_one_slice_now_and_the_rest_later(self):
+        pid = self.portfolio(("CBA.AX", 20, 150, 0.6), ("CSL.AX", 5, 250, 0.3), ("BHP.AX", 10, 40, 0.1), put_in=5000)
+        self.sql("UPDATE portfolios SET strategy='factor' WHERE id=%s", (pid,))
+        result = paper.start_portfolio(pid, self.user["id"], {}, "paper", "autonomous", entry="staged")
+        self.assertEqual((result["entry"], sum(r["ok"] for r in result["results"])), ("staged", 3))
+        self.assertEqual(self.sql("SELECT count(*) AS n FROM paper_orders WHERE portfolio_id=%s", (pid,), fetch=True)[0]["n"], 0)
+        self.pid = pid
+        result = self.scan(price=40.0)
+        plan = self.plan()
+        self.assertEqual(plan["slices"], {"CBA.AX": 0, "CSL.AX": 1, "BHP.AX": 2})   # biggest first
+        self.assertEqual(plan["target"], {"CBA.AX": 20})
+        self.assertEqual(plan["building"], {"CSL.AX": 5, "BHP.AX": 10})
+        self.assertEqual([(s["symbol"], s["action"]) for s in result["new_signals"]], [("CBA.AX", "BUY")])
+
+    def test_staged_start_is_for_model_b_only(self):
+        pid = self.portfolio(("CBA.AX", 20, 150, 1.0), put_in=5000)
+        with self.assertRaises(paper.PaperError) as caught:
+            paper.start_portfolio(pid, self.user["id"], {}, "paper", "autonomous", entry="staged")
+        self.assertEqual(caught.exception.code, "invalid_entry")
 
     def test_rules_portfolios_never_rank(self):
         self.sql("UPDATE portfolios SET strategy='rules' WHERE id=%s", (self.pid,))

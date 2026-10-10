@@ -83,10 +83,13 @@ the user ticks the live authorisation in the app; never bypass that.
   list, top 20 → existing max-Sharpe optimiser → save (mode
   'factor' sets strategy 'factor'; `/api/factors/build`).
   A 'factor' portfolio (`core/factor_strategy.py`, ai_engine) adopts its
-  holdings the first month, then re-ranks monthly: keep holdings ranked in
-  the top 40, sell the rest, fill to 20 candidates, re-optimise, trade toward
-  whole-share targets (20% band, sells first); stop-loss/take-profit still
-  run and drop that stock for the month. Plan kept in `portfolios.factor_plan`.
+  holdings the first month, then re-ranks monthly in three slices (I5): each
+  month only one slice (~7 stocks) is reviewed — keep its holdings ranked in
+  the top 40, sell the rest, refill the slice, re-optimise, trade toward
+  whole-share targets (20% band, sells first); other slices keep their
+  targets. "Buy over three months" (entry 'staged', Model B only) buys one
+  slice a month. Model B ignores stop-loss/take-profit (backtest: they cost
+  ~3–4%/yr each; artifact "Model B Backtest"). Plan kept in `portfolios.factor_plan`.
   Long-run test on Kenneth French data (artifact "Factor Strategy Plan"):
   Model B beat the market by ~2.4%/yr in Asia-Pac ex Japan (incl. since 2010)
   but has trailed the S&P 500 since 2010. Extra "buy only undervalued / sell

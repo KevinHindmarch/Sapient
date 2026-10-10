@@ -630,7 +630,7 @@ def open_order_quantities(portfolio_id: int, env: str) -> dict[str, Decimal]:
     return {symbol: q for symbol, q in pending.items() if q}
 
 
-ENTRY_MODES = ("now", "rsi_dip")
+ENTRY_MODES = ("now", "rsi_dip", "staged")
 DEFAULT_ENTRY_RSI, DEFAULT_ENTRY_DAYS = 30.0, 20  # user decision 2026-10-10: RSI below 30, else skip
 
 
@@ -649,14 +649,20 @@ def start_portfolio(portfolio_id: int, user_id: int, prices: dict[str, float], e
     ``entry="rsi_dip"`` buys nothing now: each missing holding waits until its
     RSI is below ``rsi_below`` at one of the scheduled checks (core.ai_engine),
     and is skipped if that hasn't happened within ``deadline_days`` trading days.
+
+    ``entry="staged"`` (Model B portfolios only) also buys nothing now: the
+    Model B check buys a third of the portfolio at its next run and the rest in
+    the next two months (core.ai_engine._factor_plan).
     """
     e = get_env(env)
     if mode not in (None, "suggestions", "autonomous"):
         raise PaperError("invalid_mode", "Choose approve-each-trade or fully automatic.")
     if entry not in ENTRY_MODES:
-        raise PaperError("invalid_entry", "Choose to buy now or when each stock's RSI dips.")
+        raise PaperError("invalid_entry", "Choose to buy now, when each stock's RSI dips, or over three months.")
     if entry == "rsi_dip":
         return _start_on_dip(portfolio_id, user_id, e, mode, float(rsi_below), int(deadline_days))
+    if entry == "staged":
+        return _start_staged(portfolio_id, user_id, e, mode)
     working = "','".join(WORKING)
     with db.transaction() as (cur, _):
         cur.execute("SELECT * FROM portfolios WHERE id=%s AND user_id=%s", (portfolio_id, user_id))
@@ -733,6 +739,47 @@ def start_portfolio(portfolio_id: int, user_id: int, prices: dict[str, float], e
             _audit(cur, f"{e.name}_portfolio_{'started' if first_time else 'topped_up'}",
                    payload={"portfolio_id": portfolio_id, "mode": mode, "queued": queued})
     return {"portfolio_id": portfolio_id, "environment": e.name, "started": started, "results": results}
+
+
+def _start_staged(portfolio_id: int, user_id: int, e: Env, mode: str | None) -> dict:
+    """Model B (I5): plan the portfolio and let the monthly Model B check buy it a slice a month (no orders now)."""
+    with db.transaction() as (cur, _):
+        cur.execute("SELECT * FROM portfolios WHERE id=%s AND user_id=%s", (portfolio_id, user_id))
+        portfolio = cur.fetchone()
+        if not portfolio:
+            raise PaperError("portfolio_not_found", "Portfolio not found.")
+        current = portfolio.get("trading_environment")
+        if current and current != e.name:
+            raise PaperError("wrong_environment", f"This portfolio already trades in {get_env(current).label}. "
+                                                  "Save a copy of it to trade it the other way.")
+        if (portfolio.get("strategy") or "rules") != "factor":
+            raise PaperError("invalid_entry", "Buying over three months is for Model B portfolios.")
+        if not (mode or (portfolio.get("ai_mode") or "off") != "off"):
+            raise PaperError("needs_mode", "Choose how Sapient should manage it: the monthly Model B check is what buys it.")
+        if portfolio.get(e.started_column):
+            raise PaperError("already_started", "This portfolio has already started; use Buy now to buy anything missing.")
+        cur.execute("""UPDATE portfolio_positions SET planned_quantity = CAST(CAST(quantity AS REAL) AS INTEGER),
+                       quantity = 0 WHERE portfolio_id=%s AND status='active'""", (portfolio_id,))
+        cur.execute("""SELECT symbol, planned_quantity FROM portfolio_positions
+                       WHERE portfolio_id=%s AND status='active' ORDER BY id""", (portfolio_id,))
+        results = []
+        for holding in cur.fetchall():
+            planned = int(Decimal(str(holding["planned_quantity"] or 0)))
+            if planned < 1:
+                results.append({"symbol": holding["symbol"], "ok": False, "message": "Less than one whole share."})
+            else:
+                results.append({"symbol": holding["symbol"], "ok": True, "waiting": True, "quantity": planned,
+                                "message": f"{planned} shares, bought by Model B over the next three months"})
+        if not any(r["ok"] for r in results):
+            raise PaperError("already_started", f"This portfolio has nothing to buy in {e.label}.")
+        cur.execute(f"""UPDATE portfolios SET {e.started_column}=%s, trading_environment=%s, entry_mode='staged',
+                        factor_plan=NULL, factor_month=NULL WHERE id=%s""", (_now(), e.name, portfolio_id))
+        if mode:
+            cur.execute("UPDATE portfolios SET ai_mode=%s WHERE id=%s", (mode, portfolio_id))
+        _audit(cur, f"{e.name}_portfolio_staged",
+               payload={"portfolio_id": portfolio_id, "mode": mode, "stocks": sum(r["ok"] for r in results)})
+    return {"portfolio_id": portfolio_id, "environment": e.name, "started": True, "entry": "staged",
+            "results": results}
 
 
 def _start_on_dip(portfolio_id: int, user_id: int, e: Env, mode: str | None, rsi_below: float,

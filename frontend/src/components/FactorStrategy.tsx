@@ -3,8 +3,9 @@ import { toast } from 'sonner'
 import { apiErrorMessage, factorsApi, FactorPlan } from '../lib/api'
 
 /**
- * How AI Trading decides for this portfolio: simple RSI + MACD rules, or Model B (re-ranked and re-optimised
- * every month: keep holdings still in the top 40, sell the rest, buy the best new stocks), with this month's plan.
+ * How AI Trading decides for this portfolio: simple RSI + MACD rules, or Model B (one of three slices re-ranked
+ * and re-optimised each month: keep holdings still in the top 40, sell the rest, buy the best new stocks), with this
+ * month's plan.
  */
 export default function FactorStrategy({ portfolioId, strategy, onStrategy }: {
   portfolioId: number; strategy: 'rules' | 'factor'; onStrategy: (s: 'rules' | 'factor') => void
@@ -47,17 +48,22 @@ export default function FactorStrategy({ portfolioId, strategy, onStrategy }: {
         <label className="flex items-start gap-2 theme-text">
           <input type="radio" name={`strategy-${portfolioId}`} className="mt-1" checked={strategy === 'factor'}
             disabled={saving} onChange={() => choose('factor')} data-testid="strategy-factor" />
-          <span><strong>Model B (factors):</strong> every month Sapient re-ranks the market on momentum, profitability,
-            value, investment and size. Holdings still in the top {keepWithin} are kept, the rest are sold, the best new
-            stocks are bought (up to 20) and the max-Sharpe optimiser sets the weights. Stop-loss and take-profit still
-            apply between rebalances. Needs AI Trading on; fully automatic trades without asking.</span>
+          <span><strong>Model B (factors):</strong> the portfolio is split into three slices and each month Sapient
+            reviews one of them, so every holding is checked once a quarter. It re-ranks the market on momentum,
+            profitability, value, investment and size: holdings in that slice still in the top {keepWithin} are kept, the
+            rest are sold, the best new stocks are bought and the max-Sharpe optimiser sets the weights. Stop-loss and
+            take-profit are not used for Model B (in testing they sold winners early and sold near the bottom of dips).
+            Needs AI Trading on; fully automatic trades without asking.</span>
         </label>
       </fieldset>
       {strategy === 'factor' && plan && (
         <div className="text-sm space-y-2">
           <p className="theme-text-secondary">
-            {plan.adopted ? `Plan for ${plan.month}: the portfolio as built (the first re-ranking is next month).`
-              : `Plan for ${plan.month}: re-ranked and re-optimised. Sapient trades toward it at its checks.`}
+            {plan.adopted ? `Plan for ${plan.month}: the portfolio as built (the first slice is reviewed next month).`
+              : `Plan for ${plan.month}: slice ${(plan.slice ?? 0) + 1} of 3 re-ranked and re-optimised; the other slices keep
+                 their targets. Sapient trades toward it at its checks.`}
+            {Object.keys(plan.building ?? {}).length > 0 && ` Still to buy in later months: ${Object.keys(plan.building ?? {})
+              .map((s) => s.replace('.AX', '')).join(', ')}.`}
           </p>
           {target.length > 0 && (
             <div className="overflow-x-auto">

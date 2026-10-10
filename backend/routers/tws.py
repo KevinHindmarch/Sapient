@@ -112,6 +112,7 @@ def compare_with_broker(portfolio_id: int, user=Depends(get_current_user)):
         "trading_environment": details["portfolio"].get("trading_environment"),
         "ai_mode": details["portfolio"].get("ai_mode") or "off",
         "entry_mode": details["portfolio"].get("entry_mode"),
+        "strategy": details["portfolio"].get("strategy") or "rules",
         "entry_rsi_below": details["portfolio"].get("entry_rsi_below"),
         "entry_deadline": details["portfolio"].get("entry_deadline"),
         "waiting": [p["symbol"] for p in details.get("positions") or []
