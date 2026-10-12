@@ -8,6 +8,7 @@ files:
   - dist/**
   - renderer/**
   - build/icon.png
+  - build/icon.ico
   - package.json
 extraResources:
   - from: ../packaging/dist/sapient-api
@@ -22,7 +23,8 @@ win:
   target:
     - target: nsis
       arch: [x64]
-  icon: build/icon.png
+  # Hand-made .ico (16–256 px, logo trimmed to fill the square) so the taskbar icon isn't tiny.
+  icon: build/icon.ico
 nsis:
   oneClick: false
   perMachine: false

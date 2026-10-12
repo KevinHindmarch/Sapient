@@ -119,6 +119,11 @@ function iconPath(): string {
   return path.join(__dirname, '..', '..', 'build', 'icon.png')
 }
 
+/** Window/taskbar icon: on Windows the multi-size .ico, so each size is drawn sharp and full-size. */
+function windowIconPath(): string {
+  return process.platform === 'win32' ? path.join(__dirname, '..', '..', 'build', 'icon.ico') : iconPath()
+}
+
 /**
  * A restore chosen in Settings → Backups is applied here, before the engine opens the
  * database: the current file is kept as backups/before-restore-<time>.db.
@@ -160,7 +165,7 @@ function createWindow(): void {
     minWidth: 1024,
     minHeight: 700,
     title: 'Sapient',
-    icon: iconPath(),
+    icon: windowIconPath(),
     backgroundColor: '#f8fafc',
     show: false,
     webPreferences: {
