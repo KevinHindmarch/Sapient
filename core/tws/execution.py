@@ -35,8 +35,9 @@ log = logging.getLogger("sapient.paper")
 
 LAST, BID, ASK = ("4", "68"), ("1", "66"), ("2", "67")   # live and delayed tick types
 CLOSE = ("9", "75")                                         # yesterday's close (live, delayed)
+HIST = ("hist",)                                            # close of TWS's latest 1-minute bar (delayed)
 TICK_NAMES = {"1": "bid", "2": "ask", "4": "last", "9": "close", "66": "delayed bid", "67": "delayed ask",
-              "68": "delayed last", "75": "delayed close"}
+              "68": "delayed last", "75": "delayed close", "hist": "latest 1-minute bar"}
 
 
 def describe_prices(prices: dict) -> str:
@@ -86,7 +87,7 @@ def choose_limit(side: str, prices: dict, reference: Decimal, max_gap_pct: Decim
         if bid and ask and bid <= ask:
             last = (bid + ask) / 2
         elif not (bid or ask):
-            last = _first_price(prices, CLOSE)
+            last = _first_price(prices, HIST) or _first_price(prices, CLOSE)
         if last is None:
             return None, (f"TWS sent no usable price for this stock (it sent: {describe_prices(prices)}), "
                           "so Sapient did not guess one.")
@@ -309,7 +310,7 @@ class PaperExecutor:
         except TwsTimeout:
             return  # try again next tick; the send window still applies
         order_ref = "sapient:" + order["id"][:18]
-        quote = {"prices": snap.get("prices"), "market_data_type": snap.get("market_data_type"),
+        quote = {"prices": snap.get("prices"), "market_data_type": snap.get("market_data_type"), "bar_time": snap.get("bar_time"),
                  "delayed": snap.get("market_data_type") in (3, 4), "taken_at": _now().isoformat()}
         with db.transaction() as (cur, _):
             binding = get_binding(cur, self.env.name)

@@ -309,16 +309,46 @@ class AsxDelayedPriceTests(PaperTestCase):
         from core.tws import session as session_mod
         fake = self.PlaceholderTicksFirst(last=None)
         self.order(key="k2", symbol="KAR.AX", quantity=100, price="1.57")
-        with mock.patch.object(session_mod, "STREAM_TIMEOUT", 0.3):
+        with mock.patch.object(session_mod, "STREAM_TIMEOUT", 0.3), mock.patch.object(session_mod, "HIST_TIMEOUT", 0.3):
             test_paper.ExecutorTests.executor(self, fake).step()
         blocked = paper.list_orders()[0]
         self.assertEqual(blocked["state"], "BLOCKED")
         self.assertIn("delayed bid -1", blocked["detail"])
 
+    class SilentStreamWithBars(SnapshotNeverEnds):
+        """What TWS did on the ASX in October 2026: 10167, then no ticks at all; the 1-minute bars still answer."""
+        def request(self, name, *args):
+            if name == "reqMktData" and not args[3]:
+                self.requests.append(("reqMktData", False))
+                self.emit("error", reqId=args[0], errorCode=10167,
+                          errorString="Requested market data is not subscribed. Displaying delayed market data.")
+                return
+            if name == "reqHistoricalData":
+                self.requests.append(("reqHistoricalData",) + args[3:7])
+                for minute, close in ((40, 1.55), (41, 1.56)):
+                    self.emit("historicalData", reqId=args[0],
+                              bar=SimpleNamespace(date=f"20261012 12:{minute}:00 Australia/Sydney", close=close))
+                self.emit("historicalDataEnd", reqId=args[0], start="", end="")
+                return
+            super().request(name, *args)
+
+    def test_silent_stream_falls_back_to_the_latest_one_minute_bar(self):
+        from core.tws import session as session_mod
+        fake = self.SilentStreamWithBars(last=None)
+        self.order(key="k3", symbol="KAR.AX", quantity=100, price="1.57")
+        with mock.patch.object(session_mod, "STREAM_TIMEOUT", 0.3):
+            test_paper.ExecutorTests.executor(self, fake).step()
+        self.assertIn(("reqHistoricalData", "1 D", "1 min", "TRADES", 1), fake.requests)
+        sent = paper.list_orders()[0]
+        self.assertEqual((sent["state"], sent["limit_price"]), ("SUBMITTED", Decimal("1.56")))
+        self.assertIn("12:41", sent["quote"]["bar_time"])
+
     def test_close_is_the_last_resort_price(self):
         from core.tws.execution import choose_limit
         limit, _ = choose_limit("BUY", {"66": -1, "67": -1, "75": 1.55}, Decimal("1.56"), Decimal("5"))
         self.assertEqual(limit, Decimal("1.55"))
+        limit, _ = choose_limit("BUY", {"hist": 1.56, "75": 1.50}, Decimal("1.56"), Decimal("5"))
+        self.assertEqual(limit, Decimal("1.56"))                    # TWS's latest bar beats yesterday's close
         limit, reason = choose_limit("BUY", {"75": 1.20}, Decimal("1.56"), Decimal("5"))
         self.assertIsNone(limit)                                      # still checked against Yahoo
 
