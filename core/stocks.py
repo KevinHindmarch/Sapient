@@ -2,6 +2,8 @@
 Core stock data service
 """
 
+import re
+
 from core import yahoo as yf
 import pandas as pd
 import numpy as np
@@ -863,7 +865,9 @@ def company_profiles(symbols: list[str]) -> dict[str, dict]:
             info = yf.Ticker(symbol).info or {}
         except Exception:
             info = {}
-        return symbol, {"name": info.get("shortName") or info.get("longName") or symbol.replace(".AX", ""),
+        name = info.get("longName") or info.get("shortName") or symbol.replace(".AX", "")
+        name = re.sub(r"\s+(Limited|Ltd\.?|Inc\.?|Corporation|Corp\.?|plc)$", "", str(name).strip(), flags=re.I)
+        return symbol, {"name": name,
                         "sector": info.get("sector") or "Other"}
 
     unique = sorted({s for s in symbols if s})
