@@ -203,6 +203,22 @@ def get_portfolio_summaries(current_user: dict = Depends(get_current_user)):
     return [_summary(d, prices) for d in details]
 
 
+@router.get("/history")
+def get_all_histories(current_user: dict = Depends(get_current_user)):
+    """Every portfolio's value over time, plus combined A$ and US$ series (rebuilt from trades + Yahoo closes)."""
+    from core import history
+    return history.all_histories(current_user["id"])
+
+
+@router.get("/{portfolio_id}/history")
+def get_portfolio_history(portfolio_id: int, current_user: dict = Depends(get_current_user)):
+    """One portfolio's value over time and its original forecast line."""
+    from core import history
+    if PortfolioService.get_portfolio_details(portfolio_id, current_user["id"]) is None:
+        raise HTTPException(status_code=404, detail="Portfolio not found")
+    return history.value_history(portfolio_id)
+
+
 @router.get("/{portfolio_id}/summary")
 def get_portfolio_summary(portfolio_id: int, current_user: dict = Depends(get_current_user)):
     """Value, cash, realised and unrealised profit for one portfolio (Yahoo prices; gaps are listed)."""

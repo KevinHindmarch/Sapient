@@ -32,7 +32,7 @@ export default function TwsStatusPill({ profile = 'paper' }: { profile?: Trading
   if (profile === 'live' && (state === null || state === 'NOT_CONFIGURED')) return null
   const label = TWS_STATE_LABELS[state ?? 'NOT_CONFIGURED'] ?? { text: state ?? '', tone: 'amber' as const }
   return (
-    <NavLink to="/brokerage" className="flex items-center gap-2 px-4 py-2 text-xs theme-text-secondary hover:underline"
+    <NavLink to="/brokerage" className="flex items-center gap-2 px-2 py-1.5 text-xs theme-text-secondary hover:underline"
       data-testid={profile === 'live' ? 'tws-live-pill' : 'tws-pill'}>
       <span className={`w-2.5 h-2.5 rounded-full ${DOT[label.tone]}`} />
       {profile === 'live' ? <span className="text-red-500 font-semibold">TWS LIVE:</span> : 'TWS:'} {label.text}

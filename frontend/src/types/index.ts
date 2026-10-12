@@ -16,6 +16,11 @@ export interface StockInfo {
   website?: string
   employees?: number | null
   country?: string
+  currency?: string
+  exchange?: string
+  pe_ratio?: number | null
+  week52_low?: number | null
+  week52_high?: number | null
 }
 
 export interface OptimizationResult {

@@ -101,7 +101,28 @@ export const portfolioApi = {
     api.post<RebalanceResult>(`/portfolio/${portfolioId}/execute-rebalance`, { legs, idempotency_key }),
   summary: (portfolioId: number) => api.get<PortfolioSummary>(`/portfolio/${portfolioId}/summary`),
   summaries: () => api.get<PortfolioSummary[]>('/portfolio/summaries'),
+  history: (portfolioId: number) => api.get<ValueHistory>(`/portfolio/${portfolioId}/history`),
+  histories: () => api.get<AllHistories>('/portfolio/history'),
 }
+
+export interface ValuePoint { date: string; value: number }
+
+/** Value over time, rebuilt from trades and Yahoo closes (core/history.py). */
+export interface ValueHistory {
+  portfolio_id: number
+  currency: 'AUD' | 'USD'
+  start: string
+  expected_return: number
+  money_put_in: number
+  points: (ValuePoint & { invested: number })[]
+  forecast: ValuePoint[]
+  missing_prices: string[]
+}
+
+export interface AllHistories {
+  portfolios: { portfolio_id: number; currency: 'AUD' | 'USD'; start: string; points: ValuePoint[] }[]
+  combined: Partial<Record<'AUD' | 'USD', ValuePoint[]>>
+  aud_per_usd: number | null
 
 export interface HoldingSummary {
   position_id: number | null
