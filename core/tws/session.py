@@ -41,7 +41,25 @@ MARKET_REQS = (REQ_MARKET, REQ_STREAM)
 CURRENCY_KEYS = ("CashBalance", "ExchangeRate")
 # Price tick types (live and delayed): last, bid, ask. See docs/ibkr-tws-api-notes.md.
 LAST_TICKS = {"4", "68"}
-PRICE_TICKS = LAST_TICKS | {"1", "2", "66", "67"}
+STREAM_TIMEOUT = 15.0   # seconds to wait for a usable streamed price
+BID_TICKS, ASK_TICKS = {"1", "66"}, {"2", "67"}
+PRICE_TICKS = LAST_TICKS | BID_TICKS | ASK_TICKS
+
+
+def _usable(prices: dict, keys) -> bool:
+    """TWS sends -1 (or 0) for "no price right now": only a positive price counts."""
+    for key in keys:
+        try:
+            if float(prices.get(key)) > 0:
+                return True
+        except (TypeError, ValueError):
+            continue
+    return False
+
+
+def has_price(prices: dict) -> bool:
+    """A last trade, or both a bid and an ask (live or delayed)."""
+    return _usable(prices, LAST_TICKS) or (_usable(prices, BID_TICKS) and _usable(prices, ASK_TICKS))
 # TWS setting "Prepend $LEDGER- prefix to per-currency account values" (on by default for
 # new TWS users) renames per-currency values, e.g. "$LEDGER-CashBalance". Both forms are read.
 LEDGER_PREFIX = "$LEDGER-"
@@ -341,7 +359,7 @@ class TwsSession:
 
     def market_snapshot(self, symbol: str, exchange: str, currency: str, timeout: float = 15.0,
                         data_type: int = 3, primary_exchanges: set[str] | None = None,
-                        stream_timeout: float = 12.0) -> dict:
+                        stream_timeout: float | None = None) -> dict:
         """Qualify one stock and get its current prices.
 
         data_type 3 = delayed if not subscribed (paper); 1 = real-time only (live
@@ -387,24 +405,24 @@ class TwsSession:
                 self._wait(finished, timeout, collect_ticks)
             except TwsTimeout:
                 pass  # the snapshot didn't end: stream instead (below)
-        if not refused and not prices.keys() & PRICE_TICKS:
-            self._stream_prices(found[0], stream_timeout, collect_ticks, refused)
-        if refused and not prices.keys() & PRICE_TICKS:  # no permission: the caller explains it from health.errors
+        if not refused and not has_price(prices):
+            self._stream_prices(found[0], stream_timeout or STREAM_TIMEOUT, collect_ticks, refused, prices)
+        log.info("Prices for %s (%s, market data type %s): %s", symbol, exchange, result["market_data_type"], prices or "none")
+        if refused and not has_price(prices):  # no permission: the caller explains it from health.errors
             raise TwsTimeout(f"TWS refused market data ({refused[0]})")
         result["prices"] = prices
         return result
 
-    def _stream_prices(self, contract, timeout: float, collect_ticks, refused: list) -> None:
-        """Streaming (not snapshot) prices until a last/bid/ask arrives or ``timeout``; always cancelled."""
-        got: list = []
+    def _stream_prices(self, contract, timeout: float, collect_ticks, refused: list, prices: dict) -> None:
+        """Streaming (not snapshot) prices until a usable last, or a bid and an ask, arrive or ``timeout``.
 
+        Ticks of -1 ("nothing right now") don't end the wait. The stream is always cancelled.
+        """
         def finished(name, fields):
             if name == "error" and fields.get("reqId") == REQ_STREAM and _code(fields) in NO_MARKET_DATA:
                 refused.append(_code(fields))
                 return True
-            if name == "tickPrice" and fields.get("reqId") == REQ_STREAM and str(fields.get("tickType")) in PRICE_TICKS:
-                got.append(fields)
-            return len(got) >= 3 or any(str(f.get("tickType")) in LAST_TICKS for f in got)
+            return has_price(prices)
         self.transport.request("reqMktData", REQ_STREAM, contract, "", False, False, [])
         try:
             self._wait(finished, timeout, collect_ticks)
