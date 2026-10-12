@@ -251,5 +251,78 @@ class UsExecutorTests(PaperTestCase):
         self.assertEqual((sent["limit_price"], sent["currency"], sent["state"]), (Decimal("187.45"), "USD", "SUBMITTED"))
 
 
+class AsxDelayedPriceTests(PaperTestCase):
+    """ASX paper orders: delayed prices are streamed, never snapshotted (snapshots stalled on the ASX)."""
+
+    def setUp(self):
+        super().setUp()
+        self.authorise(max_order_value=100000, max_value_per_day=1000000)
+
+    class SnapshotNeverEnds(PaperFakeTws):
+        def request(self, name, *args):
+            if name == "reqMktData":
+                self.requests.append(("reqMktData", args[3]))
+                if args[3]:
+                    return                                        # a delayed snapshot that never answers
+                req = args[0]
+                self.emit("error", reqId=req, errorCode=10167,
+                          errorString="Requested market data is not subscribed. Displaying delayed market data.")
+                self.emit("marketDataType", reqId=req, marketDataType=3)
+                self.emit("tickPrice", reqId=req, tickType=68, price=self.last, attrib=None)
+                return
+            if name == "cancelMktData":
+                self.requests.append(name)
+                return
+            super().request(name, *args)
+
+    def test_asx_order_is_priced_from_the_delayed_stream(self):
+        fake = self.SnapshotNeverEnds(last=45.62)
+        self.order(key="a1", symbol="CBA.AX", quantity=10, price="45.70")
+        test_paper.ExecutorTests.executor(self, fake).step()
+        self.assertNotIn(("reqMktData", True), fake.requests)        # no snapshot for delayed data
+        self.assertIn("cancelMktData", fake.requests)                 # the stream is always stopped
+        sent = paper.list_orders()[0]
+        self.assertEqual((sent["state"], sent["limit_price"]), ("SUBMITTED", Decimal("45.62")))
+
+    def test_message_10167_is_not_a_permission_refusal(self):
+        from core.tws.execution import PaperExecutor
+        from core.tws.session import REQ_STREAM
+        executor = test_paper.ExecutorTests.executor(self, PaperFakeTws())
+        executor.session.health.errors.append({"code": 10167, "message": "Displaying delayed market data.",
+                                               "req_id": REQ_STREAM})
+        reason = PaperExecutor._no_price_reason(executor, "SRG", 0, False)
+        self.assertEqual(reason, "TWS did not send a price in time, so nothing was sent.")
+
+    def test_orders_queued_behind_others_get_more_time(self):
+        first = self.order(key="q1", symbol="CBA.AX")
+        third = [self.order(key=f"q{i}", symbol="CBA.AX") for i in (2, 3)][-1]
+        gap = third["expires_at"] - first["expires_at"]
+        self.assertGreaterEqual(gap.total_seconds(), 2 * paper.PER_ORDER_SEND.total_seconds())
+
+
+class RealTimeSnapshotFallbackTests(unittest.TestCase):
+    def test_a_snapshot_that_never_ends_falls_back_to_streaming(self):
+        from core.tws.session import TwsSession
+
+        class Stuck(PaperFakeTws):
+            def request(self, name, *args):
+                if name == "reqMktData":
+                    self.requests.append(("reqMktData", args[3]))
+                    if not args[3]:
+                        self.emit("marketDataType", reqId=args[0], marketDataType=1)
+                        self.emit("tickPrice", reqId=args[0], tickType=4, price=44.1, attrib=None)
+                    return
+                if name == "cancelMktData":
+                    self.requests.append(name)
+                    return
+                super().request(name, *args)
+        fake = Stuck()
+        session = TwsSession(fake)
+        session.connect(7497, 71)
+        snap = session.market_snapshot("BHP", "ASX", "AUD", timeout=0.5, data_type=1)
+        self.assertEqual((snap["prices"]["4"], snap["market_data_type"]), (44.1, 1))
+        self.assertEqual([r for r in fake.requests if isinstance(r, tuple)], [("reqMktData", True), ("reqMktData", False)])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -513,7 +513,8 @@ class PortfolioOnPaperTests(PaperTestCase):
         clock = [datetime(2026, 10, 11, 23, 20, tzinfo=timezone.utc)]  # Mon 12 Oct 2026, 10:20 Sydney
         with mock.patch.object(ai_engine.TechnicalIndicatorService, "analyze_stock", return_value=analysis), \
                 mock.patch.object(ai_engine, "_company_name", return_value="BHP Group"), \
-                mock.patch("core.strategy.scheduler.calendar.is_open", return_value=True):
+                mock.patch("core.strategy.scheduler.calendar.is_open", return_value=True), \
+                mock.patch("core.tws.paper._now", return_value=clock[0]):   # admission on the same clock
             runs = Scheduler(now=lambda: clock[0]).tick()
         self.assertEqual(runs[0]["new_signals"], 1, runs)
         orders = [o for o in paper.list_orders() if o["origin"] != "entry"]
@@ -521,7 +522,8 @@ class PortfolioOnPaperTests(PaperTestCase):
                          [("ai_autonomous", "SELL", "BHP.AX", "QUEUED")])
         quantity = int(orders[0]["quantity"])
         fake = PaperFakeTws(mode="fill", last=45.0)
-        ExecutorTests.executor(self, fake).step()
+        with mock.patch("core.tws.execution._now", return_value=clock[0] + timedelta(seconds=5)):
+            ExecutorTests.executor(self, fake).step()
         self.assertEqual(self.get(orders[0]["id"])["state"], "FILLED")
         self.assertEqual(self.positions()["BHP.AX"][0], 10.0 - quantity)
         self.assertEqual(fake.placed[0][2].action, "SELL")

@@ -13,11 +13,14 @@ tracks connection health from TWS message codes:
 
 from dataclasses import dataclass, field
 from decimal import Decimal
+import logging
 import queue
 import time
 from typing import Any
 
 from core.tws.transport import Transport
+
+log = logging.getLogger(__name__)
 
 INFORMATIONAL_CODES = {2104, 2106, 2107, 2108, 2119, 2158}
 DATA_FARM_BROKEN = {2103, 2105, 2157}
@@ -31,7 +34,9 @@ STANDARD_TAGS = set(SUMMARY_TAGS.split(","))
 # Far above any order id TWS or Sapient uses (live order ids start at 1,000,000,001).
 REQ_SUMMARY, REQ_EXECUTIONS, REQ_CONTRACT, REQ_MARKET = 2_100_000_001, 2_100_000_002, 2_100_000_003, 2_100_000_004
 REQ_LEDGER = 2_100_000_005
-REQUEST_IDS = {REQ_SUMMARY, REQ_EXECUTIONS, REQ_CONTRACT, REQ_MARKET, REQ_LEDGER}
+REQ_STREAM = 2_100_000_006   # streaming prices (own id: a snapshot that never ended can't clash with it)
+REQUEST_IDS = {REQ_SUMMARY, REQ_EXECUTIONS, REQ_CONTRACT, REQ_MARKET, REQ_LEDGER, REQ_STREAM}
+MARKET_REQS = (REQ_MARKET, REQ_STREAM)
 # Per-currency values Sapient needs (US buys: US$ cash; A$ limits: TWS's exchange rate).
 CURRENCY_KEYS = ("CashBalance", "ExchangeRate")
 # Price tick types (live and delayed): last, bid, ask. See docs/ibkr-tws-api-notes.md.
@@ -113,7 +118,8 @@ class TwsSession:
             code = _code(fields)
             if code in INFORMATIONAL_CODES:
                 return
-            # Keep the numeric code and TWS's own short text (shown only locally).
+            # Keep the numeric code and TWS's own short text (shown only locally, and in the connector log).
+            log.info("TWS message %s (request %s): %s", code, fields.get("reqId"), str(fields.get("errorString", ""))[:300])
             self.health.errors.append({"code": code, "message": str(fields.get("errorString", ""))[:300],
                                        "req_id": fields.get("reqId")})
             if code == 326:
@@ -335,11 +341,16 @@ class TwsSession:
 
     def market_snapshot(self, symbol: str, exchange: str, currency: str, timeout: float = 15.0,
                         data_type: int = 3, primary_exchanges: set[str] | None = None,
-                        stream_timeout: float = 6.0) -> dict:
-        """Qualify one stock and take a price snapshot.
+                        stream_timeout: float = 12.0) -> dict:
+        """Qualify one stock and get its current prices.
 
         data_type 3 = delayed if not subscribed (paper); 1 = real-time only (live
         orders). The answer's ``market_data_type`` says what TWS actually sent.
+
+        Delayed prices are STREAMED, never snapshotted: IBKR snapshots need a
+        market-data subscription, and on the ASX a delayed snapshot often never
+        ended (docs/ibkr-tws-api-notes.md). Real-time requests snapshot first and
+        fall back to a short stream if the snapshot is empty or doesn't end.
         """
         contract = self.transport.make_contract(symbol=symbol, secType="STK", exchange=exchange, currency=currency)
         found: list = []
@@ -358,9 +369,9 @@ class TwsSession:
         result = {"qualified": True, "contract": _contract(found[0]), "market_data_type": None}
 
         def collect_ticks(name, fields):
-            if name == "marketDataType" and fields.get("reqId") == REQ_MARKET:
+            if name == "marketDataType" and fields.get("reqId") in MARKET_REQS:
                 result["market_data_type"] = fields.get("marketDataType")
-            elif name == "tickPrice" and fields.get("reqId") == REQ_MARKET:
+            elif name == "tickPrice" and fields.get("reqId") in MARKET_REQS:
                 prices[str(fields.get("tickType"))] = _plain(fields.get("price"))
         refused = []
 
@@ -370,14 +381,16 @@ class TwsSession:
                 return True
             return name == "tickSnapshotEnd" and fields.get("reqId") == REQ_MARKET
         self.transport.request("reqMarketDataType", data_type)
-        self.transport.request("reqMktData", REQ_MARKET, found[0], "", True, False, [])
-        self._wait(finished, timeout, collect_ticks)
-        if refused:  # no permission: the caller explains it from health.errors
-            raise TwsTimeout(f"TWS refused market data ({refused[0]})")
-        if not prices.keys() & PRICE_TICKS:
-            # A snapshot only returns what ticks during its 11 seconds; delayed US
-            # stocks often send no last/bid/ask in that time. Listen briefly instead.
+        if data_type == 1:
+            self.transport.request("reqMktData", REQ_MARKET, found[0], "", True, False, [])
+            try:
+                self._wait(finished, timeout, collect_ticks)
+            except TwsTimeout:
+                pass  # the snapshot didn't end: stream instead (below)
+        if not refused and not prices.keys() & PRICE_TICKS:
             self._stream_prices(found[0], stream_timeout, collect_ticks, refused)
+        if refused and not prices.keys() & PRICE_TICKS:  # no permission: the caller explains it from health.errors
+            raise TwsTimeout(f"TWS refused market data ({refused[0]})")
         result["prices"] = prices
         return result
 
@@ -386,16 +399,16 @@ class TwsSession:
         got: list = []
 
         def finished(name, fields):
-            if name == "error" and fields.get("reqId") == REQ_MARKET and _code(fields) in NO_MARKET_DATA:
+            if name == "error" and fields.get("reqId") == REQ_STREAM and _code(fields) in NO_MARKET_DATA:
                 refused.append(_code(fields))
                 return True
-            if name == "tickPrice" and fields.get("reqId") == REQ_MARKET and str(fields.get("tickType")) in PRICE_TICKS:
+            if name == "tickPrice" and fields.get("reqId") == REQ_STREAM and str(fields.get("tickType")) in PRICE_TICKS:
                 got.append(fields)
             return len(got) >= 3 or any(str(f.get("tickType")) in LAST_TICKS for f in got)
-        self.transport.request("reqMktData", REQ_MARKET, contract, "", False, False, [])
+        self.transport.request("reqMktData", REQ_STREAM, contract, "", False, False, [])
         try:
             self._wait(finished, timeout, collect_ticks)
         except TwsTimeout:
             pass  # whatever arrived is used; the caller refuses if there is no price
         finally:
-            self.transport.request("cancelMktData", REQ_MARKET)
+            self.transport.request("cancelMktData", REQ_STREAM)
