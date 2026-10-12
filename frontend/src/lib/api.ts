@@ -161,8 +161,10 @@ export interface PortfolioSummary {
   holdings: HoldingSummary[]
 }
 
-export const money = (value: number, currency: 'AUD' | 'USD' = 'AUD', digits = 2) =>
-  `${currency === 'USD' ? 'US$' : 'A$'}${value.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits })}`
+export const money = (value: number, currency: 'AUD' | 'USD' = 'AUD', digits = 2) => {
+  const shown = Math.abs(value) < 0.5 * 10 ** -digits ? 0 : value  // no "-0" for tiny negatives
+  return `${currency === 'USD' ? 'US$' : 'A$'}${shown.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits })}`
+}
 
 export interface RebalanceLeg {
   symbol: string

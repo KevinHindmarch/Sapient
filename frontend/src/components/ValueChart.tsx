@@ -17,7 +17,7 @@ export interface Series {
   flat?: boolean
 }
 
-const shortDate = (iso: string) => new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
+const shortDate = (t: number) => new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
 
 /** Value over time with optional extra lines. The first series is filled; the rest are lines. */
 export default function ValueChart({ series, period, prefix, height = 260, until }: {
@@ -34,7 +34,7 @@ export default function ValueChart({ series, period, prefix, height = 260, until
     // Lines are drawn only between their own points (connectNulls); values are not carried past the end.
     const lookups = series.map((s) => new Map(s.points.map((p) => [p.date, p.value])))
     return sorted.map((d) => {
-      const row: Record<string, number | string | null> = { date: d }
+      const row: Record<string, number | string | null> = { date: d, t: new Date(`${d}T00:00:00`).getTime() }
       series.forEach((s, i) => { row[s.key] = lookups[i].get(d) ?? null })
       return row
     })
@@ -55,14 +55,15 @@ export default function ValueChart({ series, period, prefix, height = 260, until
           </linearGradient>
         </defs>
         <CartesianGrid stroke="var(--border-color)" vertical={false} />
-        <XAxis dataKey="date" tickFormatter={shortDate} tick={{ fill: 'var(--text-muted)', fontSize: 11 }} axisLine={false}
-          tickLine={false} minTickGap={40} />
+        <XAxis dataKey="t" type="number" scale="time" domain={['dataMin', 'dataMax']}
+          tickFormatter={shortDate}
+          tick={{ fill: 'var(--text-muted)', fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={40} />
         <YAxis tickFormatter={fmt} tick={{ fill: 'var(--text-muted)', fontSize: 11, fontFamily: 'var(--font-mono)' }}
           axisLine={false} tickLine={false} width={78} domain={['auto', 'auto']} />
         <Tooltip
           contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 12, fontSize: 12 }}
           labelStyle={{ color: 'var(--text-secondary)' }}
-          labelFormatter={(d) => new Date(`${d}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}
+          labelFormatter={(t) => new Date(Number(t)).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}
           formatter={(v, name) => [typeof v === 'number' ? `${prefix}${v.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : '—',
             series.find((s) => s.key === name)?.label ?? String(name)]}
         />

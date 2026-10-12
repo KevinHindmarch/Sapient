@@ -4,7 +4,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom'
 import { portfolioApi, stocksApi, brokerApi, aiApi, apiErrorMessage, money, PortfolioSummary, RebalancePlan, type ValueHistory } from '../lib/api'
 import { Portfolio, Position, Transaction } from '../types'
 import { toast } from 'sonner'
-import { ArrowLeft, TrendingUp, TrendingDown, DollarSign, Pencil, Trash2, Plus, X, Search, RefreshCw, Sparkles, Send, Zap, Activity, Link2, AlertTriangle } from 'lucide-react'
+import { ArrowLeft, DollarSign, Pencil, Trash2, Plus, X, Search, RefreshCw, Sparkles, Send, Zap, Activity, Link2, AlertTriangle } from 'lucide-react'
 import BrokerCompareCard from '../components/BrokerCompareCard'
 import { format } from 'date-fns'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts'
@@ -622,58 +622,45 @@ export default function PortfolioDetail() {
           Those holdings are valued at what they cost until a price comes back.
         </p>
       )}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4" data-testid="portfolio-money">
-        <div className="card">
-          <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Money put in</p>
-          <p className={`text-2xl font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4" data-testid="portfolio-money">
+        <div className="stat-card">
+          <p className="text-sm theme-text-secondary">Money put in</p>
+          <p className="stat-value mt-1">
             {summary ? money(summary.money_put_in, summary.currency, 0) : `$${costBasis.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
           </p>
-          <p className="text-xs theme-text-muted">Holdings cost {summary ? money(summary.cost_of_holdings, summary.currency, 0) : '…'}</p>
+          <p className="text-xs theme-text-muted mt-1">Holdings cost {summary ? money(summary.cost_of_holdings, summary.currency, 0) : '…'}</p>
         </div>
-        <div className="card">
-          <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Value now (incl. cash)</p>
-          {loadingPrices ? (
-            <div className="mt-2 space-y-1.5">
-              <div className="animate-pulse h-8 w-28 rounded-lg bg-slate-500/20" />
-              <p className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Loading live data…</p>
-            </div>
-          ) : (
+        <div className="stat-card">
+          <p className="text-sm theme-text-secondary">Value now (incl. cash)</p>
+          {loadingPrices ? <div className="mt-2 h-8 w-28 rounded-lg loading-shimmer" /> : (
             <>
-              <p className={`text-2xl font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+              <p className="stat-value mt-1">
                 {summary ? money(summary.total_value, summary.currency, 0) : `$${totalValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
               </p>
-              {summary && <p className="text-xs theme-text-muted">Shares {money(summary.market_value, summary.currency, 0)}</p>}
+              {summary && <p className="text-xs theme-text-muted mt-1">Shares {money(summary.market_value, summary.currency, 0)}</p>}
             </>
           )}
         </div>
-        <div className="card">
-          <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Total Return</p>
-          {loadingPrices ? (
-            <div className="mt-2 space-y-1.5">
-              <div className="animate-pulse h-8 w-24 rounded-lg bg-slate-500/20" />
-              <p className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Loading live data…</p>
-            </div>
-          ) : (
-            <p className={`text-2xl font-bold flex items-center gap-1 ${
-              totalReturn >= 0 ? 'text-emerald-400' : 'text-red-400'
-            }`} style={{ textShadow: totalReturn >= 0 ? '0 0 15px rgba(52, 211, 153, 0.4)' : '0 0 15px rgba(248, 113, 113, 0.4)' }}>
-              {totalReturn >= 0 ? <TrendingUp className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />}
-              {totalReturn >= 0 ? '+' : ''}{totalReturnPct.toFixed(2)}%
+        <div className="stat-card">
+          <p className="text-sm theme-text-secondary">Total return</p>
+          {loadingPrices ? <div className="mt-2 h-8 w-24 rounded-lg loading-shimmer" /> : (
+            <p className={"stat-value mt-1"} style={{ color: totalReturn >= 0 ? 'var(--pos)' : 'var(--neg)' }}>
+              {totalReturn >= 0 ? '▲ +' : '▼ '}{totalReturnPct.toFixed(2)}%
             </p>
           )}
           {summary && !loadingPrices && (
-            <p className="text-xs theme-text-muted">
+            <p className="text-xs theme-text-muted mt-1">
               {money(summary.total_return, summary.currency, 0)} · sold {money(summary.realised_pnl, summary.currency, 0)}
               {summary.fees > 0 ? ` · fees ${money(summary.fees, summary.currency, 0)}` : ''}
             </p>
           )}
         </div>
-        <div className="card">
-          <p className={`text-sm flex items-center ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Cash</p>
-          <p className={`text-2xl font-bold ${summary && summary.cash < 0 ? 'text-red-500' : isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+        <div className="stat-card">
+          <p className="text-sm theme-text-secondary">Cash</p>
+          <p className="stat-value mt-1" style={summary && summary.cash < 0 ? { color: 'var(--neg)' } : undefined}>
             {summary ? money(summary.cash, summary.currency, 0) : '…'}
           </p>
-          <p className="text-xs theme-text-muted">Not yet invested, or from sales</p>
+          <p className="text-xs theme-text-muted mt-1">Not yet invested, or from sales</p>
         </div>
       </div>
 
