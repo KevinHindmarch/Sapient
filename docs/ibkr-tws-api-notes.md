@@ -40,8 +40,12 @@ the guide before guessing how TWS behaves.
   - In practice (October 2026) delayed ASX snapshots on the paper account often
     never sent `tickSnapshotEnd` at all, and delayed US snapshots were often empty.
   - So **delayed prices (paper) are always streamed**: `reqMktData(snapshot=False)`
-    on its own request id, until a last price or three price ticks arrive (up to
-    12 seconds), then always `cancelMktData`.
+    on its own request id, until a usable last price, or a bid and an ask, arrive
+    (up to 15 seconds), then always `cancelMktData`.
+  - TWS sends **-1** for "no price right now" (often the first delayed bid/ask/last
+    ticks). 0.12.2 counted those as prices and stopped waiting, so ASX orders said
+    "no price"; since 0.12.3 only positive prices count. The connector log records
+    every price TWS sent for each order ("Prices for KAR (ASX, …)").
   - Real-time requests (live) still snapshot first and fall back to the same
     stream if the snapshot is empty or doesn't end within 15 seconds.
   - Message **10167** ("Requested market data is not subscribed. Displaying
@@ -51,6 +55,7 @@ the guide before guessing how TWS behaves.
     (`%APPDATA%\Sapient\logs\tws-connector.log`).
   - If there is no delayed last trade but there is a delayed bid and ask, the
     paper limit is the middle of the two, rounded down for a buy and up for a
-    sell, and the 3% gap check against Yahoo's price still applies.
+    sell, and the 3% gap check against Yahoo's price still applies. With no bid or
+    ask at all, yesterday's close (9 / delayed 75) is used, with the same gap check.
   - *doc/market-data-live/top-of-book-l-1/streaming-data-snapshots*,
     *available-tick-types* (delayed 66 bid, 67 ask, 68 last, 75 close).

@@ -34,6 +34,15 @@ from core.tws.session import TwsSession, TwsTimeout
 log = logging.getLogger("sapient.paper")
 
 LAST, BID, ASK = ("4", "68"), ("1", "66"), ("2", "67")   # live and delayed tick types
+CLOSE = ("9", "75")                                         # yesterday's close (live, delayed)
+TICK_NAMES = {"1": "bid", "2": "ask", "4": "last", "9": "close", "66": "delayed bid", "67": "delayed ask",
+              "68": "delayed last", "75": "delayed close"}
+
+
+def describe_prices(prices: dict) -> str:
+    """What TWS actually sent, for the order's explanation (e.g. "delayed bid -1, delayed ask -1")."""
+    seen = [f"{TICK_NAMES[k]} {prices[k]}" for k in TICK_NAMES if k in (prices or {})]
+    return ", ".join(seen) if seen else "nothing"
 REALTIME_LAST, REALTIME_BID, REALTIME_ASK = ("4",), ("1",), ("2",)
 ACK_TIMEOUT = 10.0
 REJECT_CODES = {103, 110, 200, 201, 203, 321, 10268}
@@ -71,11 +80,16 @@ def choose_limit(side: str, prices: dict, reference: Decimal, max_gap_pct: Decim
     """Cautious limit price from a TWS snapshot, or (None, reason)."""
     last = _first_price(prices, LAST)
     if last is None:
-        # No trade printed in the delayed feed yet: the middle of TWS's delayed bid and ask.
+        # No trade printed in the delayed feed yet: the middle of TWS's bid and ask, else (no bid
+        # or ask at all) yesterday's close. Either is still checked against Yahoo below.
         bid, ask = _first_price(prices, BID), _first_price(prices, ASK)
-        if not (bid and ask and bid <= ask):
-            return None, "TWS sent no price for this stock (no last trade, bid or ask), so Sapient did not guess one."
-        last = (bid + ask) / 2
+        if bid and ask and bid <= ask:
+            last = (bid + ask) / 2
+        elif not (bid or ask):
+            last = _first_price(prices, CLOSE)
+        if last is None:
+            return None, (f"TWS sent no usable price for this stock (it sent: {describe_prices(prices)}), "
+                          "so Sapient did not guess one.")
     if side == "BUY":
         ask = _first_price(prices, ASK)
         raw = min(last, ask) if ask else last

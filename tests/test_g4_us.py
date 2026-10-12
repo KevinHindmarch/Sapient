@@ -284,6 +284,44 @@ class AsxDelayedPriceTests(PaperTestCase):
         sent = paper.list_orders()[0]
         self.assertEqual((sent["state"], sent["limit_price"]), ("SUBMITTED", Decimal("45.62")))
 
+    class PlaceholderTicksFirst(SnapshotNeverEnds):
+        """TWS first sends -1 ("no price right now") for delayed bid/ask/last, then real prices."""
+        def request(self, name, *args):
+            if name == "reqMktData" and not args[3]:
+                req = args[0]
+                self.requests.append(("reqMktData", False))
+                self.emit("marketDataType", reqId=req, marketDataType=3)
+                for tick in (66, 67, 68):
+                    self.emit("tickPrice", reqId=req, tickType=tick, price=-1.0, attrib=None)
+                if self.last:
+                    self.emit("tickPrice", reqId=req, tickType=68, price=self.last, attrib=None)
+                return
+            super().request(name, *args)
+
+    def test_placeholder_ticks_do_not_end_the_wait(self):
+        fake = self.PlaceholderTicksFirst(last=1.56)
+        self.order(key="k1", symbol="KAR.AX", quantity=100, price="1.57")
+        test_paper.ExecutorTests.executor(self, fake).step()
+        sent = paper.list_orders()[0]
+        self.assertEqual((sent["state"], sent["limit_price"]), ("SUBMITTED", Decimal("1.56")))
+
+    def test_no_usable_price_says_what_tws_sent(self):
+        from core.tws import session as session_mod
+        fake = self.PlaceholderTicksFirst(last=None)
+        self.order(key="k2", symbol="KAR.AX", quantity=100, price="1.57")
+        with mock.patch.object(session_mod, "STREAM_TIMEOUT", 0.3):
+            test_paper.ExecutorTests.executor(self, fake).step()
+        blocked = paper.list_orders()[0]
+        self.assertEqual(blocked["state"], "BLOCKED")
+        self.assertIn("delayed bid -1", blocked["detail"])
+
+    def test_close_is_the_last_resort_price(self):
+        from core.tws.execution import choose_limit
+        limit, _ = choose_limit("BUY", {"66": -1, "67": -1, "75": 1.55}, Decimal("1.56"), Decimal("5"))
+        self.assertEqual(limit, Decimal("1.55"))
+        limit, reason = choose_limit("BUY", {"75": 1.20}, Decimal("1.56"), Decimal("5"))
+        self.assertIsNone(limit)                                      # still checked against Yahoo
+
     def test_message_10167_is_not_a_permission_refusal(self):
         from core.tws.execution import PaperExecutor
         from core.tws.session import REQ_STREAM
