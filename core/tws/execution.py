@@ -43,7 +43,8 @@ FINAL = ("FILLED", "CANCELLED", "REJECTED", "EXPIRED", "BLOCKED")
 SNAPSHOT_MARGIN = timedelta(seconds=30)   # a snapshot this long after a cancel shows its result
 CLOSE_MARGIN = timedelta(minutes=30)      # after the closing auction, DAY orders are gone
 # TWS market-data messages that mean "no permission / no subscription" for the request.
-MARKET_DATA_ERRORS = {354, 10089, 10090, 10091, 10167, 10168, 10186, 10197}
+# (10167 is not one: it only says TWS is showing delayed data instead of live.)
+MARKET_DATA_ERRORS = {354, 10089, 10090, 10091, 10168, 10186, 10197}
 
 
 def _now() -> datetime:
@@ -362,9 +363,9 @@ class PaperExecutor:
     def _no_price_reason(self, symbol: str, errors_before: int, live: bool,
                          market: "markets.Market" = markets.ASX) -> str:
         """Plain-language reason for a missing TWS price, using TWS's own market-data message if it sent one."""
-        from core.tws.session import REQ_MARKET
+        from core.tws.session import MARKET_REQS
         codes = [e for e in self.session.health.errors[errors_before:]
-                 if e.get("req_id") == REQ_MARKET and e.get("code") in MARKET_DATA_ERRORS]
+                 if e.get("req_id") in MARKET_REQS and e.get("code") in MARKET_DATA_ERRORS]
         if not codes:
             return "TWS did not send a price in time, so nothing was sent."
         code = codes[-1]["code"]

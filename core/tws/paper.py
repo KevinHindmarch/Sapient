@@ -33,6 +33,11 @@ from core.tws.environments import ENVS, Env, get as get_env
 
 AUTHORISATION_TEXT = ENVS["paper"].authorisation_text  # kept for existing callers
 SEND_WINDOW = timedelta(seconds=90)       # a queued order not sent by then expires
+# Orders are priced and sent one at a time, so each order already waiting adds time to the window
+# (a whole Model B portfolio queued at once used to expire after the first few). The limit price is
+# still taken from TWS at the moment of sending and checked against the Yahoo price.
+PER_ORDER_SEND = timedelta(seconds=25)
+MAX_AHEAD = 40
 ACCOUNT_DATA_MAX_AGE = timedelta(minutes=3)
 KILL_COOLDOWN = timedelta(hours=24)
 WORKING = ("QUEUED", "SUBMITTING", "SUBMITTED", "PARTIALLY_FILLED", "CANCEL_REQUESTED", "UNKNOWN")
@@ -289,13 +294,15 @@ def admit(request: dict, user_id: int, env: str = "paper") -> dict:
         portfolio = _check_ownership(cur, r, user_id, now, e)
         _check_ai_mode(cur, r, portfolio, user_id, binding, e)
         _check_limits(cur, r, binding, now, e, market, fx_fallback)
+        cur.execute("SELECT count(*) AS n FROM paper_orders WHERE environment=%s AND state='QUEUED'", (e.name,))
+        ahead = min(int(cur.fetchone()["n"]), MAX_AHEAD)
         order_id = str(uuid.uuid4())
         cur.execute("""INSERT INTO paper_orders(id, idempotency_key, request_hash, origin, account_id, portfolio_id,
                          signal_id, symbol, side, quantity, reference_price, expires_at, environment, exchange, currency)
                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *""",
                     (order_id, r["idempotency_key"], digest, r["origin"], binding["account_id"], r["portfolio_id"],
                      r["signal_id"], r["symbol"], r["side"], r["quantity"], r["reference_price"],
-                     now + SEND_WINDOW, e.name, market.exchange, market.currency))
+                     now + SEND_WINDOW + ahead * PER_ORDER_SEND, e.name, market.exchange, market.currency))
         row = dict(cur.fetchone())
         if r["signal_id"]:
             cur.execute("""UPDATE ai_signals SET status='claimed', decided_at=%s, decided_by=%s

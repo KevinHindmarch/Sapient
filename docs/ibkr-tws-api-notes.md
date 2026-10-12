@@ -34,10 +34,21 @@ the guide before guessing how TWS behaves.
   - Delayed data needs `reqMarketDataType(3)`.
   - Live data needs a paid subscription; without one, error 10089/10168 is reported.
   - *doc/market-data-delayed/*
-- **Snapshots:** `reqMktData(snapshot=True)` returns only what ticks during
-  the 11 seconds before `tickSnapshotEnd`, so a quiet delayed feed may send no
-  last price, bid or ask at all. If a snapshot has none, Sapient listens to a
-  normal stream for up to 6 seconds and then always calls `cancelMktData`.
+- **Snapshots:** IBKR documents snapshots for accounts *with an exchange
+  market-data subscription*; `reqMktData(snapshot=True)` returns only what ticks
+  during the 11 seconds before `tickSnapshotEnd`.
+  - In practice (October 2026) delayed ASX snapshots on the paper account often
+    never sent `tickSnapshotEnd` at all, and delayed US snapshots were often empty.
+  - So **delayed prices (paper) are always streamed**: `reqMktData(snapshot=False)`
+    on its own request id, until a last price or three price ticks arrive (up to
+    12 seconds), then always `cancelMktData`.
+  - Real-time requests (live) still snapshot first and fall back to the same
+    stream if the snapshot is empty or doesn't end within 15 seconds.
+  - Message **10167** ("Requested market data is not subscribed. Displaying
+    delayed market data") is informational: delayed data is coming. It is not a
+    permission refusal (354, 10089–10091, 10168, 10186, 10197 are).
+  - TWS messages are written to the connector log
+    (`%APPDATA%\Sapient\logs\tws-connector.log`).
   - If there is no delayed last trade but there is a delayed bid and ask, the
     paper limit is the middle of the two, rounded down for a buy and up for a
     sell, and the 3% gap check against Yahoo's price still applies.
