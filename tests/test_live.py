@@ -155,6 +155,18 @@ class LiveExecutorTests(LiveTestCase):
         self.assertEqual(self.get(order["id"])["state"], "SUBMITTED")
         quote = self.get(order["id"])["quote"]
         self.assertEqual((quote["market_data_type"], quote["delayed"]), (1, False), "priced from real-time data")
+        # Same routing as paper: SMART to the ASX listing (straight to "ASX" makes TWS hold the order, 10311).
+        self.assertEqual((contract.exchange, contract.currency, contract.primaryExchange), ("SMART", "AUD", "ASX"))
+
+    def test_live_never_falls_back_to_delayed_price_bars(self):
+        from core.tws import session as session_mod
+        order = self.live_order()
+        fake = LiveFakeTws(last=None, bid=None, ask=None)   # real-time subscribed, but no prices come
+        with mock.patch.object(session_mod, "STREAM_TIMEOUT", 0.3):
+            self.live_executor(fake).step()
+        self.assertNotIn("reqHistoricalData", fake.requests, "1-minute bars are delayed data: paper only")
+        self.assertEqual(self.get(order["id"])["state"], "BLOCKED")
+        self.assertEqual(fake.placed, [])
 
     def test_paper_and_live_executors_never_touch_each_others_orders(self):
         paper.authorise(PAPER_ACCOUNT, PAPER_TEXT)
