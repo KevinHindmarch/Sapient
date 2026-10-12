@@ -6,7 +6,10 @@ Sapient doesn't store daily values, so the series is rebuilt on request:
   (a research portfolio's model holdings exist from the day it was saved; a
   portfolio bought at IBKR starts empty and fills up from its trades);
 * cash on each day = today's cash minus the cash effect of later trades;
-* value = shares x that day's Yahoo close (last known close on days without one) + cash.
+* value = shares x that day's Yahoo close (last known close on days without one,
+  including a start on a weekend or holiday) + cash;
+* today's value uses the same current prices as the portfolio's "Now" figure
+  (core.ledger.latest_prices), so the line ends where the page says it is.
 
 Top-ups of "money put in" have no date, so the series uses today's figure for
 the whole period. Prices are research data (core.yahoo), in the portfolio's
@@ -42,6 +45,16 @@ def _closes(symbol: str, start: date) -> dict[date, float]:
 
 
 BENCHMARKS = {"AUD": ("^AXJO", "ASX 200"), "USD": ("^GSPC", "S&P 500")}
+
+
+def _latest(symbols: list[str]) -> dict[str, float | None]:
+    """Current prices, from the same source as the portfolio's "Now" value."""
+    return ledger.latest_prices(symbols)
+
+
+def _last_on_or_before(closes: dict[date, float], day: date) -> float | None:
+    earlier = [d for d in closes if d <= day]
+    return closes[max(earlier)] if earlier else None
 
 
 def aud_per_usd() -> float | None:
@@ -87,8 +100,14 @@ def value_history(portfolio_id: int) -> dict:
     today = date.today()
 
     symbols = sorted(set(held_now) | {t["symbol"] for t in txns})
-    with ThreadPoolExecutor(max_workers=min(8, max(1, len(symbols)))) as pool:
-        closes = dict(zip(symbols, pool.map(lambda s: _closes(s, start), symbols)))
+    bench_symbol, bench_name = BENCHMARKS[currency]
+    with ThreadPoolExecutor(max_workers=min(8, len(symbols) + 1)) as pool:
+        closes = dict(zip(symbols + [bench_symbol], pool.map(lambda s: _closes(s, start), symbols + [bench_symbol])))
+    bench_closes = closes.pop(bench_symbol)
+    # Today: the prices "Now" uses (the long history is cached for hours, so it can lag during the day).
+    for s, price in _latest(symbols + [bench_symbol]).items():
+        if price and price > 0:
+            (bench_closes if s == bench_symbol else closes.setdefault(s, {}))[today] = float(price)
     days = sorted({d for c in closes.values() for d in c if start <= d <= today} | {start, today})
 
     # Walk backwards from today: undo each trade to get the holdings and cash before it.
@@ -107,7 +126,8 @@ def value_history(portfolio_id: int) -> dict:
                 cash -= t["amount"] - t["fees"]
         by_day[d] = ({s: q for s, q in holdings.items() if q > 1e-9}, cash)
 
-    last_price: dict[str, float] = {}
+    # A portfolio built on a weekend or holiday starts at the last close before it.
+    last_price: dict[str, float] = {s: px for s in symbols if (px := _last_on_or_before(closes.get(s, {}), start))}
     points = []
     put_in = float(p["initial_investment"] or 0)
     for d in days:
@@ -122,21 +142,21 @@ def value_history(portfolio_id: int) -> dict:
     horizon = max(today, start + timedelta(days=365))
     forecast = []
     if put_in > 0:
-        step = start
-        while step <= horizon:
-            years = (step - start).days / 365.0
-            forecast.append({"date": step.isoformat(), "value": round(put_in * (1 + rate) ** years, 2)})
+        def at(day: date) -> dict:
+            return {"date": day.isoformat(), "value": round(put_in * (1 + rate) ** ((day - start).days / 365.0), 2)}
+        # A value on every day of the portfolio line (so any period draws it), then weekly to a year out.
+        forecast = [at(d) for d in days]
+        step = today + timedelta(days=7)
+        while step < horizon:
+            forecast.append(at(step))
             step += timedelta(days=7)
-        if forecast[-1]["date"] != horizon.isoformat():
-            years = (horizon - start).days / 365.0
-            forecast.append({"date": horizon.isoformat(), "value": round(put_in * (1 + rate) ** years, 2)})
+        if horizon > today:
+            forecast.append(at(horizon))
     # The market over the same days, scaled to start at the portfolio's first value ("what if it had been the index").
-    bench_symbol, bench_name = BENCHMARKS[currency]
-    bench_closes = _closes(bench_symbol, start)
     benchmark = []
     first = points[0]["value"] if points else 0
+    last_close = _last_on_or_before(bench_closes, start)   # a weekend start uses the last close before it
     base = None
-    last_close = None
     for pt in points:
         d = date.fromisoformat(pt["date"])
         last_close = bench_closes.get(d, last_close)
