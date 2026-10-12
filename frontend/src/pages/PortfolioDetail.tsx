@@ -7,7 +7,7 @@ import { toast } from 'sonner'
 import { ArrowLeft, Pencil, Trash2, Plus, X, Search, RefreshCw, Sparkles, Send, Zap, Activity, Link2, AlertTriangle } from 'lucide-react'
 import BrokerCompareCard from '../components/BrokerCompareCard'
 import { format } from 'date-fns'
-import ValueChart, { periodStart, type Period } from '../components/ValueChart'
+import ValueChart, { DAYS, type Period } from '../components/ValueChart'
 import { CompanyLink } from '../components/CompanyPanel'
 import { useTheme } from '../lib/theme'
 
@@ -1184,9 +1184,17 @@ function dayChange(points: ValuePoint[]) {
   return { amount: now - before, pct: before > 0 ? ((now - before) / before) * 100 : 0 }
 }
 
-const PORTFOLIO_PERIODS: Period[] = ['1W', '1M', '3M', 'All']
+const PORTFOLIO_PERIODS: Period[] = ['1W', '1M', '3M', '1Y', 'All']
 
-/** Value since the start against the market index and the original forecast, so you can see how closely it is tracking. */
+const isoDay = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+const addDays = (iso: string, days: number) => { const d = new Date(`${iso}T00:00:00`); d.setDate(d.getDate() + days); return isoDay(d) }
+const longDate = (iso: string) => new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+
+/**
+ * Value since the start against the market index, and where each is expected to go.
+ * For a young portfolio a period looks forward from the day it was bought (1Y = bought → a year later), so
+ * the actual lines run up to today and the expected (dotted) lines carry on from there.
+ */
 function GrowthCard({ history, failed, period, onPeriod, valueNow, expectedReturn }: {
   history: ValueHistory | null; failed: boolean; period: Period; onPeriod: (p: Period) => void
   valueNow: number | null; expectedReturn: number
@@ -1194,6 +1202,20 @@ function GrowthCard({ history, failed, period, onPeriod, valueNow, expectedRetur
   const currency = history?.currency ?? 'AUD'
   const color = currency === 'USD' ? 'var(--usd)' : 'var(--aud)'
   const benchName = history?.benchmark_name ?? (currency === 'USD' ? 'S&P 500' : 'ASX 200')
+  const proj = history?.projection
+  const strategyLine = proj?.strategy?.length ? proj.strategy : null
+  const name = proj?.strategy_name ?? 'This portfolio'
+  const today = isoDay(new Date())
+  // The window: forward from the start while the portfolio is younger than the period, else back from today.
+  const view = (() => {
+    if (!history) return { from: today, until: today }
+    const last = proj?.until && proj.until > today ? proj.until : today
+    if (period === 'All') return { from: history.start, until: last }
+    const end = [today, addDays(history.start, DAYS[period])].sort()[1]
+    const until = end < last ? end : last
+    const back = addDays(until, -DAYS[period])
+    return { from: back < history.start ? history.start : back, until }
+  })()
   const tracking = (() => {
     if (!history || history.money_put_in <= 0) return null
     const lastDay = history.points[history.points.length - 1]?.date ?? history.start
@@ -1201,31 +1223,41 @@ function GrowthCard({ history, failed, period, onPeriod, valueNow, expectedRetur
     const forecastNow = history.money_put_in * (1 + history.expected_return) ** Math.max(years, 0)
     const actual = valueNow ?? history.points[history.points.length - 1]?.value
     if (actual == null) return null
-    return { forecastNow, actual, gap: actual - forecastNow }
+    const marketNow = history.benchmark?.length ? history.benchmark[history.benchmark.length - 1].value : null
+    return { forecastNow, actual, gap: actual - forecastNow, marketNow, vsMarket: marketNow === null ? null : actual - marketNow }
   })()
-  // Growth over the chosen period, for the legend chips.
+  // Actual growth inside the window (up to today), for the legend chips.
   const change = (points: ValuePoint[]) => {
-    const from = periodStart(period)
-    const inside = points.filter((p) => p.date >= from)
+    const inside = points.filter((p) => p.date >= view.from && p.date <= today)
     if (inside.length < 2 || inside[0].value <= 0) return null
     return (inside[inside.length - 1].value / inside[0].value - 1) * 100
   }
   const mine = history ? change(history.points) : null
   const market = history ? change(history.benchmark ?? []) : null
   const chip = (v: number | null) => v === null ? '—' : `${v >= 0 ? '▲ +' : '▼ -'}${Math.abs(v).toFixed(1)}%`
+  const pctYear = (v: number) => `${(v * 100).toFixed(1).replace(/\.0$/, '')}% a year`
+  const showsFuture = view.until > today
   const series = history ? [
     { key: 'value', label: 'This portfolio', color, points: history.points },
+    ...(showsFuture && strategyLine ? [{ key: 'expected', label: `${name} expected`, color, points: strategyLine, dotted: true }] : []),
     { key: 'bench', label: benchName, color: 'var(--text-muted)', points: history.benchmark ?? [], dashed: true },
-    { key: 'forecast', label: 'Original forecast', color: 'var(--usd)', points: history.forecast, dashed: true },
+    ...(showsFuture && proj?.market.length
+      ? [{ key: 'market', label: `${benchName} expected`, color: 'var(--text-muted)', points: proj.market, dotted: true }] : []),
+    // The optimiser's forecast is only shown where there is no strategy line (it isn't Model B's expectation).
+    ...(strategyLine ? [] : [{ key: 'forecast', label: 'Original forecast', color: 'var(--usd)', points: history.forecast, dashed: true }]),
   ] : []
-  // The forecast line stops at today, so the real history keeps the whole width.
-  const until = history?.points.length ? history.points[history.points.length - 1].date : undefined
+  const yearEnd = proj && proj.until > today ? {
+    strategy: strategyLine ? strategyLine[strategyLine.length - 1].value : null,
+    market: proj.market.length ? proj.market[proj.market.length - 1].value : null,
+  } : null
   return (
     <section aria-label="Growth" className="card space-y-4 h-full" data-testid="growth-card">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-base font-semibold theme-text">Growth vs the {benchName} and the forecast</h2>
-          <p className="text-xs theme-text-muted">Value of shares + cash since the portfolio was bought</p>
+          <h2 className="text-base font-semibold theme-text">Growth vs the {benchName}{strategyLine ? '' : ' and the forecast'}</h2>
+          <p className="text-xs theme-text-muted">
+            Value of shares + cash since the portfolio was bought{showsFuture ? '; dotted lines are what is expected from today' : ''}
+          </p>
         </div>
         <div className="seg" role="group" aria-label="Period">
           {PORTFOLIO_PERIODS.map((p) => (
@@ -1238,27 +1270,66 @@ function GrowthCard({ history, failed, period, onPeriod, valueNow, expectedRetur
           This portfolio <strong className="num" style={{ color: mine === null ? undefined : mine >= 0 ? 'var(--pos)' : 'var(--neg)' }}>{chip(mine)}</strong></span>
         <span className="flex items-center gap-2"><span className="w-4 border-t-2 border-dashed" style={{ borderColor: 'var(--text-muted)' }} />
           {benchName} <strong className="num" style={{ color: market === null ? undefined : market >= 0 ? 'var(--pos)' : 'var(--neg)' }}>{chip(market)}</strong></span>
-        <span className="flex items-center gap-2"><span className="w-4 border-t-2 border-dashed" style={{ borderColor: 'var(--usd)' }} />
-          Original forecast <span className="num">({(expectedReturn * 100).toFixed(1)}% a year)</span></span>
+        {showsFuture && strategyLine && proj && (
+          <span className="flex items-center gap-2"><span className="w-4 border-t-2 border-dotted" style={{ borderColor: color }} />
+            {name} expected <span className="num">({proj.edge ? `${benchName} + ${pctYear(proj.edge)}` : `same as the ${benchName}`})</span></span>
+        )}
+        {showsFuture && proj?.market.length ? (
+          <span className="flex items-center gap-2"><span className="w-4 border-t-2 border-dotted" style={{ borderColor: 'var(--text-muted)' }} />
+            {benchName} expected <span className="num">({pctYear(proj.market_rate)})</span></span>
+        ) : null}
+        {!strategyLine && (
+          <span className="flex items-center gap-2"><span className="w-4 border-t-2 border-dashed" style={{ borderColor: 'var(--usd)' }} />
+            Original forecast <span className="num">({(expectedReturn * 100).toFixed(1)}% a year)</span></span>
+        )}
       </div>
       {tracking && (
         <p className="text-sm theme-text-secondary">
           Now <span className="num font-semibold theme-text">{money(tracking.actual, currency, 0)}</span>
-          {' · '}forecast for today <span className="num">{money(tracking.forecastNow, currency, 0)}</span>
-          {' · '}
-          <span className="num font-semibold" style={{ color: tracking.gap >= 0 ? 'var(--pos)' : 'var(--neg)' }}>
-            {tracking.gap >= 0 ? '▲ ' : '▼ '}{money(Math.abs(tracking.gap), currency, 0)} {tracking.gap >= 0 ? 'ahead of' : 'behind'} the forecast
-          </span>
+          {strategyLine ? (tracking.marketNow !== null && tracking.vsMarket !== null && <>
+            {' · '}same money in the {benchName} <span className="num">{money(tracking.marketNow, currency, 0)}</span>
+            {' · '}
+            <span className="num font-semibold" style={{ color: tracking.vsMarket >= 0 ? 'var(--pos)' : 'var(--neg)' }}>
+              {tracking.vsMarket >= 0 ? '▲ ' : '▼ '}{money(Math.abs(tracking.vsMarket), currency, 0)} {tracking.vsMarket >= 0 ? 'ahead of' : 'behind'} the market
+            </span></>) : <>
+            {' · '}forecast for today <span className="num">{money(tracking.forecastNow, currency, 0)}</span>
+            {' · '}
+            <span className="num font-semibold" style={{ color: tracking.gap >= 0 ? 'var(--pos)' : 'var(--neg)' }}>
+              {tracking.gap >= 0 ? '▲ ' : '▼ '}{money(Math.abs(tracking.gap), currency, 0)} {tracking.gap >= 0 ? 'ahead of' : 'behind'} the forecast
+            </span></>}
+        </p>
+      )}
+      {showsFuture && yearEnd && proj && (yearEnd.strategy !== null || yearEnd.market !== null) && (
+        <p className="text-sm theme-text-secondary" data-testid="year-end">
+          Expected by {longDate(proj.until)}:{' '}
+          {yearEnd.strategy !== null && <>{name} <span className="num font-semibold theme-text">{money(yearEnd.strategy, currency, 0)}</span>{' · '}</>}
+          {yearEnd.market !== null && <>{benchName} <span className="num">{money(yearEnd.market, currency, 0)}</span></>}
+          {yearEnd.strategy !== null && yearEnd.market !== null && (
+            <span className="num font-semibold" style={{ color: yearEnd.strategy >= yearEnd.market ? 'var(--pos)' : 'var(--neg)' }}>
+              {' · '}{yearEnd.strategy >= yearEnd.market ? '▲ ' : '▼ '}{money(Math.abs(yearEnd.strategy - yearEnd.market), currency, 0)}
+              {yearEnd.strategy >= yearEnd.market ? ' ahead' : ' behind'}
+            </span>
+          )}
         </p>
       )}
       {failed ? <p className="text-sm theme-text-muted py-10 text-center">Couldn't rebuild the history right now (Yahoo didn't answer).</p>
         : !history ? <div className="h-[260px] rounded-xl loading-shimmer" />
         : <ValueChart series={series} period={period} prefix={currency === 'USD' ? 'US$' : 'A$'} height={260}
-            until={until} />}
+            from={view.from} until={view.until} />}
       <p className="text-[11px] theme-text-muted">
-        The {benchName} line shows what the same money would have done in the index. The forecast is the yearly return the
-        optimiser expected when you built this portfolio, from the past two years of prices: usually optimistic, a yardstick
-        rather than a promise.{history?.missing_prices.length ? ` No price history for ${history.missing_prices.join(', ')}.` : ''}
+        The {benchName} line shows what the same money would have done in the index.{' '}
+        {strategyLine && proj ? <>
+          Dotted lines start from today: the {benchName} at its long-run average ({pctYear(proj.market_rate)}),{' '}
+          {proj.edge ? <>and {name} at that plus the {pctYear(proj.edge)} it gained over the market on average in its long-run test.</>
+            : <>and {name} the same, because in its long-run test it did not beat the {benchName} (it trailed since 2010).</>}{' '}
+          These are averages, not promises: in any single year {name} can finish well above or below the market, and
+          dividends are not counted on either side.
+        </> : <>
+          The forecast is the yearly return the optimiser expected when you built this portfolio, from the past two years of
+          prices: usually optimistic, a yardstick rather than a promise.
+          {showsFuture && proj?.market.length ? <> The dotted {benchName} line carries on at its long-run average ({pctYear(proj.market_rate)}).</> : null}
+        </>}
+        {history?.missing_prices.length ? ` No price history for ${history.missing_prices.join(', ')}.` : ''}
       </p>
     </section>
   )

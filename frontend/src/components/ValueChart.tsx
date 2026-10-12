@@ -4,7 +4,7 @@ import type { ValuePoint } from '../lib/api'
 
 export type Period = '1W' | '1M' | '3M' | '1Y' | 'All'
 export const PERIODS: Period[] = ['1M', '3M', '1Y', 'All']
-const DAYS: Record<Period, number> = { '1W': 7, '1M': 31, '3M': 92, '1Y': 366, All: 100000 }
+export const DAYS: Record<Period, number> = { '1W': 7, '1M': 31, '3M': 92, '1Y': 366, All: 100000 }
 export const periodStart = (period: Period, today = new Date()) =>
   new Date(today.getTime() - DAYS[period] * 86400000).toISOString().slice(0, 10)
 
@@ -17,18 +17,22 @@ export interface Series {
   dashed?: boolean
   /** Step line for money put in. */
   flat?: boolean
+  /** Dotted line: an expected path after today, not something that happened. */
+  dotted?: boolean
 }
 
 const shortDate = (t: number) => new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
 
 /** Value over time with optional extra lines. The first series is filled; the rest are lines. */
-export default function ValueChart({ series, period, prefix, height = 260, until }: {
+export default function ValueChart({ series, period, prefix, height = 260, until, from: fromDate }: {
   series: Series[]; period: Period; prefix: string; height?: number
   /** Last date to draw (lets a forecast run past today). Defaults to the last point of any series. */
   until?: string
+  /** First date to draw. Defaults to the period back from today. */
+  from?: string
 }) {
   const data = useMemo(() => {
-    const from = periodStart(period)
+    const from = fromDate ?? periodStart(period)
     const dates = new Set<string>()
     for (const s of series) for (const p of s.points) if (p.date >= from && (!until || p.date <= until)) dates.add(p.date)
     const sorted = [...dates].sort()
@@ -39,7 +43,7 @@ export default function ValueChart({ series, period, prefix, height = 260, until
       series.forEach((s, i) => { row[s.key] = lookups[i].get(d) ?? null })
       return row
     })
-  }, [series, period, until])
+  }, [series, period, until, fromDate])
 
   if (!data.length) {
     return <div className="flex items-center justify-center text-sm theme-text-muted" style={{ height }}>No history yet</div>
@@ -71,8 +75,9 @@ export default function ValueChart({ series, period, prefix, height = 260, until
         <Area type="monotone" dataKey={main.key} stroke={main.color} strokeWidth={2} fill={`url(#fill-${main.key})`}
           connectNulls dot={false} isAnimationActive={false} />
         {rest.map((s) => (
-          <Line key={s.key} type={s.flat ? 'stepAfter' : 'monotone'} dataKey={s.key} stroke={s.color} strokeWidth={s.dashed ? 1.75 : 2}
-            strokeDasharray={s.dashed ? '6 5' : undefined} dot={false} connectNulls isAnimationActive={false} />
+          <Line key={s.key} type={s.flat ? 'stepAfter' : 'monotone'} dataKey={s.key} stroke={s.color}
+            strokeWidth={s.dashed || s.dotted ? 1.75 : 2}
+            strokeDasharray={s.dotted ? '2 4' : s.dashed ? '6 5' : undefined} dot={false} connectNulls isAnimationActive={false} />
         ))}
       </AreaChart>
     </ResponsiveContainer>

@@ -16,6 +16,13 @@ the whole period. Prices are research data (core.yahoo), in the portfolio's
 own currency. The forecast line is the optimiser's expected return at the time
 the portfolio was built, compounded from the money put in: a description of
 the past two years of prices, not a promise.
+
+The projection runs from today to a year after the portfolio was built (user
+request 2026-10-12: "click 1 year and see Model B vs the ASX"): the market
+grows at a long-run average (MARKET_RATES), and a Model B portfolio at that
+plus the edge its backtest showed (STRATEGY_EDGE: +2.4%/yr on the ASX; none in
+the US, where it trailed the S&P 500 since 2010). Averages, not promises: any
+single year can land far above or below.
 """
 from __future__ import annotations
 
@@ -45,6 +52,11 @@ def _closes(symbol: str, start: date) -> dict[date, float]:
 
 
 BENCHMARKS = {"AUD": ("^AXJO", "ASX 200"), "USD": ("^GSPC", "S&P 500")}
+# Long-run average yearly growth assumed for the market line after today (rough historical averages).
+MARKET_RATES = {"AUD": 0.08, "USD": 0.10}
+# Extra yearly growth a strategy's backtest showed over that market (artifact "Factor Strategy Plan").
+STRATEGY_EDGE = {("factor", "AUD"): 0.024, ("factor", "USD"): 0.0}
+STRATEGY_NAMES = {"factor": "Model B"}
 
 
 def _latest(symbols: list[str]) -> dict[str, float | None]:
@@ -78,7 +90,7 @@ def _as_date(value) -> date:
 def value_history(portfolio_id: int) -> dict:
     """Daily value series for one portfolio, plus its original forecast."""
     with transaction() as (cur, _):
-        cur.execute("""SELECT id, market, created_at, initial_investment, expected_return
+        cur.execute("""SELECT id, market, created_at, initial_investment, expected_return, strategy
                        FROM portfolios WHERE id=%s""", (portfolio_id,))
         p = cur.fetchone()
         if not p:
@@ -164,9 +176,11 @@ def value_history(portfolio_id: int) -> dict:
             continue
         base = base or last_close
         benchmark.append({"date": pt["date"], "value": round(first * last_close / base, 2)})
+    projection = _projection(currency, p.get("strategy"), start, today,
+                             benchmark[-1]["value"] if benchmark else None, points[-1]["value"] if points else None)
     return {"portfolio_id": portfolio_id, "currency": currency, "start": start.isoformat(),
             "expected_return": rate, "money_put_in": put_in, "points": points, "forecast": forecast,
-            "benchmark": benchmark, "benchmark_name": bench_name,
+            "benchmark": benchmark, "benchmark_name": bench_name, "projection": projection,
             "missing_prices": [s for s in symbols if not closes.get(s)]}
 
 
@@ -195,6 +209,31 @@ def _combine(series: list[dict]) -> dict[str, list]:
             out.append({"date": d, "value": round(total, 2)})
         combined[currency] = out
     return combined
+
+
+def _projection(currency: str, strategy: str | None, start: date, today: date,
+                market_now: float | None, value_now: float | None) -> dict:
+    """Expected paths from today to a year after the start: the market, and the strategy if it has an edge figure."""
+    until = start + timedelta(days=365)
+    market_rate = MARKET_RATES[currency]
+    edge = STRATEGY_EDGE.get((strategy or "", currency))
+    days: list[date] = []
+    if until > today:
+        step = today
+        while step < until:
+            days.append(step)
+            step += timedelta(days=1 if (step - today).days < 31 else 7)   # daily for a month so 1W/1M draw too
+        days.append(until)
+
+    def path(value_today: float | None, rate: float) -> list[dict]:
+        if value_today is None or not days:
+            return []
+        return [{"date": d.isoformat(), "value": round(value_today * (1 + rate) ** ((d - today).days / 365.0), 2)}
+                for d in days]
+    return {"until": until.isoformat(), "market_rate": market_rate, "edge": edge,
+            "strategy_name": STRATEGY_NAMES.get(strategy or "") if edge is not None else None,
+            "market": path(market_now, market_rate),
+            "strategy": path(value_now, market_rate + edge) if edge is not None else None}
 
 
 def all_histories(user_id: int) -> dict:
