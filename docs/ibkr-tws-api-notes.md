@@ -73,3 +73,15 @@ the guide before guessing how TWS behaves.
     ask at all, yesterday's close (9 / delayed 75) is used, with the same gap check.
   - *doc/market-data-live/top-of-book-l-1/streaming-data-snapshots*,
     *available-tick-types* (delayed 66 bid, 67 ask, 68 last, 75 close).
+
+## Order routing and precautions
+
+- An API order that trips one of TWS's precautions is **held in TWS** until someone
+  acknowledges the warning and transmits it by hand (*doc/orders/place-order/understanding-order-precautions*).
+  The API gets only the warning message, no `orderStatus`, so Sapient marks it UNKNOWN.
+- ASX orders routed straight to `exchange="ASX"` trip **10311** ("This order will be directly
+  routed to ASX. Direct routed orders may result in higher trade fees … Precautionary Settings
+  of Global Configuration/API"); seen on the user's paper TWS 12 Oct 2026. Since 0.13.3 ASX
+  orders use `SMART` with `primaryExchange="ASX"` like US orders (TWS lists SMART, ASX and
+  ASXCEN as valid exchanges for ASX shares). Sapient never asks the user to switch
+  precautions off (*doc/tws-settings/order-precautions*).

@@ -1,8 +1,10 @@
 """Which exchange, currency, trading hours and price ticks an order's stock uses.
 
-ASX shares are Yahoo symbols ending in .AX (BHP.AX) and trade on the ASX in
-AUD. US shares are plain Yahoo symbols (AAPL, BRK-B) and are routed SMART in
-USD, always to the stock's US primary listing. US orders need USD cash in the
+ASX shares are Yahoo symbols ending in .AX (BHP.AX) and are routed SMART in
+AUD to their ASX listing: an order routed straight to "ASX" makes TWS show its
+direct-routing precaution (message 10311) and hold the order until someone
+transmits it by hand (seen on the user's paper TWS, 12 Oct 2026). US shares
+are plain Yahoo symbols (AAPL, BRK-B) and are routed SMART in USD, always to the stock's US primary listing. US orders need USD cash in the
 account: Sapient never borrows and never converts currency by itself.
 """
 from __future__ import annotations
@@ -13,7 +15,8 @@ import re
 
 from core.strategy import calendar
 
-US_PRIMARY_EXCHANGES = {"NASDAQ", "NYSE", "ARCA", "AMEX", "BATS", "NYSE MKT", "NYSEAMERICAN", "IEX"}
+ASX_PRIMARY_EXCHANGES = frozenset({"ASX"})
+US_PRIMARY_EXCHANGES = frozenset({"NASDAQ", "NYSE", "ARCA", "AMEX", "BATS", "NYSE MKT", "NYSEAMERICAN", "IEX"})
 _US_SYMBOL = re.compile(r"^[A-Z]{1,5}([.-][A-Z]{1,2})?$")
 _ASX_SYMBOL = re.compile(r"^[A-Z0-9]{1,6}\.AX$")
 
@@ -24,14 +27,15 @@ class Market:
     exchange: str          # IBKR routing exchange
     currency: str
     hours: calendar.Market
+    primary_exchanges: frozenset   # the listing SMART must resolve to
 
     @property
     def label(self) -> str:
         return "ASX" if self.code == "ASX" else "US"
 
 
-ASX = Market("ASX", "ASX", "AUD", calendar.ASX)
-US = Market("US", "SMART", "USD", calendar.US)
+ASX = Market("ASX", "SMART", "AUD", calendar.ASX, ASX_PRIMARY_EXCHANGES)
+US = Market("US", "SMART", "USD", calendar.US, US_PRIMARY_EXCHANGES)
 
 
 def for_symbol(symbol: str) -> Market | None:

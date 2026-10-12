@@ -282,7 +282,7 @@ class PaperExecutor:
         try:
             snap = self.session.market_snapshot(
                 symbol, market.exchange, market.currency, data_type=1 if live else 3,
-                primary_exchanges=markets.US_PRIMARY_EXCHANGES if market.code == "US" else None)
+                primary_exchanges=market.primary_exchanges)
         except TwsTimeout:
             return self._block(order["id"], "BLOCKED", self._no_price_reason(symbol, errors_before, live, market))
         if not snap.get("qualified"):
