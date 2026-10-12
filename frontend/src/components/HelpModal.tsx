@@ -48,10 +48,10 @@ const sections: Section[] = [
     terms: [
       { term: 'TWS', short: 'TWS', definition: 'Trader Workstation: Interactive Brokers\' program on your PC. Sapient sends orders to TWS, and TWS sends them to the market.' },
       { term: 'Paper trading', definition: 'Practice trading in IBKR\'s pretend-money account (starts with D). Orders behave like real ones but no real money moves.' },
-      { term: 'Live trading', definition: 'Real-money orders in your real IBKR account. Locked until you authorise it in Brokerage, and it needs real-time prices.' },
+      { term: 'Live trading', definition: 'Real-money orders in your real IBKR account. Locked until you authorise it in Brokerage. Uses real-time prices if your IBKR account has them, otherwise delayed prices.' },
       { term: 'Limit order', definition: 'An order with a price cap: a buy never pays more than the limit, a sell never takes less. Sapient only uses limit orders.' },
       { term: 'Market order', definition: 'An order that trades straight away at whatever price is available. Sapient doesn\'t use them: there is no cap on the price.' },
-      { term: 'Delayed prices', definition: 'Prices that are 15–20 minutes old, free from IBKR without a market-data subscription. Fine for paper trading; live trading needs real-time prices.' },
+      { term: 'Delayed prices', definition: 'Prices that are 15–20 minutes old, free from IBKR without a market-data subscription. Sapient uses them as cautious limit orders (paper, and live without a subscription), so some orders may not fill.' },
       { term: 'Bid and ask', definition: 'The bid is the highest price a buyer is offering right now, the ask the lowest price a seller wants. The last price is the most recent trade.' },
       { term: 'Proposal', definition: 'A trade Sapient suggests for a portfolio set to "Asks first". It appears in the AI Inbox and only becomes an order if you approve it.' },
       { term: 'Emergency stop', definition: 'Turns off all automatic trading and asks TWS to cancel Sapient\'s working orders. In the sidebar and the tray icon.' },

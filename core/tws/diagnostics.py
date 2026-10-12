@@ -158,18 +158,13 @@ def run_test(settings: dict, transport_factory: Callable[[SdkInfo], Transport],
         report.ok("snapshot", f"{len(summary)} account values and {len(positions)} positions received")
 
         try:
-            snapshot = (session.market_snapshot("BHP", "ASX", "AUD", data_type=1) if live
+            # Real-time if the account is subscribed, else delayed: both are fine for orders (live may use
+            # delayed prices as cautious limit orders, user decision 2026-10-12).
+            snapshot = (session.market_snapshot("BHP", "SMART", "AUD", primary_exchanges={"ASX"}) if live
                         else session.market_snapshot("AAPL", "SMART", "USD"))
         except TwsTimeout:
             snapshot = {"qualified": True, "timeout": True}
-        if live and snapshot.get("qualified") and snapshot.get("market_data_type") not in (None, 1):
-            report.warn("market_data", "TWS sent delayed or frozen ASX prices, not real-time.",
-                        "Real-money orders need real-time prices. In IBKR Client Portal → Settings → Market Data "
-                        "Subscriptions, subscribe to ASX Total (Non-Professional). Until then Sapient refuses live orders.")
-            snapshot = {"qualified": True, "reported": True}
-        if snapshot.get("reported"):
-            pass
-        elif not snapshot.get("qualified"):
+        if not snapshot.get("qualified"):
             report.warn("market_data", "TWS could not find the test stock.",
                         "Market data checks will be repeated later; this does not block reading your account.")
         elif snapshot.get("timeout") or not snapshot.get("prices"):

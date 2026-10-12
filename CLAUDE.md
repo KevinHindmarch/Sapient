@@ -36,10 +36,14 @@ The old `.replit` key was fake.
 Paper trading authorised by the user on 2026-10-09 for their TWS **paper**
 account (DUT146393) using **delayed prices with cautious limit orders**.
 Live (real-money) trading was requested by the user on 2026-10-09 (account
-U29239702, real-time prices only, per-portfolio semi/fully automatic, limits
+U29239702, per-portfolio semi/fully automatic, limits
 A$1,000/order and A$5,000/day to start; these limits apply to buys only —
-user decision 2026-10-09 — so exits can sell a whole holding). The code exists but stays locked until
-the user ticks the live authorisation in the app; never bypass that.
+user decision 2026-10-09 — so exits can sell a whole holding). Prices (user
+decision 2026-10-12, to skip the ~A$25/month ASX data fee): real-time when the
+account has them, otherwise free delayed prices as cautious limit orders like
+paper (never yesterday's close). The code exists but stays locked until the
+user ticks the live authorisation in the app; a statement ticked under older
+wording must be ticked again (`authorisation_outdated`); never bypass that.
 
 ## Current state (October 2026)
 
@@ -58,8 +62,7 @@ the user ticks the live authorisation in the app; never bypass that.
   and never repeat the wizard; CI proves it by upgrading from the latest release.
 - Broker orders (paper and live) exist only through `core/tws/paper.py`
   (admission, per environment) → `core/tws/execution.py` (that environment's
-  connector sends). Live needs its own in-app authorisation and real-time
-  prices. A portfolio trades only in the account it was bought in
+  connector sends). Live needs its own in-app authorisation. A portfolio trades only in the account it was bought in
   (`trading_environment`); the old simulation mode was retired in G2 (user
   decision 2026-10-09) — `core/execution_safety.py` remains only for the
   Emergency stop (`IntentService.halt`) and its tests. `core/ibkr_client.py`
@@ -266,7 +269,7 @@ python -m unittest discover -s tests -p 'test_tws.py' -v         # fake TWS: dia
 python -m unittest discover -s tests -p 'test_upgrades.py' -v    # fresh install vs upgrade keeps data, no repeat wizard
 python -m unittest discover -s tests -p 'test_strategy.py' -v    # calendar, rules, sizing, scheduler
 python -m unittest discover -s tests -p 'test_paper.py' -v       # paper admission, submit protocol, fills, cancel, halt
-python -m unittest discover -s tests -p 'test_live.py' -v        # live: separate auth, real-time only, separation from paper
+python -m unittest discover -s tests -p 'test_live.py' -v        # live: separate auth, real-time or cautious delayed prices, separation from paper
 python -m unittest discover -s tests -p 'test_g1_safety.py' -v   # audit fixes: account kinds, portfolio-owned sells, DAY-order expiry
 python -m unittest discover -s tests -p 'test_g2_ledger.py' -v   # cash, realised profit, commissions, holdings = fills, rebalance
 python -m unittest discover -s tests -p 'test_g3_trading.py' -v  # proposals fit limits/cash/caps, no duplicates, re-entry

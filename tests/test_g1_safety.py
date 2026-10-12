@@ -10,7 +10,6 @@ import unittest
 from unittest import mock
 
 from core.tws import paper, store
-from core.tws.session import REQ_MARKET
 
 import test_live
 import test_paper
@@ -177,7 +176,7 @@ class LiveMarketDataTests(LiveTestCase):
             def request(self, name, *args):
                 if name == "reqMktData":
                     self.requests.append(name)
-                    self.emit("error", reqId=REQ_MARKET, errorCode=354,
+                    self.emit("error", reqId=args[0], errorCode=354,
                               errorString="Requested market data is not subscribed.")
                     return
                 super().request(name, *args)
@@ -185,8 +184,8 @@ class LiveMarketDataTests(LiveTestCase):
         order = self.live_order()
         self.live_executor(NoData()).step()
         detail = self.get(order["id"])["detail"]
-        self.assertIn("ASX Total", detail)
         self.assertIn("354", detail)
+        self.assertIn("delayed data is allowed for the live account", detail)   # live may use delayed prices
 
 
 class EngineSizingTests(unittest.TestCase):

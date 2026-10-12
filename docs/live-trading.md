@@ -9,11 +9,13 @@ Status: built (Phase F3), **locked until the user authorises it in the app**
   want to test on paper first, but some we want it for real". Each portfolio
   chooses paper **or** real money when it is bought; a real-money portfolio
   does not have to run on paper first.
-- Prices: "as close to real prices as possible". Live orders use **real-time**
-  TWS prices only (never delayed). The user has no ASX market-data
-  subscription yet (screenshot 2026-10-09); IBKR lists ASX Total at about
-  A$25/month for non-professionals. Until it is active, live orders are
-  refused with an explanation.
+- Prices (2026-10-09): "as close to real prices as possible" — live used
+  real-time prices only. **Changed 2026-10-12** ("lets let live use the delayed
+  prices just like model b then") after weighing the ASX Total fee (about
+  A$25/month, ~A$300/year) against a small portfolio: live now uses real-time
+  prices when the account has them and otherwise TWS's free delayed prices as
+  cautious limit orders, like paper. The in-app statement changed, so the
+  earlier live authorisation must be ticked again.
 - Levels: semi-automatic (Sapient proposes, the user approves each trade) and
   fully automatic (no approval) — chosen per portfolio.
 - Starting limits: A$1,000 per order, A$5,000 per day (editable in the app).
@@ -36,10 +38,13 @@ Status: built (Phase F3), **locked until the user authorises it in the app**
   account; a DU (paper) account can never be confirmed or bound as live.
 - Admission (`core.tws.paper.admit(..., env="live")`) applies all paper rules
   plus the live limits. Sending (`PaperExecutor(env="live")`) asks TWS for
-  real-time data (`reqMarketDataType(1)`); if TWS answers with anything but
-  real-time, nothing is sent. Limit = real-time ask (buy, rounded up to the
-  tick) or bid (sell, rounded down), refused beyond the price check vs Yahoo
-  (default 2%). Persist-before-send, unknown-never-resent and own-id-only
+  `reqMarketDataType(3)` (real-time if subscribed, else delayed):
+  - real-time: limit = ask (buy, rounded up to the tick) or bid (sell, rounded
+    down); the stream waits for both bid and ask;
+  - delayed: paper's cautious limit (buy at the last price or lower, sell at it
+    or higher; mid of bid/ask; today's latest 1-minute bar) but **never
+    yesterday's close**;
+  - either way refused beyond the price check vs Yahoo (default 2%). Persist-before-send, unknown-never-resent and own-id-only
   cancels are identical to paper.
 - The Emergency stop halts paper **and** live and cancels Sapient's working
   orders in both.
@@ -52,7 +57,7 @@ Status: built (Phase F3), **locked until the user authorises it in the app**
 
 `tests/test_live.py`: separate authorisation, DU refused on live, unseen or
 unconfirmed account refused, live limits and account data, live readiness
-independent of paper, real-time-only pricing, live id range, paper/live
+independent of paper, real-time pricing when subscribed and cautious delayed pricing otherwise (never yesterday's close), re-authorisation after the wording changed, live id range, paper/live
 executors ignore each other's orders, Emergency stop covers both, buy-for-real
 sets environment and mode, approvals of live portfolios go to live, live
 worker read-only until authorised.
@@ -66,10 +71,10 @@ stock's US primary listing, during US hours (Sydney night time). Rules:
   and never converts A$ to US$ itself: convert in TWS first (Forex trade or
   IBKR's currency conversion).
 - Your limits stay in A$; Sapient converts with TWS's own exchange rate.
-- Real-money US orders need US real-time market data in IBKR (for example the
-  "US Securities Snapshot and Futures Value Bundle", about US$10/month, often
-  waived when monthly commissions reach US$30). Without it, live US orders are
-  refused with an explanation. Paper uses free delayed data.
+- Real-money US orders use US real-time market data if the account has it
+  (for example the "US Securities Snapshot and Futures Value Bundle", about
+  US$10/month, often waived when monthly commissions reach US$30), otherwise
+  free delayed prices as cautious limit orders (2026-10-12).
 - Automatic checks for US portfolios run during US market hours, so Sapient
   (and TWS) must be running overnight Australian time for them.
 

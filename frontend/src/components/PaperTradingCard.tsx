@@ -33,7 +33,9 @@ export default function PaperTradingCard({ status, account, paperConfirmed, onCh
   const live = status?.environment === 'live'
   const api = tradingApiFor(live ? 'live' : 'paper')
   const word = live ? 'real-money' : 'paper'
-  const authorised = !!(binding?.account_id && binding.authorised_at)
+  // An authorisation ticked under older wording counts as not authorised: the user ticks the new statement.
+  const authorised = !!(binding?.account_id && binding.authorised_at && status?.authorisation_current)
+  const reauthorise = !!(binding?.authorised_at && !status?.authorisation_current)
   const [limits, setLimits] = useState(() => ({
     max_order_value: Number(binding?.max_order_value ?? DEFAULT_LIMITS.max_order_value),
     max_orders_per_day: Number(binding?.max_orders_per_day ?? DEFAULT_LIMITS.max_orders_per_day),
@@ -73,7 +75,7 @@ export default function PaperTradingCard({ status, account, paperConfirmed, onCh
         onChange={(v) => set('max_orders_per_day', Math.round(v))} />
       <LimitField label="Most per day (A$)" help={`Total value of the day's ${word} buys.`} step={500}
         value={limits.max_value_per_day} onChange={(v) => set('max_value_per_day', v)} />
-      <LimitField label="Price check (%)" help={`Max gap between TWS's ${live ? 'real-time' : 'delayed'} price and Yahoo's before Sapient refuses.`}
+      <LimitField label="Price check (%)" help={`Max gap between TWS's ${live ? 'real-time or delayed' : 'delayed'} price and Yahoo's before Sapient refuses.`}
         step={0.5} value={limits.max_price_gap_pct} onChange={(v) => set('max_price_gap_pct', v)} />
       <label className="sm:col-span-2 flex items-start gap-2 text-sm theme-text">
         <input type="checkbox" className="mt-1" checked={limits.autonomous_allowed}
@@ -104,9 +106,11 @@ export default function PaperTradingCard({ status, account, paperConfirmed, onCh
         <p className="text-sm theme-text-secondary">
           Sapient places <strong>real orders with your money</strong> in your IBKR <strong>live</strong> account: ASX and US
           shares, whole shares, limit orders during each market's hours, never borrowing or short selling (US buys
-          need US dollars already in the account). Each order is priced from
-          TWS's <strong>real-time</strong> price at that moment (buy at the current ask, sell at the current bid), and is
-          refused if real-time prices aren't available or differ from Yahoo by more than your price check.
+          need US dollars already in the account). If your IBKR account has <strong>real-time</strong> prices, each
+          order is priced from them (buy at the current ask, sell at the current bid). Without a subscription Sapient uses
+          TWS's free <strong>delayed</strong> prices (15–20 minutes old) as cautious limit orders, like paper: a buy at
+          that price or lower, a sell at it or higher, so some orders may not fill. Either way an order is refused if
+          the price differs from Yahoo's by more than your price check.
         </p>
       ) : (
         <p className="text-sm theme-text-secondary">
@@ -119,6 +123,11 @@ export default function PaperTradingCard({ status, account, paperConfirmed, onCh
 
       {!authorised ? (
         <>
+          {reauthorise && (
+            <p className="text-sm text-amber-600 flex items-center gap-2" data-testid="reauthorise">
+              <AlertTriangle className="w-4 h-4" />
+              The rules for {word} trading changed since you authorised it. Read the new statement and tick it again.</p>
+          )}
           <ol className="list-decimal pl-5 text-sm theme-text space-y-1">
             <li>Log in to TWS with {live ? <>your <strong>live</strong> account (port 7496)</> : <strong>Paper Trading</strong>}.</li>
             <li>In TWS: <strong>File → Global Configuration → API → Settings</strong>, <strong>untick “Read-Only API”</strong>,

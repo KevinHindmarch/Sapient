@@ -168,9 +168,9 @@ function BrokerageAccount({ profile }: { profile: TradingEnv }) {
         <div className="card border-red-500/40 bg-red-500/5 text-sm theme-text" data-testid="live-warning">
           <p className="font-semibold text-red-600">Live = your real money.</p>
           <p className="mt-1">Run a second TWS window logged in to your <strong>live</strong> account (not Paper Trading)
-            with its API on port <strong>7496</strong>. Sapient reads it until you authorise real-money orders in Step 4,
-            and real-money orders need ASX <strong>real-time</strong> prices (IBKR Client Portal → Settings → Market Data
-            Subscriptions → ASX Total, Non-Professional).</p>
+            with its API on port <strong>7496</strong>. Sapient reads it until you authorise real-money orders in Step 4.
+            Real-money orders use real-time prices if your account has them (ASX Total, about A$25/month), otherwise
+            free delayed prices as cautious limit orders.</p>
         </div>
       )}
 

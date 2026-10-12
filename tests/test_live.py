@@ -1,4 +1,5 @@
-"""Live (real-money) trading: separate authorisation, real-time prices only, separation from paper.
+"""Live (real-money) trading: separate authorisation, real-time prices when subscribed (else cautious
+delayed prices, user decision 2026-10-12), separation from paper.
 
 Uses a scripted fake TWS. Never opens a socket or touches a real account.
 """
@@ -22,13 +23,14 @@ LIVE_TEXT = LIVE.authorisation_text.format(account=LIVE_ACCOUNT)
 
 
 class LiveFakeTws(PaperFakeTws):
-    """Answers with real-time ticks only when real-time data was asked for and is 'subscribed'."""
+    """Real-time ticks when the account is 'subscribed' (type 1 or 3 asked for), otherwise delayed ticks."""
 
     def __init__(self, subscribed=True, **kw):
         super().__init__(**kw)
         self.accounts = [LIVE_ACCOUNT]
         self.subscribed = subscribed
         self.data_type = 3
+        self.close = None   # yesterday's close (delayed tick 75)
 
     def request(self, name, *args):
         if name == "reqMarketDataType":
@@ -38,10 +40,10 @@ class LiveFakeTws(PaperFakeTws):
         if name == "reqMktData":
             self.requests.append(name)
             req = args[0]
-            realtime = self.data_type == 1 and self.subscribed
+            realtime = self.subscribed and self.data_type in (1, 3)
             self.emit("marketDataType", reqId=req, marketDataType=1 if realtime else 3)
             ticks = ((4, self.last), (1, self.bid), (2, self.ask)) if realtime else \
-                ((68, self.last), (66, self.bid), (67, self.ask))
+                ((68, self.last), (66, self.bid), (67, self.ask), (75, self.close))
             for tick, price in ticks:
                 if price is not None:
                     self.emit("tickPrice", reqId=req, tickType=tick, price=price, attrib=None)
@@ -105,6 +107,18 @@ class LiveAuthorisationTests(LiveTestCase):
         store.set_status("live", account="U00000000")
         self.refused("account_not_seen", paper.authorise, LIVE_ACCOUNT, LIVE_TEXT, None, "live")
 
+    def test_authorisation_under_older_wording_must_be_ticked_again(self):
+        self.authorise_live()
+        old = ("I authorise Sapient to place REAL-MONEY orders in my Interactive Brokers live account "
+               f"{LIVE_ACCOUNT}, within the limits I set, using real-time prices. I understand these trades "
+               "use my own money and that I can lose money.")
+        self.sql("UPDATE live_binding SET authorised_text=%s WHERE id=1", (old,))
+        self.refused("authorisation_outdated", self.live_order)
+        self.assertFalse(paper.status("live")["authorisation_current"])
+        self.authorise_live()                                                       # ticks the new statement
+        self.assertTrue(paper.status("live")["authorisation_current"])
+        self.assertEqual(self.live_order()["environment"], "live")
+
 
 class LiveAdmissionTests(LiveTestCase):
     def setUp(self):
@@ -136,14 +150,14 @@ class LiveExecutorTests(LiveTestCase):
         self.assertIsNone(choose_live_limit("BUY", {"68": 150.0, "67": 150.1}, Decimal("150"), Decimal("2"))[0],
                           "delayed ticks are ignored for real money")
 
-    def test_delayed_prices_never_send_a_real_order(self):
+    def test_without_a_subscription_live_uses_delayed_prices_cautiously(self):
         order = self.live_order()
         fake = LiveFakeTws(subscribed=False, last=150.0, ask=150.05)
         self.live_executor(fake).step()
         row = self.get(order["id"])
-        self.assertEqual(row["state"], "BLOCKED")
-        self.assertIn("real-time", row["detail"])
-        self.assertEqual(fake.placed, [])
+        self.assertEqual(row["state"], "SUBMITTED")
+        self.assertEqual(fake.placed[0][2].lmtPrice, 150.0, "delayed: buy at the last price or lower, never the ask")
+        self.assertTrue(row["quote"]["delayed"])
 
     def test_real_time_order_is_sent_in_the_live_id_range(self):
         order = self.live_order()
@@ -158,13 +172,17 @@ class LiveExecutorTests(LiveTestCase):
         # Same routing as paper: SMART to the ASX listing (straight to "ASX" makes TWS hold the order, 10311).
         self.assertEqual((contract.exchange, contract.currency, contract.primaryExchange), ("SMART", "AUD", "ASX"))
 
-    def test_live_never_falls_back_to_delayed_price_bars(self):
-        from core.tws import session as session_mod
+    def test_real_money_is_never_priced_from_yesterdays_close(self):
+        from core.tws.execution import choose_limit
+        self.assertIsNone(choose_limit("BUY", {"75": 150.0}, Decimal("150"), Decimal("2"), allow_close=False)[0])
+        self.assertEqual(choose_limit("BUY", {"hist": 150.0, "75": 149.0}, Decimal("150"), Decimal("2"),
+                                      allow_close=False)[0], Decimal("150"), "today's latest bar is fine")
         order = self.live_order()
-        fake = LiveFakeTws(last=None, bid=None, ask=None)   # real-time subscribed, but no prices come
-        with mock.patch.object(session_mod, "STREAM_TIMEOUT", 0.3):
+        fake = LiveFakeTws(subscribed=False, last=None, bid=None, ask=None)
+        fake.close = 150.0
+        from core.tws import session as session_mod
+        with mock.patch.object(session_mod, "STREAM_TIMEOUT", 0.3), mock.patch.object(session_mod, "HIST_TIMEOUT", 0.3):
             self.live_executor(fake).step()
-        self.assertNotIn("reqHistoricalData", fake.requests, "1-minute bars are delayed data: paper only")
         self.assertEqual(self.get(order["id"])["state"], "BLOCKED")
         self.assertEqual(fake.placed, [])
 
@@ -238,7 +256,8 @@ class LivePortfolioTests(LiveTestCase):
             self.assertEqual(approved["environment"], "tws_live")
             self.assertIn("REAL-MONEY", approved["message"])
             live_status = client.get("/api/live/status", headers=auth).json()
-            self.assertTrue(live_status["realtime_required"])
+            self.assertTrue(live_status["real_money"])
+            self.assertTrue(live_status["authorisation_current"])
             refused = client.put("/api/tws-live/settings", headers=auth,
                                  json={"expected_account": "DU5555555", "account_confirmed": True})
             self.assertEqual(refused.json()["detail"]["code"], "paper_account_on_live")
