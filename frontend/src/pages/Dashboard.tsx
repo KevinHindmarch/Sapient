@@ -15,7 +15,8 @@ type Cur = 'AUD' | 'USD'
 
 const currencyOf = (p: Portfolio) => ((p.market || 'ASX') === 'US' ? 'USD' : 'AUD') as Cur
 const colorOf = (c: Cur | 'ALL') => (c === 'AUD' ? 'var(--aud)' : c === 'USD' ? 'var(--usd)' : 'var(--ink)')
-const pct = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`
+const tiny = (v: number, step: number) => (Math.abs(v) < step / 2 ? 0 : v)  // no "-0.0%" for rounding dust
+const pct = (v: number) => { const x = tiny(v, 0.1); return `${x >= 0 ? '+' : ''}${x.toFixed(1)}%` }
 
 function Shimmer({ className = '' }: { className?: string }) {
   return <div className={`rounded-lg loading-shimmer ${className}`} />
@@ -144,7 +145,7 @@ export default function Dashboard() {
   const hasUsd = usd.count > 0
   const everything = aud.value + (rate ? usd.value * rate : 0)
   const everythingPutIn = aud.putIn + (rate ? usd.putIn * rate : 0)
-  const everythingGain = everything - everythingPutIn
+  const everythingGain = tiny(everything - everythingPutIn, 1)
   const bothSeries = useMemo(() => combine(combined.AUD ?? [], combined.USD ?? [], rate ?? 0), [combined, rate])
 
   useEffect(() => {
@@ -200,7 +201,7 @@ export default function Dashboard() {
 
       {/* Money cards: A$ and US$ are kept apart; the third card converts US$ at today's rate. */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {[aud, usd].map((t) => (
+        {[aud, usd].map((t) => ({ ...t, gain: tiny(t.gain, 1) })).map((t) => (
           <MoneyCard key={t.currency} code={t.currency} testId={`totals-${t.currency.toLowerCase()}`}
             title={t.currency === 'AUD' ? 'Australian shares' : 'US shares'}
             count={`${t.count} portfolio${t.count === 1 ? '' : 's'}`} loading={summaries === null}
@@ -311,7 +312,7 @@ export default function Dashboard() {
                 {portfolios.map((p) => {
                   const s = summaryFor(p.id)
                   const currency = currencyOf(p)
-                  const up = (s?.total_return ?? 0) >= 0
+                  const up = tiny(s?.total_return_pct ?? 0, 0.1) >= 0
                   const held = s ? s.holdings.filter((h) => h.quantity > 0).length : p.position_count ?? 0
                   return (
                     <tr key={p.id} className="border-b theme-border last:border-b-0">
@@ -338,7 +339,7 @@ export default function Dashboard() {
                         {s ? money(s.total_value, currency, 0) : summaries === null ? '…' : money(Number(p.initial_investment), currency, 0)}
                       </td>
                       <td className={`py-3 text-right num ${up ? 'text-pos' : 'text-neg'}`}>
-                        {s ? `${up ? '▲ +' : '▼ '}${s.total_return_pct.toFixed(1)}%` : ''}
+                        {s ? `${up ? '▲ +' : '▼ -'}${Math.abs(tiny(s.total_return_pct, 0.1)).toFixed(1)}%` : ''}
                       </td>
                       <td className="py-3 hidden sm:table-cell">
                         <span className="flex justify-end"><Sparkline points={sparkFor(p.id)} color={colorOf(currency)} /></span>
