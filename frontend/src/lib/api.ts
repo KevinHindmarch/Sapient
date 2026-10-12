@@ -120,6 +120,15 @@ export interface ValueHistory {
   forecast: ValuePoint[]
   benchmark: ValuePoint[]
   benchmark_name: string
+  /** Expected paths from today to a year after the start (long-run averages, not promises). */
+  projection?: {
+    until: string
+    market_rate: number          // yearly growth assumed for the market
+    edge: number | null          // extra yearly growth the strategy's backtest showed (null: no strategy line)
+    strategy_name: string | null // e.g. "Model B"
+    market: ValuePoint[]
+    strategy: ValuePoint[] | null
+  }
   missing_prices: string[]
 }
 

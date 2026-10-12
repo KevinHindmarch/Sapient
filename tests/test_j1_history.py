@@ -48,6 +48,35 @@ class HistoryTests(Helpers, test_paper.PaperTestCase):
         self.assertAlmostEqual(forecast[h["points"][-1]["date"]], 500 * 1.5 ** (2 / 365), places=2)
         self.assertGreater(h["forecast"][-1]["date"], h["points"][-1]["date"])      # and still looks ahead
 
+    def test_model_b_projection_continues_from_today_and_beats_the_market_by_its_edge(self):
+        pid = self.portfolio(("BHP.AX", 10, 40, 1.0), put_in=500)
+        self.sql("UPDATE portfolios SET strategy='factor' WHERE id=%s", (pid,))
+        self.started(pid, 2)
+        with self.closes({"BHP.AX": [(3, 40.0), (0, 44.0)], "^AXJO": [(3, 8000.0), (0, 8800.0)]}):
+            h = history.value_history(pid)
+        proj = h["projection"]
+        self.assertEqual((proj["market_rate"], proj["edge"], proj["strategy_name"]), (0.08, 0.024, "Model B"))
+        today = h["points"][-1]["date"]
+        self.assertEqual(proj["market"][0], {"date": today, "value": h["benchmark"][-1]["value"]})  # starts at today's market
+        self.assertEqual(proj["strategy"][0], {"date": today, "value": h["points"][-1]["value"]})  # and today's value
+        self.assertEqual(proj["market"][-1]["date"], proj["until"])                  # a year after it was bought
+        years = (date.fromisoformat(proj["until"]) - date.fromisoformat(today)).days / 365
+        self.assertAlmostEqual(proj["market"][-1]["value"], 550.0 * 1.08 ** years, places=1)
+        self.assertAlmostEqual(proj["strategy"][-1]["value"], 540.0 * 1.104 ** years, places=1)
+
+    def test_us_model_b_assumes_no_edge_and_simple_rules_have_no_strategy_line(self):
+        us = self.portfolio(("AAPL", 2, 100, 1.0), put_in=200, market="US")
+        self.sql("UPDATE portfolios SET strategy='factor' WHERE id=%s", (us,))
+        rules = self.portfolio(("BHP.AX", 10, 40, 1.0), put_in=500)
+        for pid in (us, rules):
+            self.started(pid, 2)
+        with self.closes({"AAPL": [(3, 100.0), (0, 110.0)], "^GSPC": [(3, 6000.0), (0, 6100.0)],
+                          "BHP.AX": [(3, 40.0), (0, 44.0)], "^AXJO": [(3, 8000.0), (0, 8800.0)]}):
+            us_h, rules_h = history.value_history(us), history.value_history(rules)
+        self.assertEqual((us_h["projection"]["edge"], us_h["projection"]["market_rate"]), (0.0, 0.10))
+        self.assertIsNone(rules_h["projection"]["strategy"])
+        self.assertTrue(rules_h["projection"]["market"])
+
     def test_today_uses_the_same_price_as_now(self):
         pid = self.portfolio(("BHP.AX", 10, 40, 1.0), put_in=500)
         self.started(pid, 1)
