@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Briefcase } from 'lucide-react'
 import {
-  aiApi, liveApi, money, paperApi, portfolioApi,
-  type AllHistories, type PaperOrder, type PortfolioSummary, type SchedulerStatus, type ValuePoint,
+  aiApi, bookOf, liveApi, money, paperApi, portfolioApi,
+  type AllHistories, type Book, type PaperOrder, type PortfolioSummary, type SchedulerStatus, type ValuePoint,
 } from '../lib/api'
 import type { Portfolio } from '../types'
 import { useProfile } from '../lib/profile'
@@ -14,6 +14,17 @@ type View = 'AUD' | 'USD' | 'BOTH'
 type Cur = 'AUD' | 'USD'
 
 const currencyOf = (p: Portfolio) => ((p.market || 'ASX') === 'US' ? 'USD' : 'AUD') as Cur
+const BOOK_KEY = 'sapient-dashboard-book'   // remembers Paper / Real money on this PC
+
+function savedBook(): Book | null {
+  try {
+    const v = localStorage.getItem(BOOK_KEY)
+    return v === 'paper' || v === 'live' ? v : null
+  } catch {
+    return null
+  }
+}
+
 const colorOf = (c: Cur | 'ALL') => (c === 'AUD' ? 'var(--aud)' : c === 'USD' ? 'var(--usd)' : 'var(--ink)')
 const tiny = (v: number, step: number) => (Math.abs(v) < step / 2 ? 0 : v)  // no "-0.0%" for rounding dust
 const pct = (v: number) => { const x = tiny(v, 0.1); return `${x >= 0 ? '+' : ''}${x.toFixed(1)}%` }
@@ -110,11 +121,13 @@ function MoneyCard({ code, title, count, value, today, trend, color, footer, ext
 
 export default function Dashboard() {
   const { profile } = useProfile()
-  const [portfolios, setPortfolios] = useState<Portfolio[]>([])
-  const [summaries, setSummaries] = useState<PortfolioSummary[] | null>(null)
+  const [allPortfolios, setPortfolios] = useState<Portfolio[]>([])
+  const [allSummaries, setSummaries] = useState<PortfolioSummary[] | null>(null)
   const [histories, setHistories] = useState<AllHistories | null>(null)
-  const [pending, setPending] = useState(0)
-  const [orders, setOrders] = useState<PaperOrder[]>([])
+  const [signals, setSignals] = useState<{ portfolio_id: number }[]>([])
+  const [allOrders, setOrders] = useState<PaperOrder[]>([])
+  // Paper and real money are never added together: the whole page shows one side at a time.
+  const [book, setBookState] = useState<Book | null>(savedBook)
   const [markets, setMarkets] = useState<SchedulerStatus['markets']>([])
   const [loading, setLoading] = useState(true)
   const [view, setView] = useState<View>('AUD')
@@ -125,14 +138,29 @@ export default function Dashboard() {
     portfolioApi.list().then((r) => setPortfolios(r.data)).catch(() => undefined).finally(() => setLoading(false))
     portfolioApi.summaries().then((r) => setSummaries(r.data)).catch(() => setSummaries([]))
     portfolioApi.histories().then((r) => setHistories(r.data)).catch(() => undefined)
-    aiApi.listSignals('pending').then((r) => setPending(Array.isArray(r.data) ? r.data.length : 0)).catch(() => undefined)
+    aiApi.listSignals('pending').then((r) => setSignals(Array.isArray(r.data) ? r.data : [])).catch(() => undefined)
     aiApi.scheduler().then((r) => setMarkets(r.data.markets ?? [])).catch(() => undefined)
     Promise.all([paperApi.orders().catch(() => null), liveApi.orders().catch(() => null)])
       .then((all) => setOrders(all.flatMap((r) => r?.data ?? []).filter((o) => WORKING.has(o.state))))
   }, [])
 
+  const setBook = (b: Book) => {
+    setBookState(b)
+    try { localStorage.setItem(BOOK_KEY, b) } catch { /* not remembered: fine */ }
+  }
+  // First visit: show real money if there is any, else paper.
+  const hasLive = allPortfolios.some((p) => p.trading_environment === 'live')
+  const side: Book = book ?? (hasLive ? 'live' : 'paper')
+  const live = side === 'live'
+  const portfolios = useMemo(() => allPortfolios.filter((p) => bookOf(p.trading_environment) === side), [allPortfolios, side])
+  const summaries = useMemo(() => allSummaries && allSummaries.filter((s) => bookOf(s.trading_environment) === side),
+    [allSummaries, side])
+  const orders = allOrders.filter((o) => o.environment === side)
+  const sideOf = new Map(allPortfolios.map((p) => [p.id, bookOf(p.trading_environment)]))
+  const pending = signals.filter((s) => (sideOf.get(s.portfolio_id) ?? 'paper') === side).length
+
   const rate = histories?.aud_per_usd ?? null
-  const combined = useMemo(() => histories?.combined ?? {}, [histories])
+  const combined = useMemo(() => histories?.combined_by_book?.[side] ?? {}, [histories, side])
   const totals = useMemo(() => (['AUD', 'USD'] as const).map((currency) => {
     const mine = (summaries ?? []).filter((s) => s.currency === currency)
     const value = mine.reduce((a, s) => a + s.total_value, 0)
@@ -186,6 +214,11 @@ export default function Dashboard() {
           <p className="sr-only">Welcome back</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <div className="seg" role="group" aria-label="Paper or real money" data-testid="book-toggle">
+            <button type="button" aria-pressed={!live} onClick={() => setBook('paper')}>Paper</button>
+            <button type="button" aria-pressed={live} onClick={() => setBook('live')}
+              style={live ? { color: 'var(--neg)' } : undefined}>Real money</button>
+          </div>
           {markets.map((m) => {
             const pill = marketPill(m)
             return (
@@ -198,6 +231,14 @@ export default function Dashboard() {
           <Link to="/auto-builder" className="btn-primary text-sm !py-2 !px-4">+ Build a portfolio</Link>
         </div>
       </div>
+
+      <p className="text-xs theme-text-muted -mt-2" data-testid="book-note">
+        {live
+          ? <><span className="chip !py-0.5 font-bold" style={{ background: 'var(--neg-tint)', color: 'var(--neg)' }}>REAL MONEY</span>{' '}
+              Only portfolios bought with your own money in your IBKR live account.</>
+          : <><span className="chip !py-0.5 font-bold">PRACTICE MONEY</span>{' '}
+              Paper-account portfolios and research portfolios. None of this is real money.</>}
+      </p>
 
       {/* Money cards: A$ and US$ are kept apart; the third card converts US$ at today's rate. */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -293,8 +334,10 @@ export default function Dashboard() {
         {loading ? <Shimmer className="h-32 w-full" /> : portfolios.length === 0 ? (
           <div className="text-center py-10 space-y-2">
             <Briefcase className="w-8 h-8 mx-auto theme-text-muted" />
-            <p className="theme-text-secondary">No portfolios yet</p>
-            <p className="text-sm theme-text-muted">Build one with the Auto, Manual or CAPM builder.</p>
+            <p className="theme-text-secondary">{live ? 'No real-money portfolios yet' : 'No paper or research portfolios yet'}</p>
+            <p className="text-sm theme-text-muted">
+              {live ? 'Open a portfolio and use "Buy for real & manage" to trade it with your own money.'
+                : 'Build one with the Auto, Manual or CAPM builder.'}</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
