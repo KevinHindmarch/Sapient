@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Layers } from 'lucide-react'
 import { apiErrorMessage, factorsApi, FactorBuild, FactorKey, money, portfolioApi } from '../lib/api'
+import { CompanyLink } from '../components/CompanyPanel'
 
 const FACTORS: FactorKey[] = ['MOM', 'RMW', 'HML', 'CMA', 'SMB']
 const SHORT: Record<FactorKey, string> = { MOM: 'Momentum', RMW: 'Profit', HML: 'Value', CMA: 'Investment', SMB: 'Size' }
@@ -131,7 +132,7 @@ export default function FactorBuilder() {
                   return (
                     <tr key={r.symbol} className={`border-t theme-border ${w > 0 ? 'theme-text' : 'theme-text-muted'}`}>
                       <td className="py-1 pr-2">{r.rank}</td>
-                      <td className="pr-2"><span className="font-mono">{r.symbol.replace('.AX', '')}</span>{' '}
+                      <td className="pr-2"><CompanyLink symbol={r.symbol} className="font-mono" />{' '}
                         <span className="text-xs theme-text-secondary">{r.name ?? ''}</span></td>
                       <td className="pr-2 text-right">{w > 0 ? pct(w) : '—'}</td>
                       <td className="pr-2 text-right">{w > 0 ? money(w * amount, currency, 0) : '—'}</td>

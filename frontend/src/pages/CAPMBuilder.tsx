@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { Search, TrendingUp, Save, Loader2, Activity, Target, Shield, Zap, X, Plus, Radar, Check } from 'lucide-react'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts'
 import { useTheme } from '../lib/theme'
+import { CompanyLink } from '../components/CompanyPanel'
 
 const COLORS = ['#0ea5e9', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#6366f1', '#14b8a6']
 
@@ -437,7 +438,7 @@ export default function CAPMBuilder() {
                         </div>
                       </td>
                       <td className={`p-2 font-medium ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
-                        <span>{stock.symbol}</span>
+                        <CompanyLink symbol={stock.symbol} />
                         {stock.name && <span className={`text-xs ml-2 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{stock.name}</span>}
                       </td>
                       <td className="p-2 text-right font-mono">{stock.beta.toFixed(2)}</td>

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { ClipboardList, Loader2, Send } from 'lucide-react'
 import { apiErrorMessage, liveApi, PaperOrder, PaperOrderState, PaperStatus, paperApi, tradingApiFor, TradingEnv, UNKNOWN_CHECK_TEXT } from '../lib/api'
+import { CompanyLink } from '../components/CompanyPanel'
 
 const STATE: Record<PaperOrderState, { text: string; tone: string }> = {
   QUEUED: { text: 'Waiting to send', tone: 'text-sky-500' },
@@ -173,7 +174,7 @@ export default function PaperOrders() {
                       {o.environment === 'live' ? 'REAL MONEY' : 'PAPER'}
                     </span>
                     <span className={`font-bold ${o.side === 'BUY' ? 'text-emerald-500' : 'text-red-500'}`}>{o.side}</span>
-                    <span className="font-semibold theme-text">{Number(o.quantity)} {o.symbol}</span>
+                    <span className="font-semibold theme-text">{Number(o.quantity)} <CompanyLink symbol={o.symbol}>{o.symbol}</CompanyLink></span>
                     <span className="theme-text-secondary">limit {aud(o.limit_price, o.currency)}{o.quote?.delayed ? ' (delayed price)' : ''}</span>
                     <span className={`font-medium ${st.tone}`}>{st.text}</span>
                     {Number(o.filled_quantity) > 0 && (

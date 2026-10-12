@@ -10,6 +10,7 @@ import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recha
 import { useTheme } from '../lib/theme'
 import WeightEditor from '../components/WeightEditor'
 import FactorBuilder from './FactorBuilder'
+import { CompanyLink } from '../components/CompanyPanel'
 
 const COLORS = ['#0ea5e9', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#6366f1', '#14b8a6']
 
@@ -426,7 +427,7 @@ function ModelA() {
                                     style={{ backgroundColor: COLORS[index % COLORS.length] }}
                                   />
                                   <div>
-                                    <span className={`font-medium ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{symbol.replace('.AX', '')}</span>
+                                    <CompanyLink symbol={symbol} className={`font-medium ${isDark ? 'text-slate-100' : 'text-slate-900'}`} />
                                     <p className="text-xs text-slate-500 truncate max-w-[120px]">{stockInfo?.name || ''}</p>
                                   </div>
                                 </div>

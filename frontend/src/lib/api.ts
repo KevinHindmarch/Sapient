@@ -123,6 +123,7 @@ export interface AllHistories {
   portfolios: { portfolio_id: number; currency: 'AUD' | 'USD'; start: string; points: ValuePoint[] }[]
   combined: Partial<Record<'AUD' | 'USD', ValuePoint[]>>
   aud_per_usd: number | null
+}
 
 export interface HoldingSummary {
   position_id: number | null
