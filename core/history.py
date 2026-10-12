@@ -150,17 +150,13 @@ def value_history(portfolio_id: int) -> dict:
             "missing_prices": [s for s in symbols if not closes.get(s)]}
 
 
-def all_histories(user_id: int) -> dict:
-    """Every portfolio's series, plus a combined A$ series and a combined US$ series for the dashboard."""
-    with transaction() as (cur, _):
-        cur.execute("SELECT id FROM portfolios WHERE user_id=%s ORDER BY id", (user_id,))
-        ids = [r["id"] for r in cur.fetchall()]
-    series = []
-    for pid in ids:
-        try:
-            series.append(value_history(pid))
-        except Exception:
-            continue
+def book_of(environment: str | None) -> str:
+    """Dashboard side: 'live' (real money at IBKR) or 'paper' (paper portfolios and research ones never bought)."""
+    return "live" if environment == "live" else "paper"
+
+
+def _combine(series: list[dict]) -> dict[str, list]:
+    """One series per currency: each portfolio's last known value carried forward and added up day by day."""
     combined: dict[str, list] = {}
     for currency in ("AUD", "USD"):
         mine = [s for s in series if s["currency"] == currency and s["points"]]
@@ -178,5 +174,26 @@ def all_histories(user_id: int) -> dict:
                     total += last[i]
             out.append({"date": d, "value": round(total, 2)})
         combined[currency] = out
-    return {"portfolios": [{k: s[k] for k in ("portfolio_id", "currency", "start", "points")} for s in series],
-            "combined": combined, "aud_per_usd": aud_per_usd() if "USD" in combined else None}
+    return combined
+
+
+def all_histories(user_id: int) -> dict:
+    """Every portfolio's series, plus combined A$ and US$ series for the dashboard.
+
+    ``combined_by_book`` keeps real money ('live') and practice ('paper', incl. research
+    portfolios) apart, so the dashboard never adds pretend money to real money.
+    """
+    with transaction() as (cur, _):
+        cur.execute("SELECT id, trading_environment FROM portfolios WHERE user_id=%s ORDER BY id", (user_id,))
+        books = {r["id"]: book_of(r["trading_environment"]) for r in cur.fetchall()}
+    series = []
+    for pid in books:
+        try:
+            series.append({**value_history(pid), "book": books[pid]})
+        except Exception:
+            continue
+    combined = _combine(series)
+    by_book = {book: _combine([s for s in series if s["book"] == book]) for book in ("paper", "live")}
+    has_usd = "USD" in combined
+    return {"portfolios": [{k: s[k] for k in ("portfolio_id", "currency", "start", "points", "book")} for s in series],
+            "combined": combined, "combined_by_book": by_book, "aud_per_usd": aud_per_usd() if has_usd else None}

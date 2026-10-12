@@ -60,6 +60,21 @@ class HistoryTests(Helpers, test_paper.PaperTestCase):
         self.assertEqual(out["combined"]["AUD"][-1]["value"], 440.0)
         self.assertEqual(out["combined"]["USD"][-1]["value"], 220.0)
 
+    def test_real_money_is_never_added_to_paper(self):
+        research = self.portfolio(("BHP.AX", 10, 40, 1.0), put_in=400)                 # never at IBKR: practice side
+        practice = self.portfolio(("BHP.AX", 5, 40, 1.0), put_in=200, environment="paper")
+        real = self.portfolio(("BHP.AX", 1, 40, 1.0), put_in=40, environment="live")
+        for pid in (research, practice, real):
+            self.sql("UPDATE portfolios SET created_at=%s WHERE id=%s", (datetime.now(timezone.utc) - timedelta(days=1), pid))
+        self.sql("UPDATE portfolio_positions SET quantity=0 WHERE portfolio_id IN (%s, %s)", (practice, real))
+        with self.closes({"BHP.AX": [(1, 40.0), (0, 44.0)]}):
+            out = history.all_histories(self.user["id"])
+        books = out["combined_by_book"]
+        self.assertEqual(books["paper"]["AUD"][-1]["value"], 440.0 + 200.0)   # research + practice cash
+        self.assertEqual(books["live"]["AUD"][-1]["value"], 40.0)              # real money only
+        self.assertEqual({p["portfolio_id"]: p["book"] for p in out["portfolios"]},
+                         {research: "paper", practice: "paper", real: "live"})
+
 
 class ProfileTests(unittest.TestCase):
     def test_names_and_sectors_with_a_fallback(self):

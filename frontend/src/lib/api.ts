@@ -124,8 +124,10 @@ export interface ValueHistory {
 }
 
 export interface AllHistories {
-  portfolios: { portfolio_id: number; currency: 'AUD' | 'USD'; start: string; points: ValuePoint[] }[]
+  portfolios: { portfolio_id: number; currency: 'AUD' | 'USD'; start: string; points: ValuePoint[]; book: Book }[]
   combined: Partial<Record<'AUD' | 'USD', ValuePoint[]>>
+  // Real money ('live') and practice ('paper', incl. research portfolios) added up separately.
+  combined_by_book: Record<Book, Partial<Record<'AUD' | 'USD', ValuePoint[]>>>
   aud_per_usd: number | null
 }
 
@@ -234,6 +236,9 @@ export interface TwsSettings {
 }
 
 export type TradingEnv = 'paper' | 'live'
+/** Dashboard side: real money at IBKR, or practice (paper portfolios and research ones never bought). */
+export type Book = 'paper' | 'live'
+export const bookOf = (environment: TradingEnv | null | undefined): Book => (environment === 'live' ? 'live' : 'paper')
 
 export interface TwsStatus {
   state: string
