@@ -849,3 +849,26 @@ class StockDataService:
         results.sort(key=lambda x: x['sharpe_ratio'], reverse=True)
         
         return results
+
+
+def company_profiles(symbols: list[str]) -> dict[str, dict]:
+    """Name and sector for each symbol (Yahoo .info, cached), for holdings tables and sector bars.
+
+    A symbol Yahoo doesn't answer for gets its own code as the name and sector "Other".
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    def one(symbol: str) -> tuple[str, dict]:
+        try:
+            info = yf.Ticker(symbol).info or {}
+        except Exception:
+            info = {}
+        return symbol, {"name": info.get("shortName") or info.get("longName") or symbol.replace(".AX", ""),
+                        "sector": info.get("sector") or "Other"}
+
+    unique = sorted({s for s in symbols if s})
+    if not unique:
+        return {}
+    with ThreadPoolExecutor(max_workers=min(8, len(unique))) as pool:
+        return dict(pool.map(one, unique))
+

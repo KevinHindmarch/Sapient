@@ -41,6 +41,9 @@ def _closes(symbol: str, start: date) -> dict[date, float]:
     return out
 
 
+BENCHMARKS = {"AUD": ("^AXJO", "ASX 200"), "USD": ("^GSPC", "S&P 500")}
+
+
 def aud_per_usd() -> float | None:
     """Today's A$ per US$ from Yahoo (AUDUSD=X), for the dashboard's "everything in A$" card only."""
     try:
@@ -127,8 +130,23 @@ def value_history(portfolio_id: int) -> dict:
         if forecast[-1]["date"] != horizon.isoformat():
             years = (horizon - start).days / 365.0
             forecast.append({"date": horizon.isoformat(), "value": round(put_in * (1 + rate) ** years, 2)})
+    # The market over the same days, scaled to start at the portfolio's first value ("what if it had been the index").
+    bench_symbol, bench_name = BENCHMARKS[currency]
+    bench_closes = _closes(bench_symbol, start)
+    benchmark = []
+    first = points[0]["value"] if points else 0
+    base = None
+    last_close = None
+    for pt in points:
+        d = date.fromisoformat(pt["date"])
+        last_close = bench_closes.get(d, last_close)
+        if last_close is None:
+            continue
+        base = base or last_close
+        benchmark.append({"date": pt["date"], "value": round(first * last_close / base, 2)})
     return {"portfolio_id": portfolio_id, "currency": currency, "start": start.isoformat(),
             "expected_return": rate, "money_put_in": put_in, "points": points, "forecast": forecast,
+            "benchmark": benchmark, "benchmark_name": bench_name,
             "missing_prices": [s for s in symbols if not closes.get(s)]}
 
 

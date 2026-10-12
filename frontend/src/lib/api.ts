@@ -54,6 +54,8 @@ export const stocksApi = {
   search: (q: string, market: string = 'ASX') => api.get(`/stocks/search?q=${encodeURIComponent(q)}&market=${market}`),
   info: (symbol: string) => api.get(`/stocks/info/${symbol}`),
   quickInfo: (symbol: string) => api.get(`/stocks/info/${symbol}`),
+  profiles: (symbols: string[]) =>
+    api.get<Record<string, { name: string; sector: string }>>(`/stocks/profiles?symbols=${encodeURIComponent(symbols.join(','))}`),
   historical: (symbols: string[], period: string = '2y') =>
     api.post('/stocks/historical', { symbols, period }),
   dividends: (symbols: string[]) =>
@@ -116,6 +118,8 @@ export interface ValueHistory {
   money_put_in: number
   points: (ValuePoint & { invested: number })[]
   forecast: ValuePoint[]
+  benchmark: ValuePoint[]
+  benchmark_name: string
   missing_prices: string[]
 }
 

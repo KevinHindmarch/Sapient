@@ -21,8 +21,11 @@ class HistoryTests(Helpers, test_paper.PaperTestCase):
         pid = self.portfolio(("BHP.AX", 10, 40, 1.0), put_in=500)          # 10 BHP at A$40, A$100 cash
         self.sql("UPDATE portfolios SET created_at=%s, expected_return=0.1 WHERE id=%s",
                  (datetime.now(timezone.utc) - timedelta(days=3), pid))
-        with self.closes({"BHP.AX": [(3, 40.0), (2, 42.0), (0, 45.0)]}):
+        with self.closes({"BHP.AX": [(3, 40.0), (2, 42.0), (0, 45.0)], "^AXJO": [(3, 8000.0), (0, 8800.0)]}):
             h = history.value_history(pid)
+        self.assertEqual(h["benchmark_name"], "ASX 200")
+        self.assertEqual(h["benchmark"][0]["value"], 500.0)                # starts where the portfolio started
+        self.assertEqual(h["benchmark"][-1]["value"], 550.0)                # index +10%
         values = [p["value"] for p in h["points"]]
         self.assertEqual(values[0], 500.0)                                  # 10 x 40 + 100
         self.assertEqual(values[-1], 550.0)                                 # 10 x 45 + 100
@@ -56,6 +59,19 @@ class HistoryTests(Helpers, test_paper.PaperTestCase):
         self.assertEqual(out["aud_per_usd"], 1.5)
         self.assertEqual(out["combined"]["AUD"][-1]["value"], 440.0)
         self.assertEqual(out["combined"]["USD"][-1]["value"], 220.0)
+
+
+class ProfileTests(unittest.TestCase):
+    def test_names_and_sectors_with_a_fallback(self):
+        from core import stocks
+
+        class Fake:
+            def __init__(self, symbol):
+                self.info = {"shortName": "BHP Group", "sector": "Basic Materials"} if symbol == "BHP.AX" else {}
+        with mock.patch.object(stocks.yf, "Ticker", Fake):
+            out = stocks.company_profiles(["BHP.AX", "XYZ.AX"])
+        self.assertEqual(out["BHP.AX"], {"name": "BHP Group", "sector": "Basic Materials"})
+        self.assertEqual(out["XYZ.AX"], {"name": "XYZ", "sector": "Other"})
 
 
 if __name__ == "__main__":
