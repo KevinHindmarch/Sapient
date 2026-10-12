@@ -92,8 +92,9 @@ const LIVE_STEPS: Step[] = [
           (must differ from the paper window's 7497).</li>
         <li>Tick <strong>Allow connections from localhost only</strong>, leave <strong>Master API client ID</strong> empty,
           click <strong>Apply</strong> and <strong>OK</strong>.</li>
-        <li>For real-money orders, subscribe to ASX real-time data: IBKR Client Portal → Settings → Market Data
-          Subscriptions → <strong>ASX Total</strong> (Non-Professional).</li>
+        <li>Optional: real-time ASX prices (IBKR Client Portal → Settings → Market Data Subscriptions →{' '}
+          <strong>ASX Total</strong>, Non-Professional, about A$25/month). Without it, real-money orders use free
+          delayed prices as cautious limit orders.</li>
       </ol>
     ),
   },

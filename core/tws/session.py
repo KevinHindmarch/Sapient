@@ -364,7 +364,7 @@ class TwsSession:
 
     def market_snapshot(self, symbol: str, exchange: str, currency: str, timeout: float = 15.0,
                         data_type: int = 3, primary_exchanges: set[str] | None = None,
-                        stream_timeout: float | None = None) -> dict:
+                        stream_timeout: float | None = None, want_quote: bool = False) -> dict:
         """Qualify one stock and get its current prices.
 
         data_type 3 = delayed if not subscribed (paper); 1 = real-time only (live
@@ -374,6 +374,8 @@ class TwsSession:
         market-data subscription, and on the ASX a delayed snapshot often never
         ended (docs/ibkr-tws-api-notes.md). Real-time requests snapshot first and
         fall back to a short stream if the snapshot is empty or doesn't end.
+        ``want_quote`` (real money): when the stream turns out to be real-time, keep
+        listening until both a bid and an ask arrive (a buy is priced at the ask).
         """
         contract = self.transport.make_contract(symbol=symbol, secType="STK", exchange=exchange, currency=currency)
         found: list = []
@@ -410,8 +412,12 @@ class TwsSession:
                 self._wait(finished, timeout, collect_ticks)
             except TwsTimeout:
                 pass  # the snapshot didn't end: stream instead (below)
+        def enough() -> bool:
+            if want_quote and result["market_data_type"] == 1:
+                return _usable(prices, BID_TICKS) and _usable(prices, ASK_TICKS)
+            return has_price(prices)
         if not refused and not has_price(prices):
-            self._stream_prices(found[0], stream_timeout or STREAM_TIMEOUT, collect_ticks, refused, prices)
+            self._stream_prices(found[0], stream_timeout or STREAM_TIMEOUT, collect_ticks, refused, enough)
         if data_type != 1 and not has_price(prices):
             # On the ASX the delayed stream can stay silent after 10167 (October 2026). TWS's recent
             # 1-minute trade bars are the same delayed data, so the last bar's close is used instead.
@@ -454,8 +460,8 @@ class TwsSession:
                 return close, str(getattr(bar, "date", ""))
         return None
 
-    def _stream_prices(self, contract, timeout: float, collect_ticks, refused: list, prices: dict) -> None:
-        """Streaming (not snapshot) prices until a usable last, or a bid and an ask, arrive or ``timeout``.
+    def _stream_prices(self, contract, timeout: float, collect_ticks, refused: list, enough) -> None:
+        """Streaming (not snapshot) prices until ``enough()`` (usually a usable last, or a bid and an ask) or ``timeout``.
 
         Ticks of -1 ("nothing right now") don't end the wait. The stream is always cancelled.
         """
@@ -463,7 +469,7 @@ class TwsSession:
             if name == "error" and fields.get("reqId") == REQ_STREAM and _code(fields) in NO_MARKET_DATA:
                 refused.append(_code(fields))
                 return True
-            return has_price(prices)
+            return enough()
         self.transport.request("reqMktData", REQ_STREAM, contract, "", False, False, [])
         try:
             self._wait(finished, timeout, collect_ticks)

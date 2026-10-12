@@ -148,7 +148,8 @@ export default function PaperOrders() {
           </div>
           <p className="text-xs theme-text-secondary">
             {live
-              ? <>Sapient prices it from TWS's <strong>real-time</strong> price when it sends (buy at the ask, sell at the bid) and refuses if</>
+              ? <>Sapient prices it from TWS's <strong>real-time</strong> price when your account has one (buy at the ask, sell at the
+                bid), otherwise from the delayed price (a buy at that price or lower, a sell at it or higher), and refuses if</>
               : <>Sapient sets the limit price from TWS's delayed price when it sends (a buy at that price or lower, a sell at it
             or higher) and refuses if</>}{' '}it is more than {Number(binding?.max_price_gap_pct ?? 3)}% away from Yahoo's price.
             Limits: up to {aud(binding?.max_order_value)} per order, {binding?.max_orders_per_day} orders and{' '}

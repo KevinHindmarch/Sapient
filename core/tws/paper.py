@@ -8,8 +8,10 @@ Environments (core.tws.environments):
   paper  authorised 2026-10-09 for the user's paper account; delayed prices,
          cautious limits (docs/paper-trading.md).
   live   REAL MONEY, requested 2026-10-09; needs its own in-app authorisation for
-         the confirmed live account, real-time prices and the user's limits
-         (docs/live-trading.md). Nothing is sent without that authorisation.
+         the confirmed live account and the user's limits; real-time prices when
+         the account has them, else delayed (user decision 2026-10-12)
+         (docs/live-trading.md). Nothing is sent without that authorisation, and
+         an authorisation ticked under older wording must be ticked again.
 
 Scope: long-only whole-share stocks, DAY limit orders during that market's
 hours: ASX shares (.AX, AUD) and US shares (SMART, USD; G4, user decision
@@ -217,6 +219,10 @@ def blockers(cur, now: datetime | None = None, *, binding: dict | None = None, e
     if not binding["account_id"] or not binding["authorised_at"]:
         block("not_authorised", f"{_title(e)} has not been authorised yet.")
         return problems
+    if binding.get("authorised_text") != e.authorisation_text.format(account=binding["account_id"]):
+        # The rules changed since the user ticked the statement (e.g. live may now use delayed prices).
+        block("authorisation_outdated", f"The rules for {e.label} trading changed since you authorised it. "
+                                         "Read and tick the new statement on the Interactive Brokers page.")
     kind_problem = account_kind_problem(e.name, binding["account_id"])
     if kind_problem:
         block("wrong_account_kind", kind_problem[1])
@@ -582,7 +588,9 @@ def status(env: str = "paper") -> dict:
     open_now = {m.code: calendar.is_open(m.hours, now) for m in (markets.ASX, markets.US)}
     return {"environment": e.name, "binding": binding, "ready": not problems, "blockers": problems,
             "markets_open": open_now,
-            "authorisation_text": e.authorisation_text, "realtime_required": e.realtime_required}
+            "authorisation_text": e.authorisation_text, "real_money": e.real_money,
+            "authorisation_current": bool(binding["authorised_at"]) and
+            binding.get("authorised_text") == e.authorisation_text.format(account=binding["account_id"])}
 
 
 # ---- helpers for other order paths ----------------------------------------------

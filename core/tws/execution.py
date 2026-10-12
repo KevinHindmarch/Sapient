@@ -3,9 +3,11 @@
 Submit protocol (docs/ibkr-architecture.md §7), one order at a time:
   1. Take the oldest QUEUED paper order; expire it if its send window passed.
   2. Re-check the authorisation, the account and market hours.
-  3. Qualify the ASX contract and take a TWS price snapshot (delayed is fine:
-     the user chose delayed prices on 2026-10-09).
-  4. Cautious limit: BUY at the last price (or a lower ask), rounded down to
+  3. Qualify the contract and get TWS prices: real-time if the account has a
+     subscription, else delayed (paper: user decision 2026-10-09; live: user
+     decision 2026-10-12, to avoid the ASX data fee).
+  4. Live with real-time prices: buy at the ask, sell at the bid. Otherwise a
+     cautious limit: BUY at the last price (or a lower ask), rounded down to
      the tick; SELL at the last price (or a higher bid), rounded up. No premium,
      so an order may simply not fill. Refuse if that price is further than the
      allowed gap from the Yahoo reference price the user saw.
@@ -77,8 +79,11 @@ def _first_price(prices: dict, keys) -> Decimal | None:
 
 
 def choose_limit(side: str, prices: dict, reference: Decimal, max_gap_pct: Decimal,
-                 market: "markets.Market" = markets.ASX) -> tuple[Decimal | None, str]:
-    """Cautious limit price from a TWS snapshot, or (None, reason)."""
+                 market: "markets.Market" = markets.ASX, allow_close: bool = True) -> tuple[Decimal | None, str]:
+    """Cautious limit price from a TWS snapshot, or (None, reason).
+
+    ``allow_close=False`` (real money) never prices an order from yesterday's close.
+    """
     last = _first_price(prices, LAST)
     if last is None:
         # No trade printed in the delayed feed yet: the middle of TWS's bid and ask, else (no bid
@@ -87,7 +92,7 @@ def choose_limit(side: str, prices: dict, reference: Decimal, max_gap_pct: Decim
         if bid and ask and bid <= ask:
             last = (bid + ask) / 2
         elif not (bid or ask):
-            last = _first_price(prices, HIST) or _first_price(prices, CLOSE)
+            last = _first_price(prices, HIST) or (_first_price(prices, CLOSE) if allow_close else None)
         if last is None:
             return None, (f"TWS sent no usable price for this stock (it sent: {describe_prices(prices)}), "
                           "so Sapient did not guess one.")
@@ -277,23 +282,26 @@ class PaperExecutor:
             return self._block(order["id"], "BLOCKED", f"The {market.label} market closed before the order could be sent.")
 
         symbol = markets.ib_symbol(order["symbol"])  # BHP.AX -> BHP, BRK-B -> BRK B
-        live = self.env.realtime_required
+        live = self.env.real_money
         errors_before = len(self.session.health.errors)
         try:
+            # Type 3 = real-time if the account is subscribed, else delayed (both environments).
             snap = self.session.market_snapshot(
-                symbol, market.exchange, market.currency, data_type=1 if live else 3,
-                primary_exchanges=market.primary_exchanges)
+                symbol, market.exchange, market.currency, data_type=3,
+                primary_exchanges=market.primary_exchanges, want_quote=live)
         except TwsTimeout:
             return self._block(order["id"], "BLOCKED", self._no_price_reason(symbol, errors_before, live, market))
         if not snap.get("qualified"):
             return self._block(order["id"], "BLOCKED", f"TWS does not recognise {symbol} on the {market.label} market"
                                                        + (" (more than one listing matched)." if snap.get("matches") else "."))
         reference = Decimal(order["reference_price"])
-        if live and snap.get("market_data_type") != 1:
-            return self._block(order["id"], "BLOCKED", "TWS sent delayed prices, not real-time. Real-money orders need "
-                                                       f"{market.label} real-time market data, so nothing was sent.")
-        pick = choose_live_limit if live else choose_limit
-        limit, reason = pick(order["side"], snap.get("prices") or {}, reference, binding["max_price_gap_pct"], market)
+        realtime = snap.get("market_data_type") == 1
+        if live and realtime:
+            limit, reason = choose_live_limit(order["side"], snap.get("prices") or {}, reference,
+                                              binding["max_price_gap_pct"], market)
+        else:
+            limit, reason = choose_limit(order["side"], snap.get("prices") or {}, reference,
+                                         binding["max_price_gap_pct"], market, allow_close=not live)
         if limit is None:
             return self._block(order["id"], "BLOCKED", reason)
         quantity = Decimal(order["quantity"])
@@ -311,7 +319,7 @@ class PaperExecutor:
             return  # try again next tick; the send window still applies
         order_ref = "sapient:" + order["id"][:18]
         quote = {"prices": snap.get("prices"), "market_data_type": snap.get("market_data_type"), "bar_time": snap.get("bar_time"),
-                 "delayed": snap.get("market_data_type") in (3, 4), "taken_at": _now().isoformat()}
+                 "delayed": not realtime, "taken_at": _now().isoformat()}
         with db.transaction() as (cur, _):
             binding = get_binding(cur, self.env.name)
             if not binding["enabled"] or binding["halted"]:
@@ -384,14 +392,8 @@ class PaperExecutor:
         if not codes:
             return "TWS did not send a price in time, so nothing was sent."
         code = codes[-1]["code"]
-        if live:
-            needed = ("the ASX Total (Non-Professional)" if market.code == "ASX" else
-                      "a US real-time (e.g. US Securities Snapshot and Futures Value Bundle)")
-            return (f"TWS has no real-time price permission for {symbol} (IBKR message {code}). Real-money orders need "
-                    f"{needed} market-data subscription in IBKR Client Portal → Settings → "
-                    "Market Data Subscriptions. Nothing was sent.")
         return (f"TWS has no market-data permission for {symbol} (IBKR message {code}). In TWS check that delayed "
-                "data is allowed for the paper account. Nothing was sent.")
+                f"data is allowed for the {'live' if live else 'paper'} account. Nothing was sent.")
 
     @staticmethod
     def _mark_unknown(order_id: str, detail: str) -> None:

@@ -373,7 +373,8 @@ export interface PaperBinding {
 
 export interface PaperStatus {
   environment: TradingEnv
-  realtime_required: boolean
+  real_money: boolean
+  authorisation_current: boolean   // false when the statement's wording changed since it was ticked
   binding: PaperBinding
   ready: boolean
   blockers: { code: string; message: string }[]
