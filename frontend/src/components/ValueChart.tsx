@@ -2,9 +2,11 @@ import { useMemo } from 'react'
 import { Area, AreaChart, CartesianGrid, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import type { ValuePoint } from '../lib/api'
 
-export type Period = '1M' | '3M' | '1Y' | 'All'
+export type Period = '1W' | '1M' | '3M' | '1Y' | 'All'
 export const PERIODS: Period[] = ['1M', '3M', '1Y', 'All']
-const DAYS: Record<Period, number> = { '1M': 31, '3M': 92, '1Y': 366, All: 100000 }
+const DAYS: Record<Period, number> = { '1W': 7, '1M': 31, '3M': 92, '1Y': 366, All: 100000 }
+export const periodStart = (period: Period, today = new Date()) =>
+  new Date(today.getTime() - DAYS[period] * 86400000).toISOString().slice(0, 10)
 
 export interface Series {
   key: string
@@ -26,8 +28,7 @@ export default function ValueChart({ series, period, prefix, height = 260, until
   until?: string
 }) {
   const data = useMemo(() => {
-    const today = new Date()
-    const from = new Date(today.getTime() - DAYS[period] * 86400000).toISOString().slice(0, 10)
+    const from = periodStart(period)
     const dates = new Set<string>()
     for (const s of series) for (const p of s.points) if (p.date >= from && (!until || p.date <= until)) dates.add(p.date)
     const sorted = [...dates].sort()

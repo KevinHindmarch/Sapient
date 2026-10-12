@@ -1,18 +1,15 @@
 import { useEffect, useState } from 'react'
 import FactorStrategy from '../components/FactorStrategy'
 import { useParams, Link, useNavigate } from 'react-router-dom'
-import { portfolioApi, stocksApi, brokerApi, aiApi, apiErrorMessage, money, PortfolioSummary, RebalancePlan, type ValueHistory } from '../lib/api'
+import { portfolioApi, stocksApi, brokerApi, aiApi, factorsApi, apiErrorMessage, money, PortfolioSummary, RebalancePlan, type FactorPlan, type ValueHistory, type ValuePoint } from '../lib/api'
 import { Portfolio, Position, Transaction } from '../types'
 import { toast } from 'sonner'
-import { ArrowLeft, DollarSign, Pencil, Trash2, Plus, X, Search, RefreshCw, Sparkles, Send, Zap, Activity, Link2, AlertTriangle } from 'lucide-react'
+import { ArrowLeft, Pencil, Trash2, Plus, X, Search, RefreshCw, Sparkles, Send, Zap, Activity, Link2, AlertTriangle } from 'lucide-react'
 import BrokerCompareCard from '../components/BrokerCompareCard'
 import { format } from 'date-fns'
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts'
-import ValueChart, { PERIODS, type Period } from '../components/ValueChart'
+import ValueChart, { periodStart, type Period } from '../components/ValueChart'
 import { CompanyLink } from '../components/CompanyPanel'
 import { useTheme } from '../lib/theme'
-
-const COLORS = ['#0ea5e9', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#6366f1', '#14b8a6']
 
 interface PortfolioData {
   portfolio: Portfolio
@@ -73,6 +70,23 @@ export default function PortfolioDetail() {
   const [history, setHistory] = useState<ValueHistory | null>(null)
   const [historyFailed, setHistoryFailed] = useState(false)
   const [period, setPeriod] = useState<Period>('All')
+  const [plan, setPlan] = useState<FactorPlan | null>(null)
+  const [keepWithin, setKeepWithin] = useState(40)
+  const [profiles, setProfiles] = useState<Record<string, { name: string; sector: string }>>({})
+  const [pendingHere, setPendingHere] = useState(0)
+  const [showAllHoldings, setShowAllHoldings] = useState(false)
+
+  useEffect(() => {
+    if (!id) return
+    factorsApi.plan(Number(id)).then((r) => { setPlan(r.data.plan); setKeepWithin(r.data.keep_within) }).catch(() => undefined)
+    aiApi.listSignals('pending').then((r) => setPendingHere((Array.isArray(r.data) ? r.data : [])
+      .filter((sig: { portfolio_id?: number }) => sig.portfolio_id === Number(id)).length)).catch(() => undefined)
+  }, [id, strategy])
+
+  useEffect(() => {
+    const symbols = data?.positions.map((p) => p.symbol) ?? []
+    if (symbols.length) stocksApi.profiles(symbols).then((r) => setProfiles(r.data)).catch(() => undefined)
+  }, [data])
 
   const [showAddModal, setShowAddModal] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -360,15 +374,6 @@ export default function PortfolioDetail() {
     }
   }
 
-  const tooltipStyle = {
-    backgroundColor: isDark ? 'rgba(15, 23, 42, 0.9)' : 'rgba(255, 255, 255, 0.95)',
-    border: `1px solid ${isDark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.3)'}`,
-    borderRadius: '12px',
-    boxShadow: isDark ? '0 8px 32px rgba(0, 0, 0, 0.4)' : '0 8px 32px rgba(0, 0, 0, 0.1)',
-    backdropFilter: 'blur(12px)',
-    color: isDark ? '#f1f5f9' : '#0f172a'
-  }
-
   const modalStyle = {
     background: isDark ? 'rgba(15, 23, 42, 0.9)' : 'rgba(255, 255, 255, 0.95)',
     borderColor: isDark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.3)',
@@ -399,13 +404,6 @@ export default function PortfolioDetail() {
   // Bought at IBKR: holdings follow real fills, so they can't be edited by hand.
   const atBroker = !!portfolio.trading_environment
 
-  const chartData = positions
-    .filter((p) => p.status === 'active')
-    .map((p) => ({
-      name: p.symbol.replace('.AX', ''),
-      value: Number(p.allocation_amount) || 0,
-    }))
-
   const totalValue = positions.reduce((sum, p) => {
     if (p.status !== 'active') return sum
     const price = currentPrices[p.symbol] || Number(p.avg_cost)
@@ -421,82 +419,281 @@ export default function PortfolioDetail() {
   const totalReturn = summary ? summary.total_return : totalValue - costBasis
   const totalReturnPct = summary ? summary.total_return_pct : costBasis > 0 ? ((totalValue - costBasis) / costBasis) * 100 : 0
 
-  const legendColor = isDark ? '#94a3b8' : '#64748b'
+  const currency: 'AUD' | 'USD' = summary?.currency ?? ((portfolio.market || 'ASX') === 'US' ? 'USD' : 'AUD')
+  const accent = currency === 'USD' ? 'var(--usd)' : 'var(--aud)'
+  const sym = currency === 'USD' ? 'US$' : 'A$'
+  const valueNow = summary ? summary.total_value : totalValue
+  const signedMoney = (v: number) => `${v >= 0 ? '+' : '-'}${money(Math.abs(v), currency, 0)}`
+  const arrowPct = (v: number) => `${v >= 0 ? '▲ +' : '▼ -'}${Math.abs(v).toFixed(1)}%`
+  const tone = (v: number) => (v >= 0 ? 'var(--pos)' : 'var(--neg)')
+  const today = dayChange(history?.points ?? [])
+  const vsMarket = (() => {
+    const pts = history?.points ?? []
+    const bench = history?.benchmark ?? []
+    if (pts.length < 2 || bench.length < 2 || pts[0].value <= 0) return null
+    const mine = (pts[pts.length - 1].value / pts[0].value - 1) * 100
+    const market = (bench[bench.length - 1].value / bench[0].value - 1) * 100
+    return mine - market
+  })()
+  const startedOn = history ? new Date(`${history.start}T00:00:00`) : new Date(portfolio.created_at)
+  const startedLabel = startedOn.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
+  const holdingRows = positions
+    .filter((p) => p.status === 'active')
+    // 0 shares and nothing planned: a stock this portfolio no longer holds or wants (e.g. after a sale).
+    .filter((p) => Number(p.quantity) > 0 || Number(p.planned_quantity ?? 0) > 0 || !atBroker)
+    .map((p) => {
+      const h = summary?.holdings.find((x) => x.symbol === p.symbol)
+      const price = h?.price ?? currentPrices[p.symbol] ?? null
+      const value = h ? h.value : (price ?? Number(p.avg_cost)) * Number(p.quantity)
+      const cost = Number(p.avg_cost) * Number(p.quantity)
+      return { position: p, price, value, gainPct: cost > 0 ? ((value - cost) / cost) * 100 : null,
+        weight: valueNow > 0 ? (value / valueNow) * 100 : 0, profile: profiles[p.symbol] }
+    })
+    .sort((x, y) => y.value - x.value)
+  const maxWeight = Math.max(1, ...holdingRows.map((r) => r.weight))
+  const shownHoldings = showAllHoldings ? holdingRows : holdingRows.slice(0, 8)
+  const heldCount = holdingRows.filter((r) => Number(r.position.quantity) > 0).length
+  const sliceOf = (symbol: string) => (strategy === 'factor' && plan?.slices && symbol in plan.slices ? `Slice ${plan.slices[symbol] + 1}` : '')
+  const sectors = (() => {
+    const totals: Record<string, number> = {}
+    for (const r of holdingRows) {
+      if (r.value <= 0) continue
+      const name = r.profile?.sector ?? 'Other'
+      totals[name] = (totals[name] ?? 0) + r.value
+    }
+    const cash = summary?.cash ?? 0
+    const rows = Object.entries(totals).sort((a, b) => b[1] - a[1]).map(([name, v]) => ({ name, value: v }))
+    if (cash > 0 && valueNow > 0 && cash / valueNow >= 0.005) rows.push({ name: 'Cash', value: cash })
+    const total = rows.reduce((a, r) => a + r.value, 0)
+    return rows.map((r) => ({ ...r, pct: total > 0 ? (r.value / total) * 100 : 0 }))
+  })()
+  const maxSector = Math.max(1, ...sectors.map((x) => x.pct))
+  const envLabel = portfolio.trading_environment === 'live' ? 'TWS live' : portfolio.trading_environment === 'paper' ? 'TWS paper' : 'Research only'
+  const modeLabel = aiMode === 'autonomous' ? 'Fully automatic' : aiMode === 'suggestions' ? 'Asks first' : 'AI Trading off'
+  const kpis: { label: string; value: string; sub: string; color?: string; subColor?: string }[] = [
+    { label: 'Value', value: money(valueNow, currency, 0),
+      sub: summary ? `Holdings ${money(summary.market_value, currency, 0)} + cash ${money(summary.cash, currency, 0)}` : 'Shares at the latest price' },
+    { label: 'Total return', value: signedMoney(totalReturn), color: tone(totalReturn), subColor: tone(totalReturn),
+      sub: `${arrowPct(totalReturnPct)} since ${startedLabel}` },
+    today
+      ? { label: 'Today', value: signedMoney(today.amount), color: tone(today.amount), subColor: tone(today.amount), sub: arrowPct(today.pct) }
+      : { label: 'Today', value: '—', sub: 'Needs two days of prices' },
+    vsMarket === null
+      ? { label: `vs ${history?.benchmark_name ?? (currency === 'USD' ? 'S&P 500' : 'ASX 200')}`, value: '—', sub: 'Not enough history yet' }
+      : { label: `vs ${history?.benchmark_name}`, value: `${vsMarket >= 0 ? '+' : ''}${vsMarket.toFixed(1)}%`, color: tone(vsMarket),
+          sub: `${vsMarket >= 0 ? 'Ahead' : 'Behind'} since it was bought` },
+    { label: 'Fees paid', value: money(summary?.fees ?? 0, currency, 0),
+      sub: `${transactions.length} trade${transactions.length === 1 ? '' : 's'}${summary && valueNow > 0 ? ` · ${((summary.fees / valueNow) * 100).toFixed(1)}% of value` : ''}` },
+  ]
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex items-start gap-3">
-          <Link to="/portfolios" className={`p-2 mt-1 ${isDark ? 'hover:bg-slate-800/50' : 'hover:bg-slate-100'} rounded-lg transition-colors border border-transparent ${isDark ? 'hover:border-slate-700/50' : 'hover:border-slate-200'} shrink-0`}>
-            <ArrowLeft className={`w-5 h-5 ${isDark ? 'text-slate-400' : 'text-slate-600'}`} />
-          </Link>
-          <div>
-            <h1 className={`text-2xl sm:text-3xl font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{portfolio.name}</h1>
-            <div className="flex flex-wrap items-center gap-2 mt-1">
-              <span className={`text-xs font-medium px-2 py-0.5 rounded-full border ${
-                portfolio.mode === 'auto' 
-                  ? isDark ? 'bg-purple-500/20 text-purple-300 border-purple-500/30' : 'bg-purple-100 text-purple-700 border-purple-300'
-                  : isDark ? 'bg-sky-500/20 text-sky-300 border-sky-500/30' : 'bg-sky-100 text-sky-700 border-sky-300'
-              }`}>
-                {portfolio.mode === 'auto' ? 'Auto' : 'Manual'}
+    <div className="max-w-7xl mx-auto space-y-5 animate-fade-in">
+      <header className="space-y-3">
+        <nav aria-label="Breadcrumb" className="text-sm theme-text-muted flex items-center gap-1.5">
+          <Link to="/portfolios" className="hover:underline flex items-center gap-1"><ArrowLeft className="w-3.5 h-3.5" /> Portfolios</Link>
+          <span>/</span><span className="theme-text-secondary truncate">{portfolio.name}</span>
+        </nav>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="space-y-2 min-w-0">
+            <h1 className="page-title">{portfolio.name}</h1>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className={`chip ${currency === 'USD' ? 'chip-usd' : 'chip-aud'}`}>
+                <span className="w-1.5 h-1.5 rounded-full" style={{ background: accent }} />{currency === 'USD' ? 'US · US$' : 'ASX · A$'}
               </span>
-              <span className={`text-xs font-medium px-2 py-0.5 rounded-full border ${
-                portfolio.risk_tolerance === 'conservative'
-                  ? isDark ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' : 'bg-emerald-100 text-emerald-700 border-emerald-300'
-                  : portfolio.risk_tolerance === 'aggressive'
-                  ? isDark ? 'bg-red-500/20 text-red-300 border-red-500/30' : 'bg-red-100 text-red-700 border-red-300'
-                  : isDark ? 'bg-amber-500/20 text-amber-300 border-amber-500/30' : 'bg-amber-100 text-amber-700 border-amber-300'
-              }`}>
-                {portfolio.risk_tolerance}
-              </span>
-              <span className="hidden sm:inline text-sm text-slate-500">
-                Created {format(new Date(portfolio.created_at), 'MMM d, yyyy')}
-              </span>
+              <span className="chip">{strategy === 'factor' ? 'Model B' : 'Simple rules'} · {heldCount} stock{heldCount === 1 ? '' : 's'}</span>
+              <span className="chip" style={portfolio.trading_environment === 'live' ? { background: 'var(--neg-tint)', color: 'var(--neg)' } : undefined}>{envLabel}</span>
+              <span className="chip" style={aiMode === 'autonomous' ? { background: 'var(--pos-tint)', color: 'var(--pos)' } : undefined}>{modeLabel}</span>
+              <span className="chip capitalize">{portfolio.risk_tolerance}</span>
+              <span className="text-xs theme-text-muted ml-1">Created {format(new Date(portfolio.created_at), 'd MMM yyyy')}</span>
             </div>
           </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Link to="/paper-orders" className="btn-secondary text-sm !py-2 !px-4">Orders</Link>
+            <Link to="/ai-trading" className="btn-secondary text-sm !py-2 !px-4">Settings</Link>
+            {pendingHere > 0 && (
+              <Link to="/ai-inbox" className="btn-primary text-sm !py-2 !px-4">Review {pendingHere} proposal{pendingHere === 1 ? '' : 's'}</Link>
+            )}
+            <button onClick={handleSyncBroker} disabled={syncingBroker} className="btn-secondary text-sm !py-2 !px-3 flex items-center gap-1.5"
+              title={brokerConnected ? `Reload from IBKR (${brokerEnv})` : 'Connect IBKR first'}>
+              {syncingBroker ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Link2 className="w-4 h-4" />} Refresh
+            </button>
+            <button onClick={openRebalanceDrawer} className="btn-secondary text-sm !py-2 !px-3 flex items-center gap-1.5">
+              <Send className="w-4 h-4" /> Rebalance
+            </button>
+            <button onClick={() => setShowAddModal(true)} disabled={atBroker} className="btn-secondary text-sm !py-2 !px-3 flex items-center gap-1.5"
+              title={atBroker ? 'This portfolio follows your IBKR fills; buy more with an order instead' : undefined}>
+              <Plus className="w-4 h-4" /> Add stock
+            </button>
+            <button onClick={() => setShowDeletePortfolioModal(true)} className="btn-secondary text-sm !py-2 !px-3 flex items-center gap-1.5 text-neg"
+              title="Delete this portfolio">
+              <Trash2 className="w-4 h-4" />
+            </button>
+          </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2 shrink-0">
-          <button
-            onClick={handleSyncBroker}
-            disabled={syncingBroker}
-            title={brokerConnected ? `Sync with IBKR (${brokerEnv})` : 'Connect IBKR first'}
-            className={`flex items-center gap-1.5 px-3 py-2 sm:px-4 sm:py-2.5 rounded-xl border font-medium transition-all duration-200 text-sm disabled:opacity-50 ${
-              brokerConnected
-                ? isDark
-                  ? 'bg-sky-500/10 hover:bg-sky-500/20 text-sky-300 border-sky-500/30 hover:border-sky-500/50'
-                  : 'bg-sky-50 hover:bg-sky-100 text-sky-700 border-sky-200 hover:border-sky-300'
-                : isDark
-                ? 'bg-slate-800/50 text-slate-500 border-slate-700/50'
-                : 'bg-slate-100 text-slate-500 border-slate-200'
-            }`}
-          >
-            {syncingBroker ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Link2 className="w-4 h-4" />}
-            <span className="hidden sm:inline">Refresh</span>
-          </button>
-          <button
-            onClick={openRebalanceDrawer}
-            className="flex items-center gap-1.5 px-3 py-2 sm:px-4 sm:py-2.5 bg-gradient-to-r from-emerald-500/15 to-sky-500/15 hover:from-emerald-500/25 hover:to-sky-500/25 text-emerald-400 hover:text-emerald-300 rounded-xl border border-emerald-500/30 hover:border-emerald-500/50 font-medium transition-all duration-200 text-sm"
-          >
-            <Send className="w-4 h-4" />
-            <span className="hidden sm:inline">Rebalance</span>
-          </button>
-          <button
-            onClick={() => setShowDeletePortfolioModal(true)}
-            className="flex items-center gap-1.5 px-3 py-2 sm:px-4 sm:py-2.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 rounded-xl border border-red-500/20 hover:border-red-500/40 font-medium transition-all duration-200 text-sm"
-          >
-            <Trash2 className="w-4 h-4" />
-            <span className="hidden sm:inline">Delete</span>
-          </button>
-          <button
-            onClick={() => setShowAddModal(true)}
-            className="btn-primary flex items-center gap-2 text-sm disabled:opacity-50"
-            disabled={atBroker}
-            title={atBroker ? 'This portfolio follows your IBKR fills; buy more with an order instead' : undefined}
-          >
-            <Plus className="w-4 h-4 sm:w-5 sm:h-5" />
-            <span>Add Stock</span>
-          </button>
+      </header>
+
+      {loadingPrices && (
+        <div className="flex items-center gap-2 text-sm theme-text-secondary">
+          <RefreshCw className="w-4 h-4 animate-spin" /> Fetching prices… {priceProgress.total > 0 ? `${priceProgress.done} / ${priceProgress.total}` : ''}
         </div>
+      )}
+      {summary && summary.prices_missing.length > 0 && (
+        <p className="text-sm flex items-center gap-2" style={{ color: 'var(--aud)' }} data-testid="prices-missing">
+          <AlertTriangle className="w-4 h-4" /> No current price for {summary.prices_missing.join(', ')} (Yahoo didn't answer).
+          Those holdings are valued at what they cost until a price comes back.
+        </p>
+      )}
+
+      <section aria-label="Key numbers" className="grid grid-cols-2 lg:grid-cols-5 gap-3" data-testid="portfolio-money">
+        {kpis.map((k) => (
+          <div key={k.label} className="stat-card !p-4 space-y-1">
+            <p className="text-xs theme-text-muted">{k.label}</p>
+            {loadingPrices && !summary ? <div className="h-7 w-24 rounded-lg loading-shimmer" /> : (
+              <p className="num text-xl font-semibold" style={{ color: k.color ?? 'var(--text-primary)' }}>{k.value}</p>
+            )}
+            <p className="num text-[11px]" style={{ color: k.subColor ?? 'var(--text-muted)' }}>{k.sub}</p>
+          </div>
+        ))}
+      </section>
+
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+        <div className="xl:col-span-2">
+          <GrowthCard history={history} failed={historyFailed} period={period} onPeriod={setPeriod}
+            valueNow={summary?.total_value ?? null} expectedReturn={Number(portfolio.expected_return || 0)} />
+        </div>
+        <PlanCard strategy={strategy} plan={plan} keepWithin={keepWithin} />
+      </div>
+
+      <section aria-label="Holdings" className="card !p-0 overflow-hidden">
+        <div className="flex items-center justify-between px-5 pt-5 pb-3">
+          <h2 className="text-base font-semibold theme-text">Holdings</h2>
+          <span className="text-xs theme-text-muted">
+            {holdingRows.length} stock{holdingRows.length === 1 ? '' : 's'}{!showAllHoldings && holdingRows.length > 8 ? ' · showing the 8 largest' : ''}
+          </span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-[11px] uppercase tracking-wider theme-text-muted border-b theme-border">
+                <th className="px-5 py-2 font-semibold">Stock</th>
+                <th className="py-2 font-semibold text-right">Shares</th>
+                <th className="py-2 font-semibold text-right">Price</th>
+                <th className="py-2 font-semibold text-right">Value</th>
+                <th className="py-2 pl-6 font-semibold">Weight</th>
+                <th className="py-2 font-semibold text-right">Gain</th>
+                {strategy === 'factor' && <th className="py-2 pl-4 font-semibold">Slice</th>}
+                <th className="py-2 pr-5 font-semibold text-right"><span className="sr-only">Actions</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              {shownHoldings.map(({ position, price, value, gainPct, weight, profile }) => {
+                const code = position.symbol.replace('.AX', '')
+                const planned = atBroker && position.planned_quantity != null && Number(position.quantity) < Number(position.planned_quantity)
+                return (
+                  <tr key={position.id} className="border-b theme-border last:border-b-0">
+                    <td className="px-5 py-3">
+                      <div className="flex items-center gap-3">
+                        <span className="num text-[10px] font-semibold w-10 h-8 rounded-lg flex items-center justify-center shrink-0 surface-2 theme-text">
+                          {code.slice(0, 4)}
+                        </span>
+                        <span className="min-w-0">
+                          <CompanyLink symbol={position.symbol} className="block text-sm theme-text truncate max-w-[220px]">
+                            {profile?.name ?? code}
+                          </CompanyLink>
+                          <span className="block text-xs theme-text-muted">{profile?.sector ?? code}</span>
+                        </span>
+                      </div>
+                    </td>
+                    <td className="py-3 text-right num theme-text">
+                      {atBroker ? Number(position.quantity).toFixed(0) : Number(position.quantity).toFixed(2)}
+                      {planned && (
+                        <span className="block text-[11px]" style={{ color: 'var(--aud)' }}>of {Number(position.planned_quantity)} planned
+                          {position.entry_state === 'waiting' ? ' · waiting for RSI dip' : position.entry_state === 'skipped' ? ' · skipped' : ''}</span>
+                      )}
+                    </td>
+                    <td className="py-3 text-right num theme-text-secondary">
+                      {price ? `${sym}${price.toFixed(2)}` : loadingPrices ? '…' : <span title="No current price from Yahoo">n/a</span>}
+                    </td>
+                    <td className="py-3 text-right num font-semibold theme-text">{money(value, currency, 0)}</td>
+                    <td className="py-3 pl-6">
+                      <span className="flex items-center gap-2">
+                        <span className="h-1.5 w-24 rounded-full overflow-hidden" style={{ background: 'var(--chip)' }}>
+                          <span className="block h-full rounded-full" style={{ width: `${(weight / maxWeight) * 100}%`, background: accent }} />
+                        </span>
+                        <span className="num text-xs theme-text-secondary w-12 text-right">{weight.toFixed(1)}%</span>
+                      </span>
+                    </td>
+                    <td className="py-3 text-right num" style={{ color: gainPct === null ? 'var(--text-muted)' : tone(gainPct) }}>
+                      {gainPct === null ? '—' : arrowPct(gainPct)}
+                    </td>
+                    {strategy === 'factor' && <td className="py-3 pl-4 text-xs theme-text-secondary">{sliceOf(position.symbol)}</td>}
+                    <td className="py-3 pr-5 text-right">
+                      {!atBroker && (
+                        <span className="inline-flex gap-1">
+                          <button onClick={() => openEditModal(position)} className="p-1.5 rounded theme-text-muted nav-hover" title="Edit position">
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button onClick={() => openDeleteModal(position)} className="p-1.5 rounded theme-text-muted nav-hover" title="Remove position">
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+        {holdingRows.length > 8 && (
+          <div className="px-5 py-3 border-t theme-border">
+            <button type="button" className="text-sm font-medium theme-text-secondary hover:underline" onClick={() => setShowAllHoldings(!showAllHoldings)}>
+              {showAllHoldings ? 'Show the 8 largest' : `Show all ${holdingRows.length}`}
+            </button>
+          </div>
+        )}
+      </section>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <section aria-label="Sectors" className="card space-y-3">
+          <h2 className="text-base font-semibold theme-text">Where the money is</h2>
+          {sectors.length === 0 ? <p className="text-sm theme-text-muted">Nothing held yet.</p> : sectors.map((x) => (
+            <div key={x.name} className="grid grid-cols-[minmax(0,9rem)_1fr_3rem] items-center gap-3 text-sm">
+              <span className="theme-text-secondary truncate">{x.name}</span>
+              <span className="h-2 rounded-full overflow-hidden" style={{ background: 'var(--chip)' }}>
+                <span className="block h-full rounded-full" style={{ width: `${(x.pct / maxSector) * 100}%`, background: x.name === 'Cash' ? 'var(--text-muted)' : accent }} />
+              </span>
+              <span className="num text-xs text-right theme-text">{x.pct.toFixed(0)}%</span>
+            </div>
+          ))}
+        </section>
+
+        <section aria-label="Recent activity" className="card space-y-2">
+          <h2 className="text-base font-semibold theme-text">Recent activity</h2>
+          {transactions.length === 0 ? <p className="text-sm theme-text-muted py-2">No trades yet.</p> : transactions.slice(0, 6).map((txn) => {
+            const buy = txn.txn_type === 'buy'
+            const qty = Number(txn.quantity)
+            return (
+              <div key={txn.id} className="flex items-center gap-3 py-2 border-b theme-border last:border-b-0">
+                <span className="num text-[10px] font-semibold px-2 py-1 rounded-md shrink-0"
+                  style={{ background: buy ? 'var(--pos-tint)' : 'var(--neg-tint)', color: buy ? 'var(--pos)' : 'var(--neg)' }}>
+                  {txn.txn_type.toUpperCase()}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm theme-text truncate">
+                    {buy ? 'Bought' : 'Sold'} {Number.isInteger(qty) ? qty : qty.toFixed(2)} {txn.symbol.replace('.AX', '')} at {sym}{Number(txn.price).toFixed(2)}
+                  </p>
+                  <p className="text-xs theme-text-muted truncate">
+                    {format(new Date(txn.txn_time), 'd MMM, h:mm a')}
+                    {atBroker ? ` · filled at IBKR (${portfolio.trading_environment})` : ' · recorded in Sapient'}
+                    {txn.notes ? ` · ${txn.notes}` : ''}
+                  </p>
+                </div>
+                <span className="num text-sm theme-text">{money(Number(txn.total_amount), currency, 0)}</span>
+              </div>
+            )
+          })}
+        </section>
       </div>
 
       {/* AI Trading Mode + Broker Status row */}
@@ -589,239 +786,7 @@ export default function PortfolioDetail() {
         </div>
       )}
 
-      {/* Live price loading banner */}
-      {loadingPrices && (
-        <div className={`flex items-center gap-3 px-4 py-3 rounded-xl border ${
-          isDark
-            ? 'bg-sky-500/10 border-sky-500/30 text-sky-300'
-            : 'bg-sky-50 border-sky-200 text-sky-700'
-        }`}>
-          <RefreshCw className="w-4 h-4 animate-spin shrink-0" />
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium">Fetching live prices…</p>
-            {priceProgress.total > 0 && (
-              <div className="flex items-center gap-2 mt-1">
-                <div className={`flex-1 h-1.5 rounded-full ${isDark ? 'bg-slate-700' : 'bg-sky-100'}`}>
-                  <div
-                    className="h-1.5 rounded-full bg-gradient-to-r from-sky-500 to-indigo-500 transition-all duration-500"
-                    style={{ width: `${(priceProgress.done / priceProgress.total) * 100}%` }}
-                  />
-                </div>
-                <span className="text-xs shrink-0 tabular-nums">
-                  {priceProgress.done} / {priceProgress.total}
-                </span>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {summary && summary.prices_missing.length > 0 && (
-        <p className="text-sm text-amber-600 flex items-center gap-2" data-testid="prices-missing">
-          <AlertTriangle className="w-4 h-4" /> No current price for {summary.prices_missing.join(', ')} (Yahoo didn't answer).
-          Those holdings are valued at what they cost until a price comes back.
-        </p>
-      )}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4" data-testid="portfolio-money">
-        <div className="stat-card">
-          <p className="text-sm theme-text-secondary">Money put in</p>
-          <p className="stat-value mt-1">
-            {summary ? money(summary.money_put_in, summary.currency, 0) : `$${costBasis.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
-          </p>
-          <p className="text-xs theme-text-muted mt-1">Holdings cost {summary ? money(summary.cost_of_holdings, summary.currency, 0) : '…'}</p>
-        </div>
-        <div className="stat-card">
-          <p className="text-sm theme-text-secondary">Value now (incl. cash)</p>
-          {loadingPrices ? <div className="mt-2 h-8 w-28 rounded-lg loading-shimmer" /> : (
-            <>
-              <p className="stat-value mt-1">
-                {summary ? money(summary.total_value, summary.currency, 0) : `$${totalValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
-              </p>
-              {summary && <p className="text-xs theme-text-muted mt-1">Shares {money(summary.market_value, summary.currency, 0)}</p>}
-            </>
-          )}
-        </div>
-        <div className="stat-card">
-          <p className="text-sm theme-text-secondary">Total return</p>
-          {loadingPrices ? <div className="mt-2 h-8 w-24 rounded-lg loading-shimmer" /> : (
-            <p className={"stat-value mt-1"} style={{ color: totalReturn >= 0 ? 'var(--pos)' : 'var(--neg)' }}>
-              {totalReturn >= 0 ? '▲ +' : '▼ '}{totalReturnPct.toFixed(2)}%
-            </p>
-          )}
-          {summary && !loadingPrices && (
-            <p className="text-xs theme-text-muted mt-1">
-              {money(summary.total_return, summary.currency, 0)} · sold {money(summary.realised_pnl, summary.currency, 0)}
-              {summary.fees > 0 ? ` · fees ${money(summary.fees, summary.currency, 0)}` : ''}
-            </p>
-          )}
-        </div>
-        <div className="stat-card">
-          <p className="text-sm theme-text-secondary">Cash</p>
-          <p className="stat-value mt-1" style={summary && summary.cash < 0 ? { color: 'var(--neg)' } : undefined}>
-            {summary ? money(summary.cash, summary.currency, 0) : '…'}
-          </p>
-          <p className="text-xs theme-text-muted mt-1">Not yet invested, or from sales</p>
-        </div>
-      </div>
-
-      <GrowthCard history={history} failed={historyFailed} period={period} onPeriod={setPeriod}
-        valueNow={summary?.total_value ?? null} expectedReturn={Number(portfolio.expected_return || 0)} />
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 card">
-          <h2 className={`text-lg font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'} mb-4`}>Positions</h2>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className={`text-left text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'} border-b ${isDark ? 'border-slate-700/50' : 'border-slate-200'}`}>
-                  <th className="pb-3 font-medium">Symbol</th>
-                  <th className="pb-3 font-medium">Quantity</th>
-                  <th className="pb-3 font-medium">Avg Cost</th>
-                  <th className="pb-3 font-medium">Current</th>
-                  <th className="pb-3 font-medium">Value</th>
-                  <th className="pb-3 font-medium">P/L</th>
-                  <th className="pb-3 font-medium text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {positions.filter(p => p.status === 'active')
-                  // 0 shares and nothing planned: a stock this portfolio no longer holds or wants (e.g. after a sale).
-                  .filter(p => Number(p.quantity) > 0 || Number(p.planned_quantity ?? 0) > 0 || !atBroker)
-                  .map((position) => {
-                  const priceMissing = !currentPrices[position.symbol]
-                  const currentPrice = currentPrices[position.symbol] || Number(position.avg_cost)
-                  const marketValue = currentPrice * Number(position.quantity)
-                  const costBasis = Number(position.avg_cost) * Number(position.quantity)
-                  const pl = marketValue - costBasis
-                  const plPct = costBasis > 0 ? (pl / costBasis) * 100 : 0
-
-                  return (
-                    <tr key={position.id} className={`border-b ${isDark ? 'border-slate-700/50' : 'border-slate-200'} last:border-b-0 ${isDark ? 'bg-slate-800/30 hover:bg-slate-700/30' : 'bg-slate-50 hover:bg-slate-100'} transition-colors`}>
-                      <td className="py-3 theme-text">
-                        <CompanyLink symbol={position.symbol} />
-                        {summary && summary.total_value > 0 && (() => {
-                          const w = (summary.holdings.find((h) => h.symbol === position.symbol)?.value ?? 0) / summary.total_value * 100
-                          return (
-                            <span className="flex items-center gap-1.5 mt-1" title="Share of the portfolio's value">
-                              <span className="h-1 w-16 rounded-full overflow-hidden" style={{ background: 'var(--chip)' }}>
-                                <span className="block h-full" style={{ width: `${Math.min(100, w)}%`, background: summary.currency === 'USD' ? 'var(--usd)' : 'var(--aud)' }} />
-                              </span>
-                              <span className="num text-[11px] theme-text-muted">{w.toFixed(1)}%</span>
-                            </span>
-                          )
-                        })()}
-                      </td>
-                      <td className={`py-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                        {atBroker ? Number(position.quantity).toFixed(0) : Number(position.quantity).toFixed(2)}
-                        {atBroker && position.planned_quantity != null && Number(position.quantity) < Number(position.planned_quantity) && (
-                          <span className="block text-xs text-amber-600">of {Number(position.planned_quantity)} planned
-                            {position.entry_state === 'waiting' ? ' · waiting for RSI dip' : position.entry_state === 'skipped' ? ' · skipped (no dip)' : ''}</span>
-                        )}
-                      </td>
-                      <td className={`py-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>${Number(position.avg_cost).toFixed(2)}</td>
-                      <td className={`py-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                        {priceMissing && !loadingPrices ? <span className="text-amber-600" title="No current price from Yahoo">n/a</span> : `$${currentPrice.toFixed(2)}`}
-                      </td>
-                      <td className={`py-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>${marketValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
-                      <td className={`py-3 font-medium ${pl >= 0 ? 'text-emerald-400' : 'text-red-400'}`} style={{ textShadow: pl >= 0 ? '0 0 10px rgba(52, 211, 153, 0.3)' : '0 0 10px rgba(248, 113, 113, 0.3)' }}>
-                        {pl >= 0 ? '+' : ''}{plPct.toFixed(2)}%
-                      </td>
-                      <td className="py-3 text-right">
-                        {atBroker ? <span className="text-xs theme-text-muted">at IBKR</span> : (
-                        <div className="flex items-center justify-end gap-1">
-                          <button
-                            onClick={() => openEditModal(position)}
-                            className={`p-1.5 ${isDark ? 'text-slate-400' : 'text-slate-600'} hover:text-sky-400 hover:bg-sky-500/20 rounded transition-colors`}
-                            title="Edit position"
-                          >
-                            <Pencil className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={() => openDeleteModal(position)}
-                            className={`p-1.5 ${isDark ? 'text-slate-400' : 'text-slate-600'} hover:text-red-400 hover:bg-red-500/20 rounded transition-colors`}
-                            title="Remove position"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                        )}
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <div className="card">
-          <h2 className={`text-lg font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'} mb-4`}>Allocation</h2>
-          {chartData.length > 0 && (
-            <ResponsiveContainer width="100%" height={250}>
-              <PieChart>
-                <Pie
-                  data={chartData}
-                  dataKey="value"
-                  nameKey="name"
-                  cx="50%"
-                  cy="50%"
-                  outerRadius={80}
-                >
-                  {chartData.map((_, index) => (
-                    <Cell key={index} fill={COLORS[index % COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip 
-                  formatter={(value: number) => `$${value.toLocaleString()}`}
-                  contentStyle={tooltipStyle}
-                />
-                <Legend 
-                  formatter={(value) => <span style={{ color: legendColor }}>{value}</span>}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-          )}
-        </div>
-      </div>
-
       {id && <BrokerCompareCard portfolioId={Number(id)} />}
-
-      <div className="card">
-        <h2 className={`text-lg font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'} mb-4`}>Recent Transactions</h2>
-        {transactions.length === 0 ? (
-          <p className="text-slate-500 text-center py-4">No transactions yet</p>
-        ) : (
-          <div className="space-y-3">
-            {transactions.slice(0, 10).map((txn) => (
-              <div key={txn.id} className={`flex items-center justify-between p-3 ${isDark ? 'bg-slate-800/30' : 'bg-slate-50'} rounded-lg border ${isDark ? 'border-slate-700/50' : 'border-slate-200'} ${isDark ? 'hover:bg-slate-700/30' : 'hover:bg-slate-100'} transition-colors`}>
-                <div className="flex items-center gap-3">
-                  <div className={`p-2 rounded border ${
-                    txn.txn_type === 'buy' ? 'bg-emerald-500/20 border-emerald-500/30' : 'bg-red-500/20 border-red-500/30'
-                  }`}>
-                    <DollarSign className={`w-4 h-4 ${
-                      txn.txn_type === 'buy' ? 'text-emerald-400' : 'text-red-400'
-                    }`} />
-                  </div>
-                  <div>
-                    <p className={`font-medium ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
-                      {txn.txn_type.toUpperCase()} {txn.symbol.replace('.AX', '')}
-                    </p>
-                    <p className="text-sm text-slate-500">
-                      {Number(txn.quantity).toFixed(2)} @ ${Number(txn.price).toFixed(2)}
-                    </p>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <p className={`font-medium ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>${Number(txn.total_amount).toLocaleString()}</p>
-                  <p className="text-sm text-slate-500">
-                    {format(new Date(txn.txn_time), 'MMM d, h:mm a')}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
 
       {showEditModal && editingPosition && (
         <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: 'rgba(0, 0, 0, 0.7)', backdropFilter: 'blur(4px)' }}>
@@ -1211,13 +1176,24 @@ export default function PortfolioDetail() {
   )
 }
 
-/** Value since the start, with the original forecast as a dashed line, so you can see how closely it is tracking. */
+/** Change since the previous trading day's close (null without two days of values). */
+function dayChange(points: ValuePoint[]) {
+  if (points.length < 2) return null
+  const now = points[points.length - 1].value
+  const before = points[points.length - 2].value
+  return { amount: now - before, pct: before > 0 ? ((now - before) / before) * 100 : 0 }
+}
+
+const PORTFOLIO_PERIODS: Period[] = ['1W', '1M', '3M', 'All']
+
+/** Value since the start against the market index and the original forecast, so you can see how closely it is tracking. */
 function GrowthCard({ history, failed, period, onPeriod, valueNow, expectedReturn }: {
   history: ValueHistory | null; failed: boolean; period: Period; onPeriod: (p: Period) => void
   valueNow: number | null; expectedReturn: number
 }) {
   const currency = history?.currency ?? 'AUD'
   const color = currency === 'USD' ? 'var(--usd)' : 'var(--aud)'
+  const benchName = history?.benchmark_name ?? (currency === 'USD' ? 'S&P 500' : 'ASX 200')
   const tracking = (() => {
     if (!history || history.money_put_in <= 0) return null
     const lastDay = history.points[history.points.length - 1]?.date ?? history.start
@@ -1227,51 +1203,135 @@ function GrowthCard({ history, failed, period, onPeriod, valueNow, expectedRetur
     if (actual == null) return null
     return { forecastNow, actual, gap: actual - forecastNow }
   })()
+  // Growth over the chosen period, for the legend chips.
+  const change = (points: ValuePoint[]) => {
+    const from = periodStart(period)
+    const inside = points.filter((p) => p.date >= from)
+    if (inside.length < 2 || inside[0].value <= 0) return null
+    return (inside[inside.length - 1].value / inside[0].value - 1) * 100
+  }
+  const mine = history ? change(history.points) : null
+  const market = history ? change(history.benchmark ?? []) : null
+  const chip = (v: number | null) => v === null ? '—' : `${v >= 0 ? '▲ +' : '▼ -'}${Math.abs(v).toFixed(1)}%`
   const series = history ? [
-    { key: 'value', label: 'Value', color, points: history.points },
-    { key: 'forecast', label: 'Original forecast', color: 'var(--text-secondary)', points: history.forecast, dashed: true },
-    { key: 'invested', label: 'Money put in', color: 'var(--border-hover)', points: history.points.map((p) => ({ date: p.date, value: p.invested })), flat: true },
+    { key: 'value', label: 'This portfolio', color, points: history.points },
+    { key: 'bench', label: benchName, color: 'var(--text-muted)', points: history.benchmark ?? [], dashed: true },
+    { key: 'forecast', label: 'Original forecast', color: 'var(--usd)', points: history.forecast, dashed: true },
   ] : []
-  // Show the forecast a little past today so you can see where it is heading.
-  const until = history?.forecast.length ? history.forecast[history.forecast.length - 1].date : undefined
+  // The forecast line stops at today, so the real history keeps the whole width.
+  const until = history?.points.length ? history.points[history.points.length - 1].date : undefined
   return (
-    <div className="card space-y-4" data-testid="growth-card">
+    <section aria-label="Growth" className="card space-y-4 h-full" data-testid="growth-card">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-base font-semibold theme-text">Value vs original forecast</h2>
-          {tracking && (
-            <p className="text-sm theme-text-secondary mt-1">
-              Now <span className="num font-semibold theme-text">{money(tracking.actual, currency, 0)}</span>
-              {' · '}forecast for today <span className="num">{money(tracking.forecastNow, currency, 0)}</span>
-              {' · '}
-              <span className={`num font-semibold ${tracking.gap >= 0 ? 'text-pos' : 'text-neg'}`}>
-                {tracking.gap >= 0 ? '▲ ' : '▼ '}{money(Math.abs(tracking.gap), currency, 0)} {tracking.gap >= 0 ? 'ahead' : 'behind'}
-              </span>
-            </p>
-          )}
+          <h2 className="text-base font-semibold theme-text">Growth vs the {benchName} and the forecast</h2>
+          <p className="text-xs theme-text-muted">Value of shares + cash since the portfolio was bought</p>
         </div>
         <div className="seg" role="group" aria-label="Period">
-          {PERIODS.map((p) => (
+          {PORTFOLIO_PERIODS.map((p) => (
             <button key={p} type="button" aria-pressed={period === p} onClick={() => onPeriod(p)}>{p}</button>
           ))}
         </div>
       </div>
-      {failed ? <p className="text-sm theme-text-muted py-10 text-center">Couldn't rebuild the history right now (Yahoo didn't answer).</p>
-        : !history ? <div className="h-[280px] rounded-xl loading-shimmer" />
-        : <ValueChart series={series} period={period} prefix={currency === 'USD' ? 'US$' : 'A$'} height={280} until={until} />}
       <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs theme-text-secondary">
-        <span className="flex items-center gap-2"><span className="w-5 h-0.5 rounded" style={{ background: color }} /> Value (shares + cash)</span>
-        <span className="flex items-center gap-2">
-          <span className="w-5 border-t-2 border-dashed" style={{ borderColor: 'var(--text-secondary)' }} />
-          Original forecast ({(expectedReturn * 100).toFixed(1)}% a year)
-        </span>
-        <span className="flex items-center gap-2"><span className="w-5 h-0.5 rounded" style={{ background: 'var(--border-hover)' }} /> Money put in</span>
+        <span className="flex items-center gap-2"><span className="w-4 h-0.5 rounded" style={{ background: color }} />
+          This portfolio <strong className="num" style={{ color: mine === null ? undefined : mine >= 0 ? 'var(--pos)' : 'var(--neg)' }}>{chip(mine)}</strong></span>
+        <span className="flex items-center gap-2"><span className="w-4 border-t-2 border-dashed" style={{ borderColor: 'var(--text-muted)' }} />
+          {benchName} <strong className="num" style={{ color: market === null ? undefined : market >= 0 ? 'var(--pos)' : 'var(--neg)' }}>{chip(market)}</strong></span>
+        <span className="flex items-center gap-2"><span className="w-4 border-t-2 border-dashed" style={{ borderColor: 'var(--usd)' }} />
+          Original forecast <span className="num">({(expectedReturn * 100).toFixed(1)}% a year)</span></span>
       </div>
-      <p className="text-xs theme-text-muted">
-        The forecast is the yearly return the optimiser expected when you built this portfolio, worked out from the
-        past two years of prices. It is usually optimistic: treat it as a yardstick, not a promise.
-        {history?.missing_prices.length ? ` No price history for ${history.missing_prices.join(', ')}.` : ''}
+      {tracking && (
+        <p className="text-sm theme-text-secondary">
+          Now <span className="num font-semibold theme-text">{money(tracking.actual, currency, 0)}</span>
+          {' · '}forecast for today <span className="num">{money(tracking.forecastNow, currency, 0)}</span>
+          {' · '}
+          <span className="num font-semibold" style={{ color: tracking.gap >= 0 ? 'var(--pos)' : 'var(--neg)' }}>
+            {tracking.gap >= 0 ? '▲ ' : '▼ '}{money(Math.abs(tracking.gap), currency, 0)} {tracking.gap >= 0 ? 'ahead of' : 'behind'} the forecast
+          </span>
+        </p>
+      )}
+      {failed ? <p className="text-sm theme-text-muted py-10 text-center">Couldn't rebuild the history right now (Yahoo didn't answer).</p>
+        : !history ? <div className="h-[260px] rounded-xl loading-shimmer" />
+        : <ValueChart series={series} period={period} prefix={currency === 'USD' ? 'US$' : 'A$'} height={260}
+            until={until} />}
+      <p className="text-[11px] theme-text-muted">
+        The {benchName} line shows what the same money would have done in the index. The forecast is the yearly return the
+        optimiser expected when you built this portfolio, from the past two years of prices: usually optimistic, a yardstick
+        rather than a promise.{history?.missing_prices.length ? ` No price history for ${history.missing_prices.join(', ')}.` : ''}
       </p>
-    </div>
+    </section>
+  )
+}
+
+const monthName = (ym: string, add: number) => {
+  const [y, m] = ym.split('-').map(Number)
+  return new Date(y, m - 1 + add, 1).toLocaleDateString(undefined, { month: 'short' })
+}
+
+/** Model B: the three slices, which was reviewed last and which is next. Simple rules: what the rules do. */
+function PlanCard({ strategy, plan, keepWithin }: { strategy: 'rules' | 'factor'; plan: FactorPlan | null; keepWithin: number }) {
+  if (strategy !== 'factor') {
+    return (
+      <section aria-label="How it's managed" className="card space-y-3">
+        <h2 className="text-base font-semibold theme-text">Simple rules</h2>
+        <p className="text-xs theme-text-muted">How AI Trading looks after this portfolio at its two checks each trading day.</p>
+        {[
+          'Buys a little when RSI(14) says a stock is oversold (with MACD agreeing).',
+          'Sells some when RSI says it is overbought.',
+          'Stop-loss and take-profit come from AI Settings.',
+        ].map((t, i) => (
+          <div key={t} className="flex gap-3 rounded-xl p-3 surface-2 text-sm theme-text-secondary">
+            <span className="num w-6 h-6 shrink-0 rounded-md flex items-center justify-center text-xs font-semibold" style={{ background: 'var(--chip)' }}>{i + 1}</span>
+            {t}
+          </div>
+        ))}
+        <Link to="/ai-trading" className="text-sm font-medium theme-text-secondary hover:underline">Change the rules in AI Settings</Link>
+      </section>
+    )
+  }
+  const slices = plan?.slices ?? {}
+  const reviewed = plan && !plan.adopted ? plan.slice ?? 0 : null
+  const next = reviewed === null ? 0 : (reviewed + 1) % 3
+  const stocksIn = (k: number) => {
+    const list = Object.entries(slices).filter(([, v]) => v === k).map(([sym]) => sym.replace('.AX', ''))
+    return list.length ? `${list.slice(0, 4).join(', ')}${list.length > 4 ? ` + ${list.length - 4}` : ''}` : 'No stocks yet'
+  }
+  return (
+    <section aria-label="Model B plan" className="card space-y-3" data-testid="model-b-plan">
+      <div>
+        <h2 className="text-base font-semibold theme-text">Model B plan</h2>
+        <p className="text-xs theme-text-muted">A third of the portfolio is re-checked each month, so every stock is reviewed once a quarter.</p>
+      </div>
+      {!plan ? <p className="text-sm theme-text-muted">The plan is made at the next scheduled check (AI Trading must be on).</p> : [0, 1, 2].map((k) => {
+        const done = k === reviewed
+        const isNext = k === next
+        const monthsAhead = (k - next + 3) % 3 + 1
+        const title = done ? `Slice ${k + 1} · reviewed ${monthName(plan.month, 0)}` : `Slice ${k + 1} · due early ${monthName(plan.month, monthsAhead)}`
+        return (
+          <div key={k} className="flex items-center gap-3 rounded-xl p-3 border"
+            style={{ background: isNext ? 'var(--aud-tint)' : 'var(--surface-2)', borderColor: isNext ? 'var(--aud)' : 'var(--border-color)' }}>
+            <span className="num w-7 h-7 shrink-0 rounded-lg flex items-center justify-center text-xs font-semibold"
+              style={done ? { background: 'var(--pos-tint)', color: 'var(--pos)' } : isNext ? { background: 'var(--aud)', color: 'var(--on-ink)' } : { background: 'var(--chip)', color: 'var(--text-muted)' }}>
+              {k + 1}
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold theme-text">{title}</p>
+              <p className="text-xs theme-text-muted truncate">{stocksIn(k)}</p>
+            </div>
+            <span className="text-xs font-semibold" style={{ color: done ? 'var(--pos)' : isNext ? 'var(--aud)' : 'var(--text-muted)' }}>
+              {done ? 'Done ✓' : isNext ? 'Next' : 'Later'}
+            </span>
+          </div>
+        )
+      })}
+      {plan && Object.keys(plan.building ?? {}).length > 0 && (
+        <p className="text-xs theme-text-secondary">Still to buy in later months: {Object.keys(plan.building ?? {}).map((x) => x.replace('.AX', '')).join(', ')}.</p>
+      )}
+      <div className="text-xs theme-text-muted space-y-1 pt-2 border-t theme-border">
+        <p>Sells a stock once it drops out of the top {keepWithin}.</p>
+        <p>No stop-loss or take-profit: winners are left to run.</p>
+      </div>
+    </section>
   )
 }

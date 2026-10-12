@@ -67,7 +67,7 @@ class ProfileTests(unittest.TestCase):
 
         class Fake:
             def __init__(self, symbol):
-                self.info = {"shortName": "BHP Group", "sector": "Basic Materials"} if symbol == "BHP.AX" else {}
+                self.info = {"shortName": "BHP GROUP FPO [BHP]", "longName": "BHP Group Limited", "sector": "Basic Materials"} if symbol == "BHP.AX" else {}
         with mock.patch.object(stocks.yf, "Ticker", Fake):
             out = stocks.company_profiles(["BHP.AX", "XYZ.AX"])
         self.assertEqual(out["BHP.AX"], {"name": "BHP Group", "sector": "Basic Materials"})
