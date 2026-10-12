@@ -46,6 +46,14 @@ the guide before guessing how TWS behaves.
     ticks). 0.12.2 counted those as prices and stopped waiting, so ASX orders said
     "no price"; since 0.12.3 only positive prices count. The connector log records
     every price TWS sent for each order ("Prices for KAR (ASX, …)").
+  - On the user's paper TWS (12 Oct 2026) ASX streams answered only 10167
+    ("Displaying delayed market data") twice and then **no ticks and no
+    marketDataType at all**, while US streams worked. Since 0.13.0, when the delayed
+    stream gives nothing (10 s), Sapient asks for today's 1-minute TRADES bars
+    (`reqHistoricalData(..., "1 D", "1 min", "TRADES", useRTH=1)`, read-only,
+    delayed data allowed per *doc/market-data-delayed/introduction*) and uses the
+    latest bar's close, with the same Yahoo gap check. The bar time is kept in the
+    order's quote.
   - Real-time requests (live) still snapshot first and fall back to the same
     stream if the snapshot is empty or doesn't end within 15 seconds.
   - Message **10167** ("Requested market data is not subscribed. Displaying

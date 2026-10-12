@@ -1,14 +1,15 @@
 import { useEffect, useState } from 'react'
 import FactorStrategy from '../components/FactorStrategy'
 import { useParams, Link, useNavigate } from 'react-router-dom'
-import { portfolioApi, stocksApi, brokerApi, aiApi, apiErrorMessage, money, PortfolioSummary, RebalancePlan } from '../lib/api'
+import { portfolioApi, stocksApi, brokerApi, aiApi, apiErrorMessage, money, PortfolioSummary, RebalancePlan, type ValueHistory } from '../lib/api'
 import { Portfolio, Position, Transaction } from '../types'
 import { toast } from 'sonner'
-import { ArrowLeft, TrendingUp, TrendingDown, DollarSign, Pencil, Trash2, Plus, X, Search, RefreshCw, Sparkles, Send, Zap, Activity, Link2, AlertTriangle } from 'lucide-react'
+import { ArrowLeft, DollarSign, Pencil, Trash2, Plus, X, Search, RefreshCw, Sparkles, Send, Zap, Activity, Link2, AlertTriangle } from 'lucide-react'
 import BrokerCompareCard from '../components/BrokerCompareCard'
 import { format } from 'date-fns'
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, LineChart, Line, XAxis, YAxis, CartesianGrid } from 'recharts'
-import { differenceInDays } from 'date-fns'
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts'
+import ValueChart, { PERIODS, type Period } from '../components/ValueChart'
+import { CompanyLink } from '../components/CompanyPanel'
 import { useTheme } from '../lib/theme'
 
 const COLORS = ['#0ea5e9', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#6366f1', '#14b8a6']
@@ -69,6 +70,9 @@ export default function PortfolioDetail() {
   const [executingRebalance, setExecutingRebalance] = useState(false)
   const [rebalanceKey, setRebalanceKey] = useState('')
   const [summary, setSummary] = useState<PortfolioSummary | null>(null)
+  const [history, setHistory] = useState<ValueHistory | null>(null)
+  const [historyFailed, setHistoryFailed] = useState(false)
+  const [period, setPeriod] = useState<Period>('All')
 
   const [showAddModal, setShowAddModal] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -188,6 +192,8 @@ export default function PortfolioDetail() {
     try {
       const response = await portfolioApi.detail(Number(id))
       setData(response.data)
+      portfolioApi.history(Number(id)).then((r) => { setHistory(r.data); setHistoryFailed(false) })
+        .catch(() => setHistoryFailed(true))
       setAiMode(response.data.portfolio?.ai_mode || 'off')
       setStrategy(response.data.portfolio?.strategy === 'factor' ? 'factor' : 'rules')
 
@@ -415,51 +421,6 @@ export default function PortfolioDetail() {
   const totalReturn = summary ? summary.total_return : totalValue - costBasis
   const totalReturnPct = summary ? summary.total_return_pct : costBasis > 0 ? ((totalValue - costBasis) / costBasis) * 100 : 0
 
-  const generateGrowthData = () => {
-    // Starts at the money put in and ends at today's value including cash (the same figures as the cards above).
-    const initial = summary ? summary.money_put_in : Number(portfolio.initial_investment)
-    const valueNow = summary ? summary.total_value : totalValue
-    const expectedReturn = Number(portfolio.expected_return || 0.10)
-    const createdAt = new Date(portfolio.created_at)
-    const daysSinceCreation = Math.max(differenceInDays(new Date(), createdAt), 0)
-    const projectionDays = Math.max(daysSinceCreation, 365)
-    const dailyRate = expectedReturn / 365
-    const expectedAt = (day: number) => Math.round(initial * (1 + dailyRate * day))
-
-    const snapshotMap = new Map<string, number>()
-    data?.snapshots?.forEach((s: Record<string, unknown>) => {
-      snapshotMap.set(format(new Date(s.snapshot_date as string), 'MMM d, yyyy'), Number(s.total_value))
-    })
-
-    const interval = Math.max(1, Math.floor(projectionDays / 12))
-    const points: { day: number; date: string; expected: number; actual: number | null }[] = []
-    for (let day = 0; day <= projectionDays; day += interval) {
-      const date = new Date(createdAt)
-      date.setDate(date.getDate() + day)
-      const recorded = day > 0 && day < daysSinceCreation ? snapshotMap.get(format(date, 'MMM d, yyyy')) ?? null : null
-      points.push({ day, date: format(date, 'MMM yyyy'), expected: expectedAt(day), actual: day === 0 ? Math.round(initial) : recorded })
-    }
-    // Today gets its own point, labelled as such, instead of borrowing the next month's slot.
-    const today = { day: daysSinceCreation, date: 'Today', expected: expectedAt(daysSinceCreation), actual: Math.round(valueNow) }
-    const after = points.findIndex((p) => p.day > daysSinceCreation)
-    points.splice(after === -1 ? points.length : Math.max(after, 1), 0, today)
-    return points.filter((p) => p.date === 'Today' || p.day === 0 || p.day !== daysSinceCreation)
-  }
-
-  const growthChartData = generateGrowthData()
-  
-  const chartYDomain = (() => {
-    const values = growthChartData.flatMap(d => [d.expected, d.actual].filter(v => v !== null)) as number[]
-    if (values.length === 0) return [0, 100000]
-    const min = Math.min(...values)
-    const max = Math.max(...values)
-    const padding = (max - min) * 0.1 || max * 0.1
-    return [Math.floor((min - padding) / 1000) * 1000, Math.ceil((max + padding) / 1000) * 1000]
-  })()
-
-  const gridStroke = isDark ? '#334155' : '#e2e8f0'
-  const axisStroke = isDark ? '#475569' : '#94a3b8'
-  const tickFill = isDark ? '#94a3b8' : '#64748b'
   const legendColor = isDark ? '#94a3b8' : '#64748b'
 
   return (
@@ -661,121 +622,50 @@ export default function PortfolioDetail() {
           Those holdings are valued at what they cost until a price comes back.
         </p>
       )}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4" data-testid="portfolio-money">
-        <div className="card">
-          <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Money put in</p>
-          <p className={`text-2xl font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4" data-testid="portfolio-money">
+        <div className="stat-card">
+          <p className="text-sm theme-text-secondary">Money put in</p>
+          <p className="stat-value mt-1">
             {summary ? money(summary.money_put_in, summary.currency, 0) : `$${costBasis.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
           </p>
-          <p className="text-xs theme-text-muted">Holdings cost {summary ? money(summary.cost_of_holdings, summary.currency, 0) : '…'}</p>
+          <p className="text-xs theme-text-muted mt-1">Holdings cost {summary ? money(summary.cost_of_holdings, summary.currency, 0) : '…'}</p>
         </div>
-        <div className="card">
-          <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Value now (incl. cash)</p>
-          {loadingPrices ? (
-            <div className="mt-2 space-y-1.5">
-              <div className="animate-pulse h-8 w-28 rounded-lg bg-slate-500/20" />
-              <p className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Loading live data…</p>
-            </div>
-          ) : (
+        <div className="stat-card">
+          <p className="text-sm theme-text-secondary">Value now (incl. cash)</p>
+          {loadingPrices ? <div className="mt-2 h-8 w-28 rounded-lg loading-shimmer" /> : (
             <>
-              <p className={`text-2xl font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+              <p className="stat-value mt-1">
                 {summary ? money(summary.total_value, summary.currency, 0) : `$${totalValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
               </p>
-              {summary && <p className="text-xs theme-text-muted">Shares {money(summary.market_value, summary.currency, 0)}</p>}
+              {summary && <p className="text-xs theme-text-muted mt-1">Shares {money(summary.market_value, summary.currency, 0)}</p>}
             </>
           )}
         </div>
-        <div className="card">
-          <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Total Return</p>
-          {loadingPrices ? (
-            <div className="mt-2 space-y-1.5">
-              <div className="animate-pulse h-8 w-24 rounded-lg bg-slate-500/20" />
-              <p className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Loading live data…</p>
-            </div>
-          ) : (
-            <p className={`text-2xl font-bold flex items-center gap-1 ${
-              totalReturn >= 0 ? 'text-emerald-400' : 'text-red-400'
-            }`} style={{ textShadow: totalReturn >= 0 ? '0 0 15px rgba(52, 211, 153, 0.4)' : '0 0 15px rgba(248, 113, 113, 0.4)' }}>
-              {totalReturn >= 0 ? <TrendingUp className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />}
-              {totalReturn >= 0 ? '+' : ''}{totalReturnPct.toFixed(2)}%
+        <div className="stat-card">
+          <p className="text-sm theme-text-secondary">Total return</p>
+          {loadingPrices ? <div className="mt-2 h-8 w-24 rounded-lg loading-shimmer" /> : (
+            <p className={"stat-value mt-1"} style={{ color: totalReturn >= 0 ? 'var(--pos)' : 'var(--neg)' }}>
+              {totalReturn >= 0 ? '▲ +' : '▼ '}{totalReturnPct.toFixed(2)}%
             </p>
           )}
           {summary && !loadingPrices && (
-            <p className="text-xs theme-text-muted">
+            <p className="text-xs theme-text-muted mt-1">
               {money(summary.total_return, summary.currency, 0)} · sold {money(summary.realised_pnl, summary.currency, 0)}
               {summary.fees > 0 ? ` · fees ${money(summary.fees, summary.currency, 0)}` : ''}
             </p>
           )}
         </div>
-        <div className="card">
-          <p className={`text-sm flex items-center ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Cash</p>
-          <p className={`text-2xl font-bold ${summary && summary.cash < 0 ? 'text-red-500' : isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+        <div className="stat-card">
+          <p className="text-sm theme-text-secondary">Cash</p>
+          <p className="stat-value mt-1" style={summary && summary.cash < 0 ? { color: 'var(--neg)' } : undefined}>
             {summary ? money(summary.cash, summary.currency, 0) : '…'}
           </p>
-          <p className="text-xs theme-text-muted">Not yet invested, or from sales</p>
+          <p className="text-xs theme-text-muted mt-1">Not yet invested, or from sales</p>
         </div>
       </div>
 
-      <div className="card">
-        <h2 className={`text-lg font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'} mb-4`}>Portfolio Growth</h2>
-        <ResponsiveContainer width="100%" height={300}>
-          <LineChart data={growthChartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} />
-            <XAxis 
-              dataKey="date" 
-              tick={{ fontSize: 12, fill: tickFill }}
-              tickLine={{ stroke: axisStroke }}
-              axisLine={{ stroke: axisStroke }}
-            />
-            <YAxis 
-              tick={{ fontSize: 12, fill: tickFill }}
-              tickFormatter={(value) => `$${(value / 1000).toFixed(0)}k`}
-              tickLine={{ stroke: axisStroke }}
-              axisLine={{ stroke: axisStroke }}
-              domain={chartYDomain}
-            />
-            <Tooltip 
-              formatter={(value: number, name: string) => [
-                `$${value.toLocaleString()}`,
-                name === 'expected' ? 'Expected' : 'Actual'
-              ]}
-              contentStyle={tooltipStyle}
-              labelStyle={{ color: legendColor }}
-            />
-            <Legend 
-              formatter={(value) => <span style={{ color: legendColor }}>{value === 'expected' ? 'Expected Growth' : 'Actual Growth'}</span>}
-            />
-            <Line 
-              type="monotone" 
-              dataKey="expected" 
-              stroke="#64748b" 
-              strokeWidth={2}
-              strokeDasharray="5 5"
-              dot={false}
-              name="expected"
-            />
-            <Line 
-              type="monotone" 
-              dataKey="actual" 
-              stroke="#10b981" 
-              strokeWidth={3}
-              dot={{ fill: '#10b981', strokeWidth: 2, r: 4 }}
-              connectNulls
-              name="actual"
-            />
-          </LineChart>
-        </ResponsiveContainer>
-        <div className="flex justify-center gap-6 mt-4 text-sm">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-0.5 bg-slate-500" style={{ backgroundImage: 'repeating-linear-gradient(90deg, #64748b 0, #64748b 5px, transparent 5px, transparent 10px)' }}></div>
-            <span className={isDark ? 'text-slate-400' : 'text-slate-600'}>Expected ({((portfolio.expected_return || 0.10) * 100).toFixed(1)}% p.a.)</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-0.5 bg-emerald-500"></div>
-            <span className={isDark ? 'text-slate-400' : 'text-slate-600'}>Actual ({totalReturnPct >= 0 ? '+' : ''}{totalReturnPct.toFixed(1)}%)</span>
-          </div>
-        </div>
-      </div>
+      <GrowthCard history={history} failed={historyFailed} period={period} onPeriod={setPeriod}
+        valueNow={summary?.total_value ?? null} expectedReturn={Number(portfolio.expected_return || 0)} />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 card">
@@ -794,7 +684,10 @@ export default function PortfolioDetail() {
                 </tr>
               </thead>
               <tbody>
-                {positions.filter(p => p.status === 'active').map((position) => {
+                {positions.filter(p => p.status === 'active')
+                  // 0 shares and nothing planned: a stock this portfolio no longer holds or wants (e.g. after a sale).
+                  .filter(p => Number(p.quantity) > 0 || Number(p.planned_quantity ?? 0) > 0 || !atBroker)
+                  .map((position) => {
                   const priceMissing = !currentPrices[position.symbol]
                   const currentPrice = currentPrices[position.symbol] || Number(position.avg_cost)
                   const marketValue = currentPrice * Number(position.quantity)
@@ -804,7 +697,20 @@ export default function PortfolioDetail() {
 
                   return (
                     <tr key={position.id} className={`border-b ${isDark ? 'border-slate-700/50' : 'border-slate-200'} last:border-b-0 ${isDark ? 'bg-slate-800/30 hover:bg-slate-700/30' : 'bg-slate-50 hover:bg-slate-100'} transition-colors`}>
-                      <td className={`py-3 font-medium ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{position.symbol.replace('.AX', '')}</td>
+                      <td className="py-3 theme-text">
+                        <CompanyLink symbol={position.symbol} />
+                        {summary && summary.total_value > 0 && (() => {
+                          const w = (summary.holdings.find((h) => h.symbol === position.symbol)?.value ?? 0) / summary.total_value * 100
+                          return (
+                            <span className="flex items-center gap-1.5 mt-1" title="Share of the portfolio's value">
+                              <span className="h-1 w-16 rounded-full overflow-hidden" style={{ background: 'var(--chip)' }}>
+                                <span className="block h-full" style={{ width: `${Math.min(100, w)}%`, background: summary.currency === 'USD' ? 'var(--usd)' : 'var(--aud)' }} />
+                              </span>
+                              <span className="num text-[11px] theme-text-muted">{w.toFixed(1)}%</span>
+                            </span>
+                          )
+                        })()}
+                      </td>
                       <td className={`py-3 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
                         {atBroker ? Number(position.quantity).toFixed(0) : Number(position.quantity).toFixed(2)}
                         {atBroker && position.planned_quantity != null && Number(position.quantity) < Number(position.planned_quantity) && (
@@ -1301,6 +1207,71 @@ export default function PortfolioDetail() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+/** Value since the start, with the original forecast as a dashed line, so you can see how closely it is tracking. */
+function GrowthCard({ history, failed, period, onPeriod, valueNow, expectedReturn }: {
+  history: ValueHistory | null; failed: boolean; period: Period; onPeriod: (p: Period) => void
+  valueNow: number | null; expectedReturn: number
+}) {
+  const currency = history?.currency ?? 'AUD'
+  const color = currency === 'USD' ? 'var(--usd)' : 'var(--aud)'
+  const tracking = (() => {
+    if (!history || history.money_put_in <= 0) return null
+    const lastDay = history.points[history.points.length - 1]?.date ?? history.start
+    const years = (new Date(`${lastDay}T00:00:00`).getTime() - new Date(`${history.start}T00:00:00`).getTime()) / (365 * 86400000)
+    const forecastNow = history.money_put_in * (1 + history.expected_return) ** Math.max(years, 0)
+    const actual = valueNow ?? history.points[history.points.length - 1]?.value
+    if (actual == null) return null
+    return { forecastNow, actual, gap: actual - forecastNow }
+  })()
+  const series = history ? [
+    { key: 'value', label: 'Value', color, points: history.points },
+    { key: 'forecast', label: 'Original forecast', color: 'var(--text-secondary)', points: history.forecast, dashed: true },
+    { key: 'invested', label: 'Money put in', color: 'var(--border-hover)', points: history.points.map((p) => ({ date: p.date, value: p.invested })), flat: true },
+  ] : []
+  // Show the forecast a little past today so you can see where it is heading.
+  const until = history?.forecast.length ? history.forecast[history.forecast.length - 1].date : undefined
+  return (
+    <div className="card space-y-4" data-testid="growth-card">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-base font-semibold theme-text">Value vs original forecast</h2>
+          {tracking && (
+            <p className="text-sm theme-text-secondary mt-1">
+              Now <span className="num font-semibold theme-text">{money(tracking.actual, currency, 0)}</span>
+              {' · '}forecast for today <span className="num">{money(tracking.forecastNow, currency, 0)}</span>
+              {' · '}
+              <span className={`num font-semibold ${tracking.gap >= 0 ? 'text-pos' : 'text-neg'}`}>
+                {tracking.gap >= 0 ? '▲ ' : '▼ '}{money(Math.abs(tracking.gap), currency, 0)} {tracking.gap >= 0 ? 'ahead' : 'behind'}
+              </span>
+            </p>
+          )}
+        </div>
+        <div className="seg" role="group" aria-label="Period">
+          {PERIODS.map((p) => (
+            <button key={p} type="button" aria-pressed={period === p} onClick={() => onPeriod(p)}>{p}</button>
+          ))}
+        </div>
+      </div>
+      {failed ? <p className="text-sm theme-text-muted py-10 text-center">Couldn't rebuild the history right now (Yahoo didn't answer).</p>
+        : !history ? <div className="h-[280px] rounded-xl loading-shimmer" />
+        : <ValueChart series={series} period={period} prefix={currency === 'USD' ? 'US$' : 'A$'} height={280} until={until} />}
+      <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs theme-text-secondary">
+        <span className="flex items-center gap-2"><span className="w-5 h-0.5 rounded" style={{ background: color }} /> Value (shares + cash)</span>
+        <span className="flex items-center gap-2">
+          <span className="w-5 border-t-2 border-dashed" style={{ borderColor: 'var(--text-secondary)' }} />
+          Original forecast ({(expectedReturn * 100).toFixed(1)}% a year)
+        </span>
+        <span className="flex items-center gap-2"><span className="w-5 h-0.5 rounded" style={{ background: 'var(--border-hover)' }} /> Money put in</span>
+      </div>
+      <p className="text-xs theme-text-muted">
+        The forecast is the yearly return the optimiser expected when you built this portfolio, worked out from the
+        past two years of prices. It is usually optimistic: treat it as a yardstick, not a promise.
+        {history?.missing_prices.length ? ` No price history for ${history.missing_prices.join(', ')}.` : ''}
+      </p>
     </div>
   )
 }

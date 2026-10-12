@@ -24,6 +24,7 @@ READ_ONLY_REQUESTS = frozenset({
     "reqPositions", "cancelPositions", "reqAllOpenOrders", "reqExecutions",
     "reqContractDetails", "reqMarketDataType", "reqMktData", "cancelMktData",
     "reqAccountUpdates",  # account values per currency (subscribe, read, unsubscribe)
+    "reqHistoricalData", "cancelHistoricalData",  # recent price bars when the delayed stream is silent
 })
 
 CALLBACKS = (
@@ -32,6 +33,7 @@ CALLBACKS = (
     "position", "positionEnd",
     "openOrder", "openOrderEnd", "execDetails", "execDetailsEnd",
     "contractDetails", "contractDetailsEnd", "marketDataType", "tickPrice", "tickSnapshotEnd",
+    "historicalData", "historicalDataEnd",
     "orderStatus", "commissionReport", "commissionAndFeesReport",
     "error", "connectionClosed",
 )

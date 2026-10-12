@@ -64,6 +64,13 @@ async def search_stocks(q: str = Query(..., min_length=1), market: str = "ASX") 
     return [StockSearchResult(**r) for r in results]
 
 
+@router.get("/profiles")
+def get_company_profiles(symbols: str = Query(...)) -> dict:
+    """Name and sector for comma-separated symbols (holdings tables, "Where the money is")."""
+    from core.stocks import company_profiles
+    return company_profiles([s.strip() for s in symbols.split(",") if s.strip()][:60])
+
+
 @router.get("/info/{symbol}")
 def get_stock_info(symbol: str) -> StockInfo:
     """Get detailed information about a stock."""

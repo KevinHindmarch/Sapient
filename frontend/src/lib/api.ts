@@ -54,6 +54,8 @@ export const stocksApi = {
   search: (q: string, market: string = 'ASX') => api.get(`/stocks/search?q=${encodeURIComponent(q)}&market=${market}`),
   info: (symbol: string) => api.get(`/stocks/info/${symbol}`),
   quickInfo: (symbol: string) => api.get(`/stocks/info/${symbol}`),
+  profiles: (symbols: string[]) =>
+    api.get<Record<string, { name: string; sector: string }>>(`/stocks/profiles?symbols=${encodeURIComponent(symbols.join(','))}`),
   historical: (symbols: string[], period: string = '2y') =>
     api.post('/stocks/historical', { symbols, period }),
   dividends: (symbols: string[]) =>
@@ -101,6 +103,30 @@ export const portfolioApi = {
     api.post<RebalanceResult>(`/portfolio/${portfolioId}/execute-rebalance`, { legs, idempotency_key }),
   summary: (portfolioId: number) => api.get<PortfolioSummary>(`/portfolio/${portfolioId}/summary`),
   summaries: () => api.get<PortfolioSummary[]>('/portfolio/summaries'),
+  history: (portfolioId: number) => api.get<ValueHistory>(`/portfolio/${portfolioId}/history`),
+  histories: () => api.get<AllHistories>('/portfolio/history'),
+}
+
+export interface ValuePoint { date: string; value: number }
+
+/** Value over time, rebuilt from trades and Yahoo closes (core/history.py). */
+export interface ValueHistory {
+  portfolio_id: number
+  currency: 'AUD' | 'USD'
+  start: string
+  expected_return: number
+  money_put_in: number
+  points: (ValuePoint & { invested: number })[]
+  forecast: ValuePoint[]
+  benchmark: ValuePoint[]
+  benchmark_name: string
+  missing_prices: string[]
+}
+
+export interface AllHistories {
+  portfolios: { portfolio_id: number; currency: 'AUD' | 'USD'; start: string; points: ValuePoint[] }[]
+  combined: Partial<Record<'AUD' | 'USD', ValuePoint[]>>
+  aud_per_usd: number | null
 }
 
 export interface HoldingSummary {
@@ -139,8 +165,10 @@ export interface PortfolioSummary {
   holdings: HoldingSummary[]
 }
 
-export const money = (value: number, currency: 'AUD' | 'USD' = 'AUD', digits = 2) =>
-  `${currency === 'USD' ? 'US$' : 'A$'}${value.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits })}`
+export const money = (value: number, currency: 'AUD' | 'USD' = 'AUD', digits = 2) => {
+  const shown = Math.abs(value) < 0.5 * 10 ** -digits ? 0 : value  // no "-0" for tiny negatives
+  return `${currency === 'USD' ? 'US$' : 'A$'}${shown.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits })}`
+}
 
 export interface RebalanceLeg {
   symbol: string

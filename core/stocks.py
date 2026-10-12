@@ -576,6 +576,15 @@ def dividend_yield_fraction(info: dict) -> float:
     return 0.0
 
 
+def _positive(value) -> float | None:
+    """A positive finite number from Yahoo, else None."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    return v if v > 0 and v == v and v != float("inf") else None
+
+
 class StockDataService:
     """Manages fetching and processing of stock data for ASX and US markets."""
     
@@ -658,12 +667,17 @@ class StockDataService:
                 'name': info.get('longName', symbol),
                 'sector': info.get('sector', 'Unknown'),
                 'industry': info.get('industry', 'Unknown'),
-                'current_price': info.get('currentPrice', 0),
-                'market_cap': info.get('marketCap', 0),
+                'current_price': info.get('currentPrice') or info.get('regularMarketPrice') or 0,
+                'market_cap': info.get('marketCap') or 0,
                 'description': info.get('longBusinessSummary', ''),
                 'website': info.get('website', ''),
                 'employees': info.get('fullTimeEmployees', None),
                 'country': info.get('country', ''),
+                'currency': info.get('currency') or ('AUD' if market == 'ASX' else 'USD'),
+                'exchange': info.get('fullExchangeName') or info.get('exchange') or '',
+                'pe_ratio': _positive(info.get('trailingPE')),
+                'week52_low': _positive(info.get('fiftyTwoWeekLow')),
+                'week52_high': _positive(info.get('fiftyTwoWeekHigh')),
             }
         except:
             return {
@@ -835,3 +849,26 @@ class StockDataService:
         results.sort(key=lambda x: x['sharpe_ratio'], reverse=True)
         
         return results
+
+
+def company_profiles(symbols: list[str]) -> dict[str, dict]:
+    """Name and sector for each symbol (Yahoo .info, cached), for holdings tables and sector bars.
+
+    A symbol Yahoo doesn't answer for gets its own code as the name and sector "Other".
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    def one(symbol: str) -> tuple[str, dict]:
+        try:
+            info = yf.Ticker(symbol).info or {}
+        except Exception:
+            info = {}
+        return symbol, {"name": info.get("shortName") or info.get("longName") or symbol.replace(".AX", ""),
+                        "sector": info.get("sector") or "Other"}
+
+    unique = sorted({s for s in symbols if s})
+    if not unique:
+        return {}
+    with ThreadPoolExecutor(max_workers=min(8, len(unique))) as pool:
+        return dict(pool.map(one, unique))
+

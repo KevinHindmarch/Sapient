@@ -35,13 +35,15 @@ STANDARD_TAGS = set(SUMMARY_TAGS.split(","))
 REQ_SUMMARY, REQ_EXECUTIONS, REQ_CONTRACT, REQ_MARKET = 2_100_000_001, 2_100_000_002, 2_100_000_003, 2_100_000_004
 REQ_LEDGER = 2_100_000_005
 REQ_STREAM = 2_100_000_006   # streaming prices (own id: a snapshot that never ended can't clash with it)
-REQUEST_IDS = {REQ_SUMMARY, REQ_EXECUTIONS, REQ_CONTRACT, REQ_MARKET, REQ_LEDGER, REQ_STREAM}
+REQ_HIST = 2_100_000_007     # recent 1-minute bars (fallback when the delayed stream sends nothing)
+REQUEST_IDS = {REQ_SUMMARY, REQ_EXECUTIONS, REQ_CONTRACT, REQ_MARKET, REQ_LEDGER, REQ_STREAM, REQ_HIST}
 MARKET_REQS = (REQ_MARKET, REQ_STREAM)
 # Per-currency values Sapient needs (US buys: US$ cash; A$ limits: TWS's exchange rate).
 CURRENCY_KEYS = ("CashBalance", "ExchangeRate")
 # Price tick types (live and delayed): last, bid, ask. See docs/ibkr-tws-api-notes.md.
 LAST_TICKS = {"4", "68"}
-STREAM_TIMEOUT = 15.0   # seconds to wait for a usable streamed price
+STREAM_TIMEOUT = 10.0   # seconds to wait for a usable streamed price
+HIST_TIMEOUT = 10.0     # seconds to wait for recent price bars
 BID_TICKS, ASK_TICKS = {"1", "66"}, {"2", "67"}
 PRICE_TICKS = LAST_TICKS | BID_TICKS | ASK_TICKS
 
@@ -407,11 +409,47 @@ class TwsSession:
                 pass  # the snapshot didn't end: stream instead (below)
         if not refused and not has_price(prices):
             self._stream_prices(found[0], stream_timeout or STREAM_TIMEOUT, collect_ticks, refused, prices)
+        if data_type != 1 and not has_price(prices):
+            # On the ASX the delayed stream can stay silent after 10167 (October 2026). TWS's recent
+            # 1-minute trade bars are the same delayed data, so the last bar's close is used instead.
+            bar = self._last_bar(found[0], HIST_TIMEOUT)
+            if bar:
+                prices["hist"], result["bar_time"] = bar
+                refused.clear()
         log.info("Prices for %s (%s, market data type %s): %s", symbol, exchange, result["market_data_type"], prices or "none")
         if refused and not has_price(prices):  # no permission: the caller explains it from health.errors
             raise TwsTimeout(f"TWS refused market data ({refused[0]})")
         result["prices"] = prices
         return result
+
+    def _last_bar(self, contract, timeout: float) -> tuple[float, str] | None:
+        """Close and time of the latest 1-minute TRADES bar today (delayed without a subscription), or None."""
+        bars: list = []
+
+        def collect(name, fields):
+            if name == "historicalData" and fields.get("reqId") == REQ_HIST:
+                bars.append(fields.get("bar"))
+
+        def finished(name, fields):
+            if name == "error" and fields.get("reqId") == REQ_HIST and _code(fields) != 10167:
+                return True  # e.g. 162 no permission: give up, the caller explains
+            return name == "historicalDataEnd" and fields.get("reqId") == REQ_HIST
+        self.transport.request("reqHistoricalData", REQ_HIST, contract, "", "1 D", "1 min", "TRADES", 1, 1, False, [])
+        try:
+            self._wait(finished, timeout, collect)
+        except TwsTimeout:
+            try:
+                self.transport.request("cancelHistoricalData", REQ_HIST)
+            except Exception:
+                pass
+        for bar in reversed(bars):
+            try:
+                close = float(getattr(bar, "close", None))
+            except (TypeError, ValueError):
+                continue
+            if close > 0:
+                return close, str(getattr(bar, "date", ""))
+        return None
 
     def _stream_prices(self, contract, timeout: float, collect_ticks, refused: list, prices: dict) -> None:
         """Streaming (not snapshot) prices until a usable last, or a bid and an ask, arrive or ``timeout``.

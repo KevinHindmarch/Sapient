@@ -11,6 +11,7 @@ import WeightEditor from '../components/WeightEditor'
 import HelpTooltip from '../components/HelpTooltip'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts'
 import { useTheme } from '../lib/theme'
+import { CompanyLink } from '../components/CompanyPanel'
 
 type Market = 'ASX' | 'US'
 
@@ -540,7 +541,7 @@ export default function ManualBuilder() {
                       return (
                         <div key={symbol}>
                           <div className="flex justify-between text-sm mb-1">
-                            <span className={`font-medium ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>{displaySymbol(symbol)}</span>
+                            <CompanyLink symbol={symbol} className={`font-medium ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>{displaySymbol(symbol)}</CompanyLink>
                             <span className={isDark ? 'text-slate-400' : 'text-slate-600'}>
                               {pct.toFixed(1)}% · {currencySymbol}{amount.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                             </span>

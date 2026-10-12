@@ -14,6 +14,11 @@ class StockInfo(BaseModel):
     website: Optional[str] = ''
     employees: Optional[int] = None
     country: Optional[str] = ''
+    currency: Optional[str] = ''
+    exchange: Optional[str] = ''
+    pe_ratio: Optional[float] = None
+    week52_low: Optional[float] = None
+    week52_high: Optional[float] = None
 
 
 class StockSearchResult(BaseModel):

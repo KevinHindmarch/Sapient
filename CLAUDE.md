@@ -94,7 +94,16 @@ the user ticks the live authorisation in the app; never bypass that.
   Model B beat the market by ~2.4%/yr in Asia-Pac ex Japan (incl. since 2010)
   but has trailed the S&P 500 since 2010. Extra "buy only undervalued / sell
   overvalued" rules were tested (artifact "Model B Value Rules"), showed no
-  benefit, and were dropped (user decision 2026-10-10). Model A code path of the Auto
+  benefit, and were dropped (user decision 2026-10-10).
+- J1 UI redesign (user approved 2026-10-12, artifact "Sapient UI Redesign"): IBM Plex
+  fonts (bundled via @fontsource), neutral tokens in `index.css` (gold = A$, blue =
+  US$), grouped sidebar with Help & Glossary, TWS status + Emergency stop card.
+  Dashboard: A$ / US$ / "Everything in A$" cards (Yahoo AUDUSD=X, display only), value
+  chart, "Needs your attention". Value history is rebuilt on request from trades +
+  Yahoo closes (`core/history.py`, `/api/portfolio/history`, `/{id}/history`); the
+  portfolio chart shows the original forecast (expected_return compounded on money put
+  in). Click any company (`components/CompanyPanel.tsx` `CompanyLink`) for Yahoo's
+  description and key facts. Model A code path of the Auto
   Builder is untouched (user request). No news
   sentiment (user dropped it). Never promise profits: the user asked for
   "make money every single day" — explained that no strategy can.
@@ -266,6 +275,7 @@ python -m unittest discover -s tests -p 'test_g5_research.py' -v # optimiser mat
 python -m unittest discover -s tests -p 'test_g6_ops.py' -v      # daily backups, integrity check, restore requests
 python -m unittest discover -s tests -p 'test_h1_entry.py' -v    # buy on RSI dip, skip after the deadline
 python -m unittest discover -s tests -p 'test_i2_factors.py' -v  # Model B ranking, Factor Builder, monthly rebalance
+python -m unittest discover -s tests -p 'test_j1_history.py' -v  # portfolio value history + forecast, dashboard totals
 python -m compileall -q core backend
 cd frontend && npm run build && npm run lint
 ```

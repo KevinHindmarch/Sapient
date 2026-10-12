@@ -20,6 +20,7 @@ import {
   ArrowRight,
   Inbox,
 } from 'lucide-react'
+import { CompanyLink } from '../components/CompanyPanel'
 
 type SignalStatus = 'pending' | 'approved' | 'rejected' | 'snoozed' | 'executed' | 'expired' | 'claimed'
 type SignalAction = 'BUY' | 'SELL'
@@ -351,7 +352,7 @@ const SignalCard: React.FC<SignalCardProps> = ({
             <h3 className={`text-lg font-bold tracking-tight ${
               isDark ? 'text-slate-100' : 'text-slate-900'
             }`}>
-              {signal.symbol}
+              <CompanyLink symbol={signal.symbol}>{signal.symbol}</CompanyLink>
             </h3>
             {signal.company_name && (
               <span className="theme-text-muted text-sm">· {signal.company_name}</span>

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { apiErrorMessage, factorsApi, FactorPlan } from '../lib/api'
+import { CompanyLink } from './CompanyPanel'
 
 /**
  * How AI Trading decides for this portfolio: simple RSI + MACD rules, or Model B (one of three slices re-ranked
@@ -72,7 +73,7 @@ export default function FactorStrategy({ portfolioId, strategy, onStrategy }: {
                   <th className="pr-2 text-right">Rank</th><th className="pr-2 text-right">Target shares</th><th>Why</th></tr></thead>
                 <tbody>{target.map(([symbol, shares]) => (
                   <tr key={symbol} className="border-t theme-border theme-text">
-                    <td className="py-1 pr-2 font-mono">{symbol.replace('.AX', '')}</td>
+                    <td className="py-1 pr-2 font-mono"><CompanyLink symbol={symbol} /></td>
                     <td className="pr-2 text-right">{plan.ranks?.[symbol] ?? '—'}</td>
                     <td className="pr-2 text-right">{shares}</td>
                     <td className="theme-text-secondary">{plan.reasons?.[symbol] ?? ''}</td>

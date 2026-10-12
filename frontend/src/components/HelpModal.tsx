@@ -20,6 +20,45 @@ interface Section {
 
 const sections: Section[] = [
   {
+    title: 'Reading your portfolio',
+    terms: [
+      { term: 'Money put in', definition: 'The cash you have put into this portfolio. If buys cost more than the cash it had, the extra counts as new money put in.' },
+      { term: 'Value now', definition: 'What the shares are worth at the latest price, plus the portfolio\'s cash.', example: 'Shares worth A$9,800 + A$300 cash = A$10,100 value.' },
+      { term: 'Total return', definition: 'Value now minus money put in, including profit from shares already sold and after brokerage fees.' },
+      { term: 'Original forecast line', definition: 'The dashed line on a portfolio\'s chart. It grows the money put in at the yearly return the optimiser expected when you built the portfolio, so you can see whether you are ahead or behind. That figure comes from the past two years of prices, so it is usually optimistic: a yardstick, not a promise.' },
+      { term: 'Weight', definition: 'How much of the portfolio\'s value is in one stock.', example: 'A$2,000 of BHP in a A$10,000 portfolio = 20% weight.' },
+      { term: 'A$ and US$', definition: 'Australian portfolios are in Australian dollars (gold in Sapient), US portfolios in US dollars (blue). They are kept apart; the "Everything in A$" card converts US$ at today\'s exchange rate only for that total.' },
+    ],
+  },
+  {
+    title: "Sapient's models",
+    terms: [
+      { term: 'Model A', definition: 'The Auto Builder\'s original scan: scores ASX or S&P 500 companies on value, quality, growth and momentum from their financial reports, then optimises the top picks.' },
+      { term: 'Model B', definition: 'Ranks every stock in the list on five long-studied "factors" (momentum, profitability, value, investment and size), buys the top 20 with max-Sharpe weights, and re-checks monthly.', example: 'Score = 35% momentum + 25% profitability + 20% value + 10% investment + 10% size.' },
+      { term: 'Momentum', definition: 'How much a share price has risen over the past year (leaving out the last month). Stocks that have been rising tend to keep rising for a while.' },
+      { term: 'Factor', definition: 'A trait of a company (cheap, profitable, rising, small…) that research has linked with higher long-run returns.' },
+      { term: 'Slices', definition: 'A Model B portfolio is split into three groups of about 7 stocks. Each month only one slice is reviewed, so every stock is checked once a quarter and trading stays low.' },
+      { term: 'Buy over three months', definition: 'A Model B start option: buy one slice a month instead of everything on day one.' },
+      { term: 'RSI dip entry', definition: 'A start option that buys each stock only when its RSI falls below 30 at a scheduled check, and skips it if that doesn\'t happen by the deadline.' },
+      { term: 'Max-Sharpe optimiser', definition: 'Chooses how much of each stock to hold so the portfolio had the best return for its ups and downs over the chosen history, within your per-stock cap.' },
+    ],
+  },
+  {
+    title: 'Trading at IBKR',
+    terms: [
+      { term: 'TWS', short: 'TWS', definition: 'Trader Workstation: Interactive Brokers\' program on your PC. Sapient sends orders to TWS, and TWS sends them to the market.' },
+      { term: 'Paper trading', definition: 'Practice trading in IBKR\'s pretend-money account (starts with D). Orders behave like real ones but no real money moves.' },
+      { term: 'Live trading', definition: 'Real-money orders in your real IBKR account. Locked until you authorise it in Brokerage, and it needs real-time prices.' },
+      { term: 'Limit order', definition: 'An order with a price cap: a buy never pays more than the limit, a sell never takes less. Sapient only uses limit orders.' },
+      { term: 'Market order', definition: 'An order that trades straight away at whatever price is available. Sapient doesn\'t use them: there is no cap on the price.' },
+      { term: 'Delayed prices', definition: 'Prices that are 15–20 minutes old, free from IBKR without a market-data subscription. Fine for paper trading; live trading needs real-time prices.' },
+      { term: 'Bid and ask', definition: 'The bid is the highest price a buyer is offering right now, the ask the lowest price a seller wants. The last price is the most recent trade.' },
+      { term: 'Proposal', definition: 'A trade Sapient suggests for a portfolio set to "Asks first". It appears in the AI Inbox and only becomes an order if you approve it.' },
+      { term: 'Emergency stop', definition: 'Turns off all automatic trading and asks TWS to cancel Sapient\'s working orders. In the sidebar and the tray icon.' },
+      { term: 'Stop-loss / take-profit', definition: 'Rules that sell a stock after it falls (stop-loss) or rises (take-profit) by a set percentage. Simple-rules portfolios use them; Model B ignores them because they lowered its returns in testing.' },
+    ],
+  },
+  {
     title: 'Risk & Return Metrics',
     terms: [
       {
@@ -182,9 +221,8 @@ const sections: Section[] = [
 ]
 
 export default function HelpModal({ onClose }: HelpModalProps) {
-  const { theme } = useTheme()
-  const isDark = theme === 'dark'
-  const [openSection, setOpenSection] = useState<string | null>('Technical Indicators')
+  const isDark = useTheme().theme === 'dark'
+  const [openSection, setOpenSection] = useState<string | null>('Reading your portfolio')
   const [search, setSearch] = useState('')
 
   const filteredSections = sections.map(section => ({
@@ -198,16 +236,13 @@ export default function HelpModal({ onClose }: HelpModalProps) {
   })).filter(s => s.terms.length > 0)
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div
-        className={`rounded-2xl border w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl ${
-          isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'
-        }`}
-      >
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-label="Help and glossary"
+      data-testid="glossary">
+      <div className="rounded-2xl border theme-border w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl" style={{ background: 'var(--bg-card)' }}>
         <div className={`flex items-center justify-between p-5 border-b ${isDark ? 'border-slate-700/50' : 'border-slate-200'}`}>
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-sky-500/20 rounded-xl border border-sky-500/30">
-              <BookOpen className="w-5 h-5 text-sky-400" />
+            <div className="p-2 rounded-xl surface-2">
+              <BookOpen className="w-5 h-5 theme-text" />
             </div>
             <div>
               <h2 className={`text-lg font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Help & Glossary</h2>
@@ -257,7 +292,7 @@ export default function HelpModal({ onClose }: HelpModalProps) {
                         <div className="flex items-center gap-2 mb-1">
                           <span className={`font-medium text-sm ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{term.term}</span>
                           {term.short && (
-                            <span className="text-xs px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-700 dark:text-sky-400 border border-sky-500/30 font-mono">
+                            <span className="chip num !py-0.5">
                               {term.short}
                             </span>
                           )}
