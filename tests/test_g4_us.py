@@ -317,6 +317,8 @@ class AsxDelayedPriceTests(PaperTestCase):
 
     class SilentStreamWithBars(SnapshotNeverEnds):
         """What TWS did on the ASX in October 2026: 10167, then no ticks at all; the 1-minute bars still answer."""
+        warn_first = False
+
         def request(self, name, *args):
             if name == "reqMktData" and not args[3]:
                 self.requests.append(("reqMktData", False))
@@ -325,6 +327,9 @@ class AsxDelayedPriceTests(PaperTestCase):
                 return
             if name == "reqHistoricalData":
                 self.requests.append(("reqHistoricalData",) + args[3:7])
+                if self.warn_first:  # what the user's paper TWS did (12 Oct 2026): a warning, then the bars
+                    self.emit("error", reqId=args[0], errorCode=2188, errorString="Up-to-the-second historical "
+                              "data requires additional subscription for the API.")
                 for minute, close in ((40, 1.55), (41, 1.56)):
                     self.emit("historicalData", reqId=args[0],
                               bar=SimpleNamespace(date=f"20261012 12:{minute}:00 Australia/Sydney", close=close))
@@ -342,6 +347,16 @@ class AsxDelayedPriceTests(PaperTestCase):
         sent = paper.list_orders()[0]
         self.assertEqual((sent["state"], sent["limit_price"]), ("SUBMITTED", Decimal("1.56")))
         self.assertIn("12:41", sent["quote"]["bar_time"])
+
+    def test_warning_2188_before_the_bars_does_not_end_the_wait(self):
+        from core.tws import session as session_mod
+        fake = self.SilentStreamWithBars(last=None)
+        fake.warn_first = True
+        self.order(key="k4", symbol="KAR.AX", quantity=100, price="1.57")
+        with mock.patch.object(session_mod, "STREAM_TIMEOUT", 0.3):
+            test_paper.ExecutorTests.executor(self, fake).step()
+        sent = paper.list_orders()[0]
+        self.assertEqual((sent["state"], sent["limit_price"]), ("SUBMITTED", Decimal("1.56")))
 
     def test_close_is_the_last_resort_price(self):
         from core.tws.execution import choose_limit

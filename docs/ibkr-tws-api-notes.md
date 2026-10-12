@@ -54,6 +54,12 @@ the guide before guessing how TWS behaves.
     delayed data allowed per *doc/market-data-delayed/introduction*) and uses the
     latest bar's close, with the same Yahoo gap check. The bar time is kept in the
     order's quote.
+  - On that paper TWS every ASX bar request is first answered with message **2188**
+    ("Up-to-the-second historical data requires additional subscription for the API"),
+    and the bars follow a few milliseconds later. 0.13.0 treated 2188 as a refusal and
+    stopped waiting, so ASX orders still said "no price"; since 0.13.1 2188 (like 10167)
+    is only a warning for bar requests. Checked read-only against the user's TWS on
+    12 Oct 2026: VEA, BSL and KAR all got the latest delayed bar.
   - Real-time requests (live) still snapshot first and fall back to the same
     stream if the snapshot is empty or doesn't end within 15 seconds.
   - Message **10167** ("Requested market data is not subscribed. Displaying

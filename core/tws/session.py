@@ -26,6 +26,9 @@ INFORMATIONAL_CODES = {2104, 2106, 2107, 2108, 2119, 2158}
 DATA_FARM_BROKEN = {2103, 2105, 2157}
 # Market-data refusals that mean no prices will come (10167 "showing delayed data" is not one).
 NO_MARKET_DATA = {354, 10089, 10090, 10091, 10168, 10186, 10197}
+# Warnings TWS sends before price bars that still come: 10167 (delayed data) and 2188 ("Up-to-the-second
+# historical data requires additional subscription", seen on the user's paper TWS 12 Oct 2026, bars followed).
+HIST_WARNINGS = {10167, 2188}
 SUMMARY_TAGS = "AccountType,NetLiquidation,TotalCashValue,BuyingPower,AvailableFunds,GrossPositionValue"
 # Tags outside SUMMARY_TAGS come from "$LEDGER:ALL": one row per currency (CashBalance:USD, ExchangeRate:USD, ...).
 STANDARD_TAGS = set(SUMMARY_TAGS.split(","))
@@ -431,7 +434,7 @@ class TwsSession:
                 bars.append(fields.get("bar"))
 
         def finished(name, fields):
-            if name == "error" and fields.get("reqId") == REQ_HIST and _code(fields) != 10167:
+            if name == "error" and fields.get("reqId") == REQ_HIST and _code(fields) not in HIST_WARNINGS:
                 return True  # e.g. 162 no permission: give up, the caller explains
             return name == "historicalDataEnd" and fields.get("reqId") == REQ_HIST
         self.transport.request("reqHistoricalData", REQ_HIST, contract, "", "1 D", "1 min", "TRADES", 1, 1, False, [])
