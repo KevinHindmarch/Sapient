@@ -285,7 +285,9 @@ class ExecutorTests(PaperTestCase):
         self.assertEqual((ib_order.action, ib_order.orderType, ib_order.tif, ib_order.account, ib_order.lmtPrice,
                           ib_order.totalQuantity, ib_order.outsideRth),
                          ("BUY", "LMT", "DAY", ACCOUNT, 45.67, Decimal("10"), False))
-        self.assertEqual((contract.conId, contract.exchange, contract.currency), (4036818, "ASX", "AUD"))
+        # SMART to the ASX listing: routing straight to "ASX" makes TWS hold the order (precaution 10311).
+        self.assertEqual((contract.conId, contract.exchange, contract.currency, contract.primaryExchange),
+                         (4036818, "SMART", "AUD", "ASX"))
         row = self.get(queued["id"])
         self.assertEqual((row["state"], row["api_order_id"], row["perm_id"]), ("SUBMITTED", 500, 9500))
         self.assertTrue(row["quote"]["delayed"])
