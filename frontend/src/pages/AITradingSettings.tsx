@@ -73,11 +73,12 @@ export default function AITradingSettings() {
   const [killing, setKilling] = useState(false)
   const [scheduler, setScheduler] = useState<SchedulerStatus | null>(null)
 
+  const refreshScheduler = () => aiApi.scheduler().then((res) => setScheduler(res.data)).catch(() => undefined)
+
   useEffect(() => {
     load()
-    const refresh = () => aiApi.scheduler().then((res) => setScheduler(res.data)).catch(() => undefined)
-    refresh()
-    const timer = window.setInterval(refresh, 30000)
+    refreshScheduler()
+    const timer = window.setInterval(refreshScheduler, 30000)
     return () => window.clearInterval(timer)
   }, [])
 
@@ -130,6 +131,8 @@ export default function AITradingSettings() {
       setSettings(data)
       setOriginal(data)
       toast.success('AI trading settings saved')
+      // The checker reads settings every 30 s: look again soon so the status doesn't show the old state.
+      for (const ms of [1000, 10000, 35000]) window.setTimeout(refreshScheduler, ms)
     } catch (err) {
       const e = err as { response?: { data?: { detail?: string } } }
       toast.error(apiErrorMessage(e, 'Failed to save settings'))
@@ -347,7 +350,12 @@ export default function AITradingSettings() {
           <div className={`rounded-xl border p-4 text-sm space-y-2 ${isDark ? 'border-slate-700/50' : 'border-slate-200'}`}>
             <p className="theme-text">
               <strong>Status:</strong>{' '}
-              {scheduler.running ? scheduler.detail : 'Not running — the automatic checks run inside the Sapient desktop app.'}
+              {!scheduler.running ? 'Not running — the automatic checks run inside the Sapient desktop app.'
+                : original.scheduler_enabled && scheduler.detail === 'Automatic checks are off.'
+                  ? 'Turning on… the checker picks up saved changes within 30 seconds.'
+                  : !original.scheduler_enabled && scheduler.detail !== 'Automatic checks are off.'
+                    ? 'Turning off… the checker picks up saved changes within 30 seconds.'
+                    : scheduler.detail}
               {scheduler.running && scheduler.next_check_at && <> · next check {when(scheduler.next_check_at)}</>}
             </p>
             <div className="flex flex-wrap gap-4 theme-text-secondary">
