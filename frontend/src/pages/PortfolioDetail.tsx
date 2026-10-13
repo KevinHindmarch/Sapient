@@ -1164,7 +1164,9 @@ export default function PortfolioDetail() {
                     <Send className="w-4 h-4" />
                     {rebalancePlan?.can_execute
                       ? `Place ${rebalancePlan.legs.length} ${rebalancePlan.environment === 'live' ? 'REAL-MONEY' : 'paper'} order(s)`
-                      : rebalancePlan?.environment ? 'Trading is switched off for this account' : 'Buy this portfolio at IBKR to rebalance'}
+                      : !rebalancePlan?.environment ? 'Buy this portfolio at IBKR to rebalance'
+                        : !rebalancePlan.legs.length ? 'Nothing to send'
+                        : 'Trading is switched off for this account'}
                   </>
                 )}
               </button>
