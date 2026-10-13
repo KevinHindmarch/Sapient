@@ -332,9 +332,11 @@ body {
   50% { box-shadow: 0 0 35px rgba(56, 189, 248, 0.4); }
 }
 
+/* Ends at transform: none — a lingering transform (even translateY(0), kept by `forwards`) makes the page a
+   containing block for position: fixed, so pop-ups centred on the whole page instead of the window. */
 @keyframes fade-in {
   from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
+  to { opacity: 1; transform: none; }
 }
 
 @keyframes float {
