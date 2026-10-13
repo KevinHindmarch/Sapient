@@ -3,7 +3,7 @@ import { Area, AreaChart, CartesianGrid, Line, ResponsiveContainer, Tooltip, XAx
 import type { ValuePoint } from '../lib/api'
 
 export type Period = '1W' | '1M' | '3M' | '1Y' | 'All'
-export const PERIODS: Period[] = ['1M', '3M', '1Y', 'All']
+export const PERIODS: Period[] = ['1W', '1M', '3M', '1Y', 'All']
 export const DAYS: Record<Period, number> = { '1W': 7, '1M': 31, '3M': 92, '1Y': 366, All: 100000 }
 export const periodStart = (period: Period, today = new Date()) =>
   new Date(today.getTime() - DAYS[period] * 86400000).toISOString().slice(0, 10)
